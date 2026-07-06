@@ -224,12 +224,12 @@ Day-3 model-comparison run: full eval suite with provider = Claude, Gemini, loca
 
 ---
 
-## 6. Open questions for human review
+## 6. Open questions — human decisions recorded 6 July 2026
 
-1. **"E-Discovery Review" template** — rename to "Disclosure Review" (CPR 31 / PD 57AD framing) or keep both? UK term of art is *disclosure*; the column set also needs review (e.g. "Privileged?" → legal professional privilege categories). *Not guessing per CLAUDE.md.*
-2. **`OPENAI_BASE_URL` semantics** (§5.2): dedicated `LOCAL_LLM_*` vars with `OPENAI_BASE_URL` as alias (recommended), or literally repoint the OpenAI provider?
-3. **Companies House gating**: expose CH tools whenever a key exists (recommended), or add a per-user feature toggle replacing the deleted `legal_research_us`?
+1. **"E-Discovery Review" template** — **DECIDED: rename to "Disclosure Review"** (CPR Part 31 / PD 57AD framing); rework columns to English practice (privilege column split into legal advice privilege / litigation privilege / without prejudice). WS4 implements.
+2. **`OPENAI_BASE_URL` semantics** (§5.2) — **DECIDED: dedicated `LOCAL_LLM_*` vars**, with `OPENAI_BASE_URL` honoured as a documented alias when `LOCAL_LLM_BASE_URL` is unset. Cloud OpenAI and local providers coexist. WS3 implements.
+3. **Companies House gating** — **DECIDED: available whenever a key is configured** (server env or user key). No feature toggle, no new `user_profiles` column.
 4. **Migrations** — ~~needs instruction~~ **AUTHORISED (6 July 2026)**: `20260706_remove_courtlistener.sql` and `20260706_add_companies_house_user_api_key_provider.sql`, recorded in the human-maintained allowlist `.claude/hooks/authorized-migrations.json` which the PreToolUse guard enforces. Proposed SQL is in §2 step 6; the files land in the excision and WS1 PRs respectively.
 5. **Per-user local base URLs** are excluded from v1 (SSRF surface — a user-supplied URL fetched by the backend). Confirm.
-6. **Persisted US-event history** (§2 step 7): confirm "render nothing for unknown event types" is acceptable for pre-fork chats rather than data migration.
+6. **Persisted US-event history** (§2 step 7) — **DECIDED: silently skip unknown event types in the UI**; no data migration. Excision PR must verify the renderer's unknown-event fallback.
 7. **Terminology sweep judgment calls** will be reported by the terminology-auditor agent as a diff-less report for your sign-off before WS4 applies legal-term changes.
