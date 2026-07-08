@@ -7,6 +7,126 @@
 
 ---
 
+## 2026-07-08 — UK terminology sweep + UK workflow templates (branch `ws4-uk-workflows`, WS4)
+
+**Scope:** Mechanical US→UK terminology sweep (audit-report subset only), the decided
+Disclosure Review rework, five new UK workflow templates, and their golden-set eval
+cases. Per the brief's scope discipline, only the 16 MECHANICAL audit rows and the
+two DECIDED legal items (L6/L7) were applied; L1–L5, L8, L9, U1–U4 are untouched and
+await owner sign-off.
+
+**Part A — mechanical sweep (16/16 rows applied):** UK spellings (Analy**s**ing,
+Summari**s**e ×11, finali**s**ing) across `TRChatPanel.tsx`, `AssistantMessage.tsx`,
+`chatTools.ts`, backend `builtinWorkflows.ts`, `prompt-generator.ts`,
+`columnPresets.ts`, frontend `builtinWorkflows.ts`; `credits-exhausted-modal.tsx`
+date locale `en-US`→`en-GB` (renders "8 July 2026" style). Verified clean via grep
+for all 16 find/replace pairs post-edit.
+
+**Part B — Disclosure Review (L6/L7, DECIDED):** Renamed "E-Discovery Review" →
+"Disclosure Review", added a CPR Part 31 / PD 57AD-framed `prompt_md`, and split the
+single "Privileged?" column into three: **Legal Advice Privilege**, **Litigation
+Privilege**, **Without Prejudice** (each Yes/No + basis, uncertainty noted
+explicitly). "Lawyer" → "solicitor (or other legal adviser)" in the privilege
+prompts.
+- **Id kept as `builtin-ediscovery`** (not renamed) — verified `backend/schema.sql`'s
+  `hidden_workflows.workflow_id` is a free-text column keyed on this exact string
+  (`routes/workflows.ts` hide/unhide endpoints write whatever id the frontend
+  sends); renaming would silently un-hide the workflow for any user who had
+  previously hidden it. A code comment records this at the template definition.
+
+**Part C — five new templates** in frontend `builtinWorkflows.ts`: English-law SPA
+Review (tabular, Corporate, 10 columns incl. s.1159 CA2006 subsidiary check),
+Commercial Lease Review — LTA 1954 (tabular, Real Estate, 10 columns incl. a
+dedicated s.38A/s.24 security-of-tenure column and a 1954 Act red-flags column),
+TUPE Analysis (assistant, Employment, structured reg 3/4/7/13–15 analysis citing SI
+2006/246, instructs the model to verify citations "where verification tools are
+available"), Employment Contract vs Statutory Minima (tabular, Employment, 7
+columns each extracting the term / stating the statutory floor / flagging
+shortfall), Companies House Due-Diligence Snapshot (assistant, Corporate, names the
+three CH tools, instructs "say so" rather than inventing register data if
+tools/key are unavailable).
+
+**Backend** `builtinWorkflows.ts`: only the mechanical "finalising" fix — no new
+templates added there per the brief.
+
+**Part D — golden-set cases:** 22 new case files (17 `cit-`, 5 `jud-`) + 5 new rubric
+files, across 6 templates (5 new + Disclosure Review; the Companies House snapshot
+reuses the existing `jud-due-diligence-snapshot` + rubric per the brief, extended
+with 2 new `cit-` cases rather than duplicated). Every new template has 3–4 golden
+cases; 27 case files total in `evals/cases/` post-merge.
+
+**Eval-harness bug fix (`evals/src/citations.ts`):** `resolveActUri` matched an
+Act's canonical URI only via a calendar-year regex on the Atom `<id>` (e.g.
+`/id/ukpga/2006/46`). The Landlord and Tenant Act 1954 — a real, brief-mandated
+citation for the lease template — is canonically identified on
+legislation.gov.uk by **regnal year** (`/id/ukpga/Eliz2/2-3/56`), so the existing
+regex silently failed to resolve it even though the calendar-year alias path
+(`/ukpga/1954/56/...`, which the API 301-redirects to the canonical URI) works
+fine. Added a minimal fallback that reads the `<ukm:Year Value="…"/><ukm:Number
+Value="…"/>` metadata pair (present on every entry regardless of citation style)
+when the primary regex misses. Verified this doesn't regress any Act already
+passing (Companies Act 2006, Employment Rights Act 1996, National Minimum Wage
+Act 1998, Pensions Act 2008 all resolve via the pre-existing regex; only
+pre-1963-style Acts needed the fallback).
+
+**Verification evidence**
+- `npm run evals` from worktree root: **20 passed, 0 failed, 1 skipped
+  (`det-companies-house-profile`, no `COMPANIES_HOUSE_API_KEY` set — expected), 6
+  pending** (all `jud-*` cases, correctly marked pending pre-workflow-fixture).
+  Every new `cit-` case resolved its citation(s) against the live
+  legislation.gov.uk API with zero failures.
+- `npm run evals:smoke`: 3 passed, 1 skipped, 0 failed — unchanged (smoke set
+  untouched, still 4 cases, none of the new cases marked `smoke`).
+- `cd evals && npm run typecheck` — clean.
+- `cd backend && npx tsc --noEmit` — clean.
+- `cd frontend && npx tsc --noEmit` — clean.
+- `cd frontend && npm run lint` — 35 errors / 77 warnings, identical file set to
+  main; none in any file this branch touched (all in pre-existing files:
+  `WorkflowPickerContent.tsx`, `ChatHistoryContext.tsx`, `useFetchDocxBytes.ts`,
+  `useSelectedModel.ts`, `login/page.tsx`, `support/page.tsx`,
+  `text-search-widget.tsx`, `label.ts`). No regression.
+- `cd backend && npx prettier --check` on the two touched backend files reports
+  the same pre-existing warnings as on `main` (confirmed via `git stash` diff) —
+  not introduced by this branch's one-word edits.
+
+**For owner review (new-content judgment calls, none blocking):**
+1. SPA template's "Warranties" column references a tax covenant's *presence* but
+   does not itself mandate a specific citation form for the tax covenant/tax deed
+   mechanism (no single statute governs it) — flagged in case a house style is
+   preferred.
+2. Lease template's FRI ("full repairing and insuring") column format is `yes_no`
+   with a request for the extent of repair covenant in the same answer — if the UI
+   expects strictly Yes/No for `yes_no` columns, this may need a format change to
+   `text`; used `yes_no` to match the existing precedent of `yes_no` columns that
+   also request a short supporting explanation (e.g. "Independent Contractor?" in
+   the Employment Agreement Review template, line ~1206).
+3. Employment-minima template's Pay-vs-NMW column deliberately does **not** state a
+   current NMW rate (rates change annually and the workflow has no live wage-rate
+   API), instructing the model to flag verification is needed instead — a
+   conservative choice consistent with hard rule 5, but means the column is less
+   immediately actionable than the others; flagging in case a future workstream
+   wires up a rates lookup.
+4. SSP column in the same template intentionally does not cite a specific
+   statute/SI for statutory sick pay (unlike the other six columns) — I could not
+   find a citation form for this in the brief and did not want to guess at a
+   specific SI/section without sign-off; the column instead asks the model to
+   flag if a contract purports to exclude SSP altogether.
+5. Disclosure Review's without-prejudice column asks for "genuine settlement
+   negotiation content" per the brief's exact wording; note that the without
+   prejudice rule is common-law in origin (no statute to cite), so this column,
+   unlike the other two privilege columns, has no statutory citation at all —
+   flagging as an intentional gap, not an oversight.
+
+**Not in this branch (per scope discipline):** L1–L5 (US "lawyers"/"opinion"
+generic usage, SOFR/EURIBOR reference-rate wording ×3, LPA waterfall
+term-of-art), L8 (Delaware corporation example jurisdiction), L9 (PE
+waterfall term), U1–U4 (browser-locale dates, governing-law example ordering,
+illustrative currency, bi-weekly pay frequency) — all left exactly as audited,
+no "drive-by" fixes.
+
+**Note for parallel branches:** this entry is inserted at the top of the file
+(after the first `---`); expect a trivial merge conflict with WS1–WS3 branches
+doing the same — resolve by keeping both entries, newest first.
 ## 2026-07-08 — legislation.gov.uk integration (branch `ws2-legislation`, WS2)
 
 **Scope:** legislation.gov.uk research tools per `docs/MIGRATION_SPEC.md` §4 — a no-key client, three LLM tools (`legislation_lookup`, `legislation_search`, `legislation_verify_citations`), the `[N]`/`<CITATIONS>` extension for legislation-kind citations, chat wiring so legislation research is always on (no key needed), and the matching frontend surface (tool chips, citation pills, `LegislationPanel`). First vitest harness in the repo.
