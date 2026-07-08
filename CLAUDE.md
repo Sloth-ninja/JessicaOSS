@@ -64,7 +64,7 @@ Backend (`backend/.env.example` documents the core set):
 | `RATE_LIMIT_*` (11 vars, `src/index.ts:54-83`) | optional | rate-limit tuning |
 | `LOG_RAW_LLM_STREAM`, `RAW_LLM_STREAM_LOG_DIR` | optional | dev-only stream logging |
 | `RESEND_API_KEY` | optional | in `.env.example`; SDK installed, currently unused in `src/` |
-| `COMPANIES_HOUSE_API_KEY` | planned | WS1 (see MIGRATION_SPEC) |
+| `COMPANIES_HOUSE_API_KEY` | optional | Companies House env-fallback key; per-user BYO key takes precedence (WS1) |
 | `LOCAL_LLM_BASE_URL`, `LOCAL_LLM_MODELS`, `LOCAL_LLM_API_KEY` | optional | Local/on-premises OpenAI-compatible chat-completions provider (Ollama, LM Studio, vLLM) — data sovereignty mode, see `docs/local-models.md`. `OPENAI_BASE_URL` honoured as an alias for `LOCAL_LLM_BASE_URL` when the latter is unset; never affects the cloud OpenAI client. |
 
 Frontend (`frontend/.env.local.example`, all public): `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY`, `NEXT_PUBLIC_API_BASE_URL` (default `http://localhost:3001`). No secrets in the frontend, ever.

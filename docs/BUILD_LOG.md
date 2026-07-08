@@ -7,6 +7,40 @@
 
 ---
 
+## 2026-07-08 — WS1: Companies House integration (branch `ws1-companies-house`)
+
+**Scope:** First UK data integration per `docs/MIGRATION_SPEC.md` §3 — a Companies House client, chat tools, and a side-panel viewer, wired through the `researchTools`/`buildSystemPrompt` seam left by the CourtListener excision. No feature toggle: available whenever a Companies House key is configured (server env or per-user), per decision §6.3.
+
+**Backend**
+- `lib/rateLimit.ts` (new): generic `TokenBucket` (continuous refill) and `SingleFlight` de-dupe — provider-agnostic, no shared state with WS2's own politeness limiter.
+- `lib/companiesHouse.ts` (new): typed client for `api.company-information.service.gov.uk` — HTTP Basic auth (key as username, blank password), company-number normalisation (uppercase, zero-pad to 8 chars, jurisdiction prefixes SC/NI/OC/etc.), per-key token bucket (500/5min headroom under the real 600 limit), single-flight + in-memory TTL cache (15min profile/officers/PSC, 5min search, 60min filing-history), 401/404/429/5xx → typed `CompaniesHouseError` (one retry on 5xx; no retry on 429). Errors are built from status + context only — never from raw request/response text, since Companies House keys aren't covered by `safeError.ts`'s redaction patterns.
+- `lib/legalSourcesTools/companiesHouseTools.ts` (new): `COMPANIES_HOUSE_TOOLS` (3 OpenAI-shape tools: search, get_company, get_filing_history), `COMPANIES_HOUSE_SYSTEM_PROMPT`, `executeCompaniesHouseToolCall` — `get_company` batches profile+officers+PSCs into one payload; officer/PSC failures degrade gracefully (profile failure still fails the whole call).
+- Provider plumbing: added `companies_house` to `ApiKeyProvider`/`PROVIDERS`/`envApiKey`/both `getUserApiKeyStatus`/`getUserApiKeys` literal objects (`userApiKeys.ts`), `UserApiKeys.companies_house` (`llm/types.ts`), `schema.sql` CHECK, and the pre-authorised migration `20260706_add_companies_house_user_api_key_provider.sql`. Route allowlist (`user.ts`) auto-follows via `normalizeApiKeyProvider`.
+- `chatTools.ts` seam: `buildSystemPrompt(includeResearchTools, sources: ResearchSources)` splices `COMPANIES_HOUSE_SYSTEM_PROMPT` when `sources.companiesHouse`; `buildMessages` gained a 6th `sources` param; `runLLMStream` gained `researchSources`, populates `researchTools` from `COMPANIES_HOUSE_TOOLS`; `runToolCalls` gained a `companies_house_*` branch (mirrors the MCP branch: generic `companies_house_tool_start`/`companies_house_tool_result` SSE pair, same pattern as MCP, rather than one SSE event name per tool) plus a `companiesHouseEvents` accumulator, pushed into `AssistantEvent`s in `runLLMStream`'s `runTools` callback so they persist to chat history. `chat.ts`/`projectChat.ts`: `researchSources = { companiesHouse: !!apiKeys.companies_house?.trim() }`, `includeResearchTools` derived from it (replacing the hardcoded `false`).
+- Left the shared seam exactly per the cross-branch contract (types/line shapes) so WS2's parallel legislation.gov.uk branch merges mechanically — expect trivial conflicts on those lines and this BUILD_LOG file.
+- **New:** vitest test harness for `backend/` (upstream shipped none) — `"vitest": "^3.2.4"` devDep, `"test": "vitest run"` script, `vitest.config.ts` (byte-identical to WS2's, per the shared-seam contract). 34 unit tests across `companiesHouse.test.ts` and `companiesHouseTools.test.ts` (fetch mocked via `vi.stubGlobal`, fake timers for token-bucket refill).
+
+**Frontend**
+- `mikeApi.ts` / `UserProfileContext.tsx` / `account/api-keys/page.tsx`: added `companies_house` across all four lockstep provider-union seams; new "Companies House API Key" row with a one-line free-registration hint.
+- `shared/types.ts`: `companies_house_tool_call` `AssistantEvent` variant (mirrors the backend shape, `company?: unknown` carrying the full profile/officers/PSC payload for the side panel).
+- `useAssistantChat.ts`: `companies_house_tool_start`/`_result` handlers, same start→result pairing pattern as `mcp_tool_start`/`_result`.
+- `AssistantMessage.tsx`: extracted the `mcp_tool_call` chip markup into a shared `ToolCallChip` component, reused by a new `companies_house_tool_call` branch with human-friendly labels ("Searching Companies House…", "Fetching company record…", "Fetching filing history…", plus done-state company name/number). Completed `get_company` chips are clickable, opening the `CompanyPanel`.
+- `CompanyPanel.tsx` (new): profile (status, type, incorporation date, registered office, SIC codes, accounts/confirmation-statement due dates — all UK date format, e.g. "21 February 2022", never MM/DD/YYYY), officers, and PSCs, plus a "View on Companies House" link-out. Wired in via a new `CompanyTab` kind on `AssistantSidePanelTab` (not document-backed — no `versionId`/`filename` — so `upsertTab`'s dedupe now branches on `companyNumber` for company tabs and `documentId` otherwise); `openCompany` helper added in `ChatView.tsx` alongside `openCitation`/`openEditor`/`openDocument`.
+- **Deviation from the brief's literal SSE shape:** the `companies_house_tool_result` SSE payload (and the frontend's paired update) also carries the full `company` payload, not just `company_number`/`company_name` — needed so the CompanyPanel has data to show without a page reload mid-conversation; the persisted `AssistantEvent` shape already documented `company?: unknown` for exactly this purpose.
+
+**Evals** (`evals/cases/`, none smoke-flagged — smoke subset stays at 4/5)
+- `det-companies-house-officers.yaml`, `det-companies-house-psc.yaml`, `det-companies-house-search.yaml`, `det-companies-house-filing-history.yaml` — real values verified live 8 July 2026 (ARIA GRACE LAW CIC 13927967; MARKS AND SPENCER P.L.C. 00214436).
+
+**Verification**
+- `cd backend && npx tsc --noEmit` clean; `npm test` → 34/34 pass.
+- `cd frontend && npx tsc --noEmit` clean; ESLint on all changed files → 0 new errors/warnings (the only errors on touched files, `AssistantMessage.tsx`/`ChatView.tsx`, are pre-existing `set-state-in-effect`/`refs` issues at lines unrelated to this change).
+- Backend boots with dummy env (`SUPABASE_URL`/`SUPABASE_SECRET_KEY`/`DOWNLOAD_SIGNING_SECRET`/`USER_API_KEYS_ENCRYPTION_SECRET`=x): `GET /health` → `{"ok":true}`.
+- `npm run evals` (repo root, no `COMPANIES_HOUSE_API_KEY` in this worktree): 3 passed, 5 skipped (4 new CH cases + the pre-existing `det-companies-house-profile`, all correctly skipped — no key), 1 pending. `npm run evals:smoke`: 3 passed, 1 skipped, smoke count unchanged at 4.
+
+**Decisions**
+- Rate limiting/caching/single-flight are hand-rolled (no existing util) per `docs/MIGRATION_SPEC.md` note that no cache/throttle utility exists yet; kept generic in `rateLimit.ts` so WS2 can add its own instance without shared state.
+- `get_company` degrades gracefully on officer/PSC failures (partial data + inline error string) rather than failing the whole tool call, since the profile is the core signal.
+
 ## 2026-07-08 — Local model support / WS3 (branch `ws3-local-models`)
 
 **Scope:** New "local" LLM provider — any OpenAI-compatible `/v1/chat/completions`
