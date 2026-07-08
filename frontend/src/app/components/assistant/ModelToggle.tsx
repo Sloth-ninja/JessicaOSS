@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronDown, Check, AlertCircle } from "lucide-react";
 import {
     DropdownMenu,
@@ -16,8 +16,34 @@ import type { ApiKeyState } from "@/app/lib/mikeApi";
 export interface ModelOption {
     id: string;
     label: string;
-    group: "Anthropic" | "Google" | "OpenAI";
+    group: "Anthropic" | "Google" | "OpenAI" | "Local";
 }
+
+export const LOCAL_MODEL_PREFIX = "local:";
+
+export function isLocalModelId(id: string): boolean {
+    return id.startsWith(LOCAL_MODEL_PREFIX);
+}
+
+export function localModelLabel(id: string): string {
+    return id.startsWith(LOCAL_MODEL_PREFIX)
+        ? id.slice(LOCAL_MODEL_PREFIX.length)
+        : id;
+}
+
+export function toLocalModelOptions(localModels: string[]): ModelOption[] {
+    return localModels.map((id) => ({
+        id,
+        label: localModelLabel(id),
+        group: "Local" as const,
+    }));
+}
+
+/** repo link — see docs/local-models.md (setup + honest quality guidance). */
+export const LOCAL_MODEL_DOCS_URL =
+    "https://github.com/Sloth-ninja/JessicaOSS/blob/main/docs/local-models.md";
+export const LOCAL_MODEL_HINT =
+    "Runs on your own hardware — see quality guidance";
 
 export const MODELS: ModelOption[] = [
     { id: "claude-fable-5", label: "Claude Fable 5", group: "Anthropic" },
@@ -46,20 +72,38 @@ export const DEFAULT_MODEL_ID = "gemini-3-flash-preview";
 
 export const ALLOWED_MODEL_IDS = new Set(MODELS.map((m) => m.id));
 
-const GROUP_ORDER: ModelOption["group"][] = ["Anthropic", "Google", "OpenAI"];
+const GROUP_ORDER: ModelOption["group"][] = [
+    "Anthropic",
+    "Google",
+    "OpenAI",
+    "Local",
+];
+
+const GROUP_LABEL: Record<ModelOption["group"], string> = {
+    Anthropic: "Anthropic",
+    Google: "Google",
+    OpenAI: "OpenAI",
+    Local: "Local (on-premises)",
+};
 
 interface Props {
     value: string;
     onChange: (id: string) => void;
     apiKeys?: ApiKeyState;
+    /** Server-reported local:-prefixed model ids; omit/empty when unconfigured. */
+    localModels?: string[];
 }
 
-export function ModelToggle({ value, onChange, apiKeys }: Props) {
+export function ModelToggle({ value, onChange, apiKeys, localModels = [] }: Props) {
     const [isOpen, setIsOpen] = useState(false);
-    const selected = MODELS.find((m) => m.id === value);
+    const options = useMemo(
+        () => [...MODELS, ...toLocalModelOptions(localModels)],
+        [localModels],
+    );
+    const selected = options.find((m) => m.id === value);
     const selectedLabel = selected?.label ?? "Model";
     const selectedAvailable = apiKeys
-        ? isModelAvailable(value, apiKeys)
+        ? isModelAvailable(value, apiKeys, localModels)
         : true;
 
     return (
@@ -85,26 +129,42 @@ export function ModelToggle({ value, onChange, apiKeys }: Props) {
             </DropdownMenuTrigger>
             <DropdownMenuContent className="w-56 z-50" side="top" align="end">
                 {GROUP_ORDER.map((group, gi) => {
-                    const items = MODELS.filter((m) => m.group === group);
+                    const items = options.filter((m) => m.group === group);
                     if (items.length === 0) return null;
                     return (
                         <div key={group}>
                             {gi > 0 && <DropdownMenuSeparator />}
-                            <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-gray-400">
-                                {group}
+                            <DropdownMenuLabel className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-gray-400">
+                                <span>{GROUP_LABEL[group]}</span>
+                                {group === "Local" && (
+                                    <a
+                                        href={LOCAL_MODEL_DOCS_URL}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="normal-case tracking-normal text-gray-400 underline hover:text-gray-600"
+                                    >
+                                        Guidance
+                                    </a>
+                                )}
                             </DropdownMenuLabel>
                             {items.map((m) => {
                                 const available = apiKeys
-                                    ? isModelAvailable(m.id, apiKeys)
+                                    ? isModelAvailable(m.id, apiKeys, localModels)
                                     : true;
                                 return (
                                     <DropdownMenuItem
                                         key={m.id}
                                         className="cursor-pointer"
                                         onSelect={() => onChange(m.id)}
+                                        title={
+                                            m.group === "Local"
+                                                ? LOCAL_MODEL_HINT
+                                                : undefined
+                                        }
                                     >
                                         <span
-                                            className={`flex-1 ${available ? "" : "text-gray-400"}`}
+                                            className={`min-w-0 flex-1 truncate ${available ? "" : "text-gray-400"}`}
                                         >
                                             {m.label}
                                         </span>

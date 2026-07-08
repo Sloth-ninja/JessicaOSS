@@ -262,8 +262,15 @@ export type ApiKeyState = Record<
     }
 >;
 
+// Local / on-premises models have no per-user key — availability is a
+// server-env fact only (see docs/MIGRATION_SPEC.md §6.5). Reported
+// additively alongside ApiKeyStatus; "local" is deliberately NOT part of
+// ApiKeyProvider (no BYO key, no /user/api-keys/:provider entry).
+export type LocalModelStatus = { configured: boolean; models: string[] };
+
 export type ApiKeyStatus = Record<ApiKeyProvider, boolean> & {
     sources?: Partial<Record<ApiKeyProvider, ApiKeySource>>;
+    local?: LocalModelStatus;
 };
 
 export async function getApiKeyStatus(): Promise<ApiKeyStatus> {

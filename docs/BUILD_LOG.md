@@ -7,6 +7,110 @@
 
 ---
 
+## 2026-07-08 — Local model support / WS3 (branch `ws3-local-models`)
+
+**Scope:** New "local" LLM provider — any OpenAI-compatible `/v1/chat/completions`
+server (Ollama, LM Studio, vLLM) — per `docs/MIGRATION_SPEC.md` §5 + §6 decision #2/#5.
+Positioning is data sovereignty, not cost. Cloud OpenAI (Responses API client)
+kept unchanged; this is a new chat-completions client, not a base-URL override.
+
+**Backend**
+- `lib/llm/localConfig.ts` (new): resolves `LOCAL_LLM_BASE_URL` (primary),
+  `OPENAI_BASE_URL` (documented alias, only when the former is unset — never
+  affects the cloud OpenAI client), `LOCAL_LLM_MODELS` (comma-separated,
+  trimmed/deduped-empty), `LOCAL_LLM_API_KEY` (optional, defaults to bearer
+  `ollama`). `getLocalLlmConfig()` returns null unless a base URL AND at least
+  one model are present.
+- `lib/llm/localOpenAI.ts` (new): `streamLocal`/`completeLocalText` — chat-completions
+  streaming client mirroring `openai.ts`'s callback contract (`onContentDelta`,
+  `onReasoningDelta`/`onReasoningBlockEnd`, `onToolCallStart`), tool_calls delta
+  fragments accumulated by index, standard OpenAI tool schema (no conversion
+  needed), tool loop (default 10 iterations) appending assistant `tool_calls` +
+  per-call `{role:"tool"}` messages. Malformed tool-call JSON is never executed —
+  it's fed back as `{"error": "Invalid tool arguments: ..."}` so the model can
+  retry, with a logged warning; half-formed SSE frames stay buffered defensively.
+  Raw-stream logging hooks (`createRawLlmStreamRecorder`/`logRawLlmStream`) mirrored.
+- `lib/llm/types.ts`: `Provider` gains `"local"`. `lib/llm/models.ts`:
+  `providerForModel` maps the `local:` prefix; `resolveModel` bypasses the static
+  registry for any `local:*` id once local mode is configured at all (graceful
+  fallback to default when unconfigured or a persisted id is stale).
+  `lib/llm/index.ts`: dispatches `"local"` to the new client.
+- `routes/user.ts`: `local: {configured, models}` merged additively into all four
+  `apiKeyStatus`-bearing responses (`GET /user/profile`, `PATCH /user/profile`,
+  `PATCH /user/security/mfa-login`, `GET`+`PUT /user/api-keys[/:provider]`) via a
+  small `withLocalStatus()` helper — no schema/type change to `ApiKeyStatus`
+  itself, no secrets or base URL in the payload. `ApiKeyProvider`/`user_api_keys`
+  deliberately untouched — there is no per-user local key (server-env only; a
+  per-user base URL is an SSRF surface, excluded per decision §6.5).
+- `routes/tabular.ts`: `missingModelApiKey` bypasses the per-user-key gate for
+  the `"local"` provider (server-reported availability, not key-gated) — without
+  this, selecting a local tabular-review model would always 422.
+- `.env.example`: documented `LOCAL_LLM_*` block; `CLAUDE.md` env registry row
+  updated from "planned" to the real vars.
+
+**Frontend**
+- `mikeApi.ts`: `ApiKeyStatus` gains optional `local?: {configured, models}`
+  (additive; `ApiKeyProvider` untouched). `UserProfileContext.tsx`: `UserProfile`
+  gains `localModels: string[]` (empty when unconfigured/on the exception-path
+  fallback profile).
+- `ModelToggle.tsx`: `ModelOption["group"]` gains `"Local"` (rendered label
+  "Local (on-premises)", `GROUP_ORDER` last); server-reported models merged into
+  the option list at runtime (`toLocalModelOptions`); group header carries a
+  "Guidance" link to `docs/local-models.md`; each local row's tooltip carries the
+  "runs on your own hardware" hint. Hidden entirely when unconfigured.
+- `modelAvailability.ts`: `ModelProvider` gains `"local"`; `getModelProvider`
+  short-circuits on the `local:` prefix (bypasses the static `SETTINGS_MODELS`
+  lookup); `isModelAvailable`/`isProviderAvailable` take an additional
+  `localModels` param and treat local as server-reported, never key-gated;
+  `providerLabel` gains "Local".
+- `useSelectedModel.ts`: accepts `localModels`; a persisted `local:*` selection
+  is re-validated whenever the reported list changes and falls back to
+  `DEFAULT_MODEL_ID` gracefully if no longer valid.
+- `ChatInput.tsx`, `TabularReviewView.tsx`, `TRChatPanel.tsx`,
+  `account/models/page.tsx`: threaded `localModels` from `useUserProfile()`
+  through to every `isModelAvailable`/`ModelToggle` call site (chat, tabular
+  chat, tabular generation gating, title/tabular account preferences).
+- `ApiKeyMissingModal` needed no changes — it only fires when
+  `isModelAvailable` returns false, which never happens for a hidden
+  (unconfigured) local model.
+
+**Docs:** `docs/local-models.md` (new) — Ollama/LM Studio setup, Qwen 2.5 14B
+Instruct (Apache-2.0) recommendation, data-sovereignty positioning, honest
+quality caveat pointing at the README eval table (Day-3 run), tool-calling
+reliability caveat.
+
+**Tests (new — vitest, first backend test suite):** `backend/package.json`
+devDep `vitest ^3.2.4`, script `test`, `vitest.config.ts` (byte-identical to
+the WS1/WS2 copies per shared spec). 25 tests across `localConfig.test.ts`
+(env resolution incl. `OPENAI_BASE_URL` alias precedence), `models.test.ts`
+(`providerForModel`/`resolveModel` local-prefix behaviour configured vs not)
+and `localOpenAI.test.ts` (canned-SSE/mocked-`fetch`: content-delta assembly,
+tool-call fragment accumulation across deltas, malformed-JSON → tool error
+without crashing, second-turn message shape, default `Bearer ollama`, abort
+handling) — no live server required.
+
+**Verification**
+- `cd backend && npx tsc --noEmit` clean; `npm test` → 25/25 passing.
+- `cd frontend && npx tsc --noEmit` clean; `npm run lint` → 34 errors/77
+  warnings vs 35/77 on `main` (net improvement; zero new findings in any file
+  touched by this workstream — confirmed by diffing per-file error lists).
+- Backend boots on dummy env + `LOCAL_LLM_BASE_URL`/`LOCAL_LLM_MODELS` →
+  `/health` → `{"ok":true}`; also boots identically without the local vars.
+- No local Ollama/LM Studio server was reachable in the sandbox
+  (`curl localhost:11434` connection refused) — the live smoke call was
+  skipped per the brief; all coverage is via mocked fetch/canned SSE.
+- Prettier: pre-existing 4-space-vs-default drift on `llm/types.ts`,
+  `llm/models.ts`, `llm/index.ts`, `routes/user.ts`, `routes/tabular.ts` is
+  unchanged from `main` (not introduced by this branch — minimal-diff, hard
+  rule 8); all new files (`localConfig.ts`, `localOpenAI.ts`, tests) are
+  Prettier-clean.
+
+**Decisions carried from MIGRATION_SPEC §6:** dedicated `LOCAL_LLM_*` vars with
+`OPENAI_BASE_URL` alias (#2); no per-user local base URL (#5, SSRF). Expect
+trivial merge conflicts with parallel WS1/WS2 branches on `vitest.config.ts`
+(byte-identical, should merge cleanly), `backend/package.json`, and this
+`BUILD_LOG.md` entry position.
+
 ## 2026-07-08 — README + landing docs (branch `ws5-readme-landing`, WS5)
 
 **Scope:** Docs-only. Full rewrite of `README.md` per `docs/BUILD_PLAN.md` §3 WS5 and `docs/MIGRATION_SPEC.md` §1.4/§6 item 7 framing. No code changes.

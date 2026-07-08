@@ -13,8 +13,11 @@ import {
 import { useUserProfile } from "@/contexts/UserProfileContext";
 import type { ApiKeyState } from "@/app/lib/mikeApi";
 import {
+    LOCAL_MODEL_DOCS_URL,
+    LOCAL_MODEL_HINT,
     MODELS,
     SETTINGS_MODELS,
+    toLocalModelOptions,
     type ModelOption,
 } from "@/app/components/assistant/ModelToggle";
 import {
@@ -31,6 +34,7 @@ type ModelPreferenceField = "titleModel" | "tabularModel";
 
 export default function ModelPreferencesPage() {
     const { profile, updateModelPreference } = useUserProfile();
+    const localModels = profile?.localModels ?? [];
     const [savingField, setSavingField] = useState<ModelPreferenceField | null>(
         null,
     );
@@ -95,6 +99,7 @@ export default function ModelPreferencesPage() {
                         }
                         options={SETTINGS_MODELS}
                         apiKeys={profile?.apiKeys}
+                        localModels={localModels}
                         isSaving={savingField === "titleModel"}
                         isSaved={savedField === "titleModel"}
                         onChange={(id) => handleModelChange("titleModel", id)}
@@ -117,6 +122,7 @@ export default function ModelPreferencesPage() {
                         }
                         options={MODELS}
                         apiKeys={profile?.apiKeys}
+                        localModels={localModels}
                         isSaving={savingField === "tabularModel"}
                         isSaved={savedField === "tabularModel"}
                         onChange={(id) => handleModelChange("tabularModel", id)}
@@ -131,7 +137,8 @@ function ModelPreferenceDropdown({
     value,
     onChange,
     apiKeys,
-    options,
+    options: baseOptions,
+    localModels = [],
     isSaving,
     isSaved,
 }: {
@@ -139,16 +146,21 @@ function ModelPreferenceDropdown({
     onChange: (id: string) => void;
     apiKeys?: ApiKeyState;
     options: ModelOption[];
+    localModels?: string[];
     isSaving?: boolean;
     isSaved?: boolean;
 }) {
     const [isOpen, setIsOpen] = useState(false);
+    const options = [...baseOptions, ...toLocalModelOptions(localModels)];
     const selected = options.find((m) => m.id === value);
-    const selectedAvailable = apiKeys ? isModelAvailable(value, apiKeys) : true;
-    const groups: ("Anthropic" | "Google" | "OpenAI")[] = [
+    const selectedAvailable = apiKeys
+        ? isModelAvailable(value, apiKeys, localModels)
+        : true;
+    const groups: ModelOption["group"][] = [
         "Anthropic",
         "Google",
         "OpenAI",
+        "Local",
     ];
 
     return (
@@ -189,13 +201,28 @@ function ModelPreferenceDropdown({
                     return (
                         <div key={group}>
                             {gi > 0 && <DropdownMenuSeparator />}
-                            <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-gray-400">
-                                {group}
+                            <DropdownMenuLabel className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-gray-400">
+                                <span>
+                                    {group === "Local"
+                                        ? "Local (on-premises)"
+                                        : group}
+                                </span>
+                                {group === "Local" && (
+                                    <a
+                                        href={LOCAL_MODEL_DOCS_URL}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="normal-case tracking-normal text-gray-400 underline hover:text-gray-600"
+                                    >
+                                        Guidance
+                                    </a>
+                                )}
                             </DropdownMenuLabel>
                             {items.map((m) => {
                                 const provider = modelGroupToProvider(m.group);
                                 const available = apiKeys
-                                    ? isModelAvailable(m.id, apiKeys)
+                                    ? isModelAvailable(m.id, apiKeys, localModels)
                                     : true;
                                 return (
                                     <DropdownMenuItem
@@ -203,13 +230,15 @@ function ModelPreferenceDropdown({
                                         className="cursor-pointer"
                                         onSelect={() => onChange(m.id)}
                                         title={
-                                            !available
-                                                ? `Add a ${providerLabel(provider)} API key to use this model`
-                                                : undefined
+                                            m.group === "Local"
+                                                ? LOCAL_MODEL_HINT
+                                                : !available
+                                                  ? `Add a ${providerLabel(provider)} API key to use this model`
+                                                  : undefined
                                         }
                                     >
                                         <span
-                                            className={`flex-1 ${available ? "" : "text-gray-400"}`}
+                                            className={`min-w-0 flex-1 truncate ${available ? "" : "text-gray-400"}`}
                                         >
                                             {m.label}
                                         </span>

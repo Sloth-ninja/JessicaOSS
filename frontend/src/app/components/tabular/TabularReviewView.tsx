@@ -118,6 +118,7 @@ export function TRView({ reviewId, projectId }: Props) {
     const router = useRouter();
     const { profile } = useUserProfile();
     const apiKeys = profile?.apiKeys;
+    const localModels = profile?.localModels ?? [];
     const tabularModel = profile?.tabularModel ?? "gemini-3-flash-preview";
 
     useEffect(() => {
@@ -246,7 +247,7 @@ export function TRView({ reviewId, projectId }: Props) {
     }
 
     async function handleRegenerateCell(docId: string, colIndex: number) {
-        if (apiKeys && !isModelAvailable(tabularModel, apiKeys)) {
+        if (apiKeys && !isModelAvailable(tabularModel, apiKeys, localModels)) {
             setApiKeyModalProvider(getModelProvider(tabularModel));
             return;
         }
@@ -302,7 +303,7 @@ export function TRView({ reviewId, projectId }: Props) {
         // If columns changed since last save, update the review first
         if (columns.length === 0) return;
 
-        if (apiKeys && !isModelAvailable(tabularModel, apiKeys)) {
+        if (apiKeys && !isModelAvailable(tabularModel, apiKeys, localModels)) {
             setApiKeyModalProvider(getModelProvider(tabularModel));
             return;
         }
