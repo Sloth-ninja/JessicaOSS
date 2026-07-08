@@ -1,0 +1,12 @@
+id: det-legislation-title-feed
+type: deterministic
+description: >
+  The Atom title-search feed for "Companies Act 2006" must return the
+  canonical ukpga/2006/46 id — the same feed shape resolveByTitle
+  (backend/src/lib/legislation.ts) and evals/src/citations.ts resolveActUri
+  depend on. Verified live before committing.
+request:
+  url: https://www.legislation.gov.uk/ukpga/data.feed?title=Companies%20Act%202006
+  status: 200
+  contains:
+    - "ukpga/2006/46"

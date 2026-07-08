@@ -1,0 +1,12 @@
+id: det-legislation-era1996-s98
+type: deterministic
+description: >
+  legislation.gov.uk must serve s.98 Employment Rights Act 1996 (fairness /
+  reason for dismissal) and the fetched CLML must contain the distinctive
+  statutory wording, verified live before committing.
+request:
+  url: https://www.legislation.gov.uk/ukpga/1996/18/section/98/data.xml
+  status: 200
+  contains:
+    - "it is for the employer to show"
+    - "the reason (or, if more than one, the principal reason) for the dismissal"
