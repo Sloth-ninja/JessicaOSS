@@ -30,6 +30,12 @@ import {
   type OpenAIToolSchema,
 } from "./llm";
 import { safeErrorMessage } from "./safeError";
+import {
+  COMPANIES_HOUSE_SYSTEM_PROMPT,
+  COMPANIES_HOUSE_TOOLS,
+  executeCompaniesHouseToolCall,
+  type CompaniesHouseToolEvent,
+} from "./legalSourcesTools/companiesHouseTools";
 
 const STANDARD_FONT_DATA_URL = (() => {
   try {
@@ -151,15 +157,35 @@ GENERAL GUIDANCE:
 `;
 
 /**
+ * Which UK legal research sources are available this turn. Each flag gates
+ * splicing that source's system-prompt block and tool set into the chat
+ * (WS1 Companies House / WS2 legislation.gov.uk — docs/MIGRATION_SPEC.md).
+ */
+export type ResearchSources = {
+  companiesHouse?: boolean;
+  legislation?: boolean;
+};
+
+/**
  * Assemble the chat system prompt. `includeResearchTools` is the seam for
  * legal research sources: when UK sources land (Companies House /
  * legislation.gov.uk — WS1/WS2, docs/MIGRATION_SPEC.md) their instructions
  * are spliced between the two prompt halves, so the model is only told about
  * tools it actually has.
  */
-export function buildSystemPrompt(includeResearchTools = true): string {
-  void includeResearchTools;
-  return `${SYSTEM_PROMPT_BEFORE_RESEARCH}\n\n${SYSTEM_PROMPT_AFTER_RESEARCH}`;
+export function buildSystemPrompt(
+  includeResearchTools = true,
+  sources: ResearchSources = {},
+): string {
+  const researchBlocks: string[] = [];
+  if (includeResearchTools && sources.companiesHouse) {
+    researchBlocks.push(COMPANIES_HOUSE_SYSTEM_PROMPT);
+  }
+  // Seam for WS2 legislation.gov.uk system prompt block.
+  if (!researchBlocks.length) {
+    return `${SYSTEM_PROMPT_BEFORE_RESEARCH}\n\n${SYSTEM_PROMPT_AFTER_RESEARCH}`;
+  }
+  return `${SYSTEM_PROMPT_BEFORE_RESEARCH}\n\n${researchBlocks.join("\n\n")}\n\n${SYSTEM_PROMPT_AFTER_RESEARCH}`;
 }
 
 export const SYSTEM_PROMPT = buildSystemPrompt(true);
@@ -691,9 +717,10 @@ export function buildMessages(
   systemPromptExtra?: string,
   docIndex?: DocIndex,
   includeResearchTools = true,
+  sources: ResearchSources = {},
 ) {
   const formatted: unknown[] = [];
-  let systemContent = buildSystemPrompt(includeResearchTools);
+  let systemContent = buildSystemPrompt(includeResearchTools, sources);
 
   if (systemPromptExtra) {
     systemContent += `\n\n${systemPromptExtra.trim()}`;
@@ -1908,6 +1935,7 @@ export async function runToolCalls(
   docIndex?: DocIndex,
   turnEditState?: TurnEditState,
   projectId?: string | null,
+  companiesHouseApiKey?: string | null,
 ): Promise<{
   toolResults: unknown[];
   docsRead: { filename: string; document_id?: string }[];
@@ -1917,6 +1945,7 @@ export async function runToolCalls(
   workflowsApplied: { workflow_id: string; title: string }[];
   docsEdited: DocEditedResult[];
   mcpEvents: McpToolEvent[];
+  companiesHouseEvents: CompaniesHouseToolEvent[];
 }> {
   const toolResults: unknown[] = [];
   const docsRead: { filename: string; document_id?: string }[] = [];
@@ -1930,6 +1959,7 @@ export async function runToolCalls(
   const workflowsApplied: { workflow_id: string; title: string }[] = [];
   const docsEdited: DocEditedResult[] = [];
   const mcpEvents: McpToolEvent[] = [];
+  const companiesHouseEvents: CompaniesHouseToolEvent[] = [];
   for (const tc of toolCalls) {
     let args: Record<string, unknown> = {};
     try {
@@ -1965,6 +1995,41 @@ export async function runToolCalls(
           tool_name: event.tool_name,
           status: event.status,
           error: event.error,
+        })}\n\n`,
+      );
+      continue;
+    }
+
+    if (tc.function.name.startsWith("companies_house_")) {
+      write(
+        `data: ${JSON.stringify({
+          type: "companies_house_tool_start",
+          name: tc.function.name,
+        })}\n\n`,
+      );
+      const { content, event } = await executeCompaniesHouseToolCall(
+        tc.function.name,
+        args,
+        companiesHouseApiKey,
+      );
+      toolResults.push({
+        role: "tool",
+        tool_call_id: tc.id,
+        content,
+      });
+      companiesHouseEvents.push(event);
+      write(
+        `data: ${JSON.stringify({
+          type: "companies_house_tool_result",
+          name: tc.function.name,
+          status: event.status,
+          error: event.error,
+          company_number: event.company_number,
+          company_name: event.company_name,
+          // Full structured payload (profile/officers/PSCs) so the
+          // CompanyPanel can render immediately, without waiting for a
+          // page reload to re-hydrate from persisted chat history.
+          company: event.company,
         })}\n\n`,
       );
       continue;
@@ -2670,6 +2735,7 @@ export async function runToolCalls(
     workflowsApplied,
     docsEdited,
     mcpEvents,
+    companiesHouseEvents,
   };
 }
 
@@ -2873,6 +2939,7 @@ type AssistantEvent =
       annotations: EditAnnotation[];
     }
   | McpToolEvent
+  | (CompaniesHouseToolEvent & { isStreaming?: boolean })
   | { type: "content"; text: string }
   | { type: "error"; message: string };
 
@@ -2919,6 +2986,7 @@ export async function runLLMStream(params: {
   write: (s: string) => void;
   extraTools?: unknown[];
   includeResearchTools?: boolean;
+  researchSources?: ResearchSources;
   workflowStore?: WorkflowStore;
   tabularStore?: TabularCellStore;
   buildCitations?: (fullText: string) => unknown[];
@@ -2945,6 +3013,7 @@ export async function runLLMStream(params: {
     write,
     extraTools,
     includeResearchTools = true,
+    researchSources = {},
     workflowStore,
     tabularStore,
     buildCitations,
@@ -2954,9 +3023,13 @@ export async function runLLMStream(params: {
     projectId,
   } = params;
   // Seam for UK legal research tools (Companies House / legislation.gov.uk —
-  // WS1/WS2, docs/MIGRATION_SPEC.md). Empty until those integrations land.
-  const researchTools: OpenAIToolSchema[] = [];
-  void includeResearchTools;
+  // WS1/WS2, docs/MIGRATION_SPEC.md).
+  const researchTools: OpenAIToolSchema[] = includeResearchTools
+    ? [
+        ...(researchSources.companiesHouse ? COMPANIES_HOUSE_TOOLS : []),
+        // Seam for WS2 legislation.gov.uk tools.
+      ]
+    : [];
   const mcpTools = await buildUserMcpTools(userId, db);
   const baseTools = [...TOOLS, ...researchTools, ...WORKFLOW_TOOLS];
   const activeTools = extraTools?.length
@@ -3154,6 +3227,7 @@ export async function runLLMStream(params: {
           workflowsApplied,
           docsEdited,
           mcpEvents,
+          companiesHouseEvents,
         } = await runToolCalls(
           toolCalls,
           docStore,
@@ -3165,6 +3239,7 @@ export async function runLLMStream(params: {
           docIndex,
           turnEditState,
           projectId,
+          apiKeys?.companies_house,
         );
         throwIfAborted(signal);
         for (const r of docsRead) {
@@ -3219,6 +3294,9 @@ export async function runLLMStream(params: {
           });
         }
         for (const event of mcpEvents) {
+          events.push(event);
+        }
+        for (const event of companiesHouseEvents) {
           events.push(event);
         }
 

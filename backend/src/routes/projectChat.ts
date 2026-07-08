@@ -144,14 +144,17 @@ projectChatRouter.post("/", requireAuth, async (req, res) => {
     }
 
     const { api_keys: apiKeys } = await getUserModelSettings(userId, db);
-    // Research tools disabled until UK legal sources land (WS1/WS2 — see
-    // docs/MIGRATION_SPEC.md); the seam in buildMessages/runLLMStream remains.
+    // Research sources are available whenever a key is configured (server
+    // env or user key) — no feature toggle (docs/MIGRATION_SPEC.md §6.3).
+    const researchSources = { companiesHouse: !!apiKeys.companies_house?.trim() };
+    const includeResearchTools = Object.values(researchSources).some(Boolean);
     const apiMessages = buildMessages(
         messagesForLLM,
         docAvailability,
         systemPromptExtra,
         undefined,
-        false,
+        includeResearchTools,
+        researchSources,
     );
 
     const workflowStore = await buildWorkflowStore(userId, userEmail, db);
@@ -181,7 +184,8 @@ projectChatRouter.post("/", requireAuth, async (req, res) => {
             write,
             extraTools: PROJECT_EXTRA_TOOLS,
             workflowStore,
-            includeResearchTools: false,
+            includeResearchTools,
+            researchSources,
             model,
             apiKeys,
             signal: streamAbort.signal,
