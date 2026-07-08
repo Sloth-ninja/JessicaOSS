@@ -1,0 +1,95 @@
+name: Pilot feedback
+description: Report a problem or suggestion from using JessicaOS during the private pilot.
+title: "[Pilot] "
+labels:
+  - pilot-feedback
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking part in the JessicaOS pilot. Please fill in as
+        much of this as you can — even a partial report is useful. See
+        `docs/PILOT.md` for what kind of feedback we're looking for.
+
+        Reminder: please only describe synthetic or public documents here,
+        not privileged, confidential, client, matter, or firm material.
+
+  - type: textarea
+    id: what-were-you-trying-to-do
+    attributes:
+      label: What were you trying to do?
+      description: Describe the task or workflow you were carrying out.
+      placeholder: e.g. "Reviewing a sample commercial lease with the Commercial Lease Review workflow"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe what JessicaOS actually did, as precisely as you can.
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-you-expected
+    attributes:
+      label: What did you expect to happen instead?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: workflow-or-template
+    attributes:
+      label: Which workflow or template was involved?
+      description: >-
+        If none of these match exactly, pick the closest one and note the
+        actual name in the description above.
+      options:
+        - Assistant chat (no workflow)
+        - Tabular review (general)
+        - SPA Review (English law)
+        - Commercial Lease Review (LTA 1954)
+        - TUPE Analysis
+        - Employment Contract vs Statutory Minima
+        - Companies House Due-Diligence Snapshot
+        - Disclosure Review
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: How much did this affect your ability to use JessicaOS?
+      options:
+        - Blocker — could not continue
+        - Major — got a wrong or misleading result
+        - Minor — annoying but workable
+        - Idea — a suggestion, not a problem
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: uk-terminology
+    attributes:
+      label: UK terminology
+      description: >-
+        Tick this if the issue is (or includes) US legal terminology, US date
+        formats, US citation style, or another US-ism that should be UK
+        English/UK legal terms instead.
+      options:
+        - label: This is (or includes) a UK-terminology issue
+          required: false
+
+  - type: input
+    id: contact-ok
+    attributes:
+      label: May we contact you about this report?
+      description: >-
+        Your name, email, or "yes"/"no" — whatever's easiest. Leave blank if
+        you'd rather we didn't follow up directly.
+      placeholder: e.g. "Yes, email me" or "No follow-up needed"
+    validations:
+      required: false
