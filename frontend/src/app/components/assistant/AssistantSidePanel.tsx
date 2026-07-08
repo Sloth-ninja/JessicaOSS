@@ -10,6 +10,10 @@ import {
 import { X } from "lucide-react";
 import { DocPanel, type DocPanelMode } from "../shared/DocPanel";
 import { CompanyPanel } from "./CompanyPanel";
+import {
+    LegislationPanel,
+    type LegislationProvisionPayload,
+} from "./LegislationPanel";
 import type {
     CitationAnnotation,
     EditAnnotation,
@@ -64,11 +68,26 @@ export type CompanyTab = {
     company: unknown;
 };
 
+/**
+ * A UK statutory provision viewed on legislation.gov.uk — no underlying
+ * document/version, so it doesn't extend CommonTab. Opened from a completed
+ * legislation_lookup tool-call chip or a legislation citation pill.
+ */
+export type LegislationTab = {
+    id: string;
+    kind: "legislation";
+    url: string;
+    title: string;
+    quote?: string;
+    provision?: LegislationProvisionPayload;
+};
+
 export type AssistantSidePanelTab =
     | DocumentTab
     | CitationTab
     | EditTab
-    | CompanyTab;
+    | CompanyTab
+    | LegislationTab;
 
 interface Props {
     tabs: AssistantSidePanelTab[];
@@ -124,6 +143,7 @@ function maxPanelWidth() {
 
 function tabTitle(tab: AssistantSidePanelTab): string {
     if (tab.kind === "company") return tab.companyName || tab.companyNumber;
+    if (tab.kind === "legislation") return tab.title;
     return tab.filename;
 }
 
@@ -231,7 +251,10 @@ export function AssistantSidePanel({
                     {tabs.map((tab) => {
                         const isActive = tab.id === active.id;
                         const versionNumber =
-                            tab.kind === "company" ? null : tab.versionNumber;
+                            tab.kind === "company" ||
+                            tab.kind === "legislation"
+                                ? null
+                                : tab.versionNumber;
                         const showVersionBadge =
                             typeof versionNumber === "number" &&
                             Number.isFinite(versionNumber) &&
@@ -305,6 +328,23 @@ export function AssistantSidePanel({
                                     companyNumber={tab.companyNumber}
                                     companyName={tab.companyName}
                                     company={tab.company}
+                                />
+                            </div>
+                        );
+                    }
+
+                    if (tab.kind === "legislation") {
+                        return (
+                            <div
+                                key={tab.id}
+                                className={`absolute inset-0 flex flex-col ${isActive ? "" : "invisible pointer-events-none"}`}
+                                aria-hidden={!isActive}
+                            >
+                                <LegislationPanel
+                                    url={tab.url}
+                                    title={tab.title}
+                                    quote={tab.quote}
+                                    provision={tab.provision}
                                 />
                             </div>
                         );

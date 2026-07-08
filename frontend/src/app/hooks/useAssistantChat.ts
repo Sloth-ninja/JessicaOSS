@@ -617,6 +617,50 @@ export function useAssistantChat({
               continue;
             }
 
+            if (data.type === "legislation_tool_start") {
+              pushEvent({
+                type: "legislation_tool_call",
+                tool_name: (data.name as string) ?? "",
+                status: "ok",
+                isStreaming: true,
+              });
+              continue;
+            }
+
+            if (data.type === "legislation_tool_result") {
+              const toolName = (data.name as string) ?? "";
+              updateMatchingEvent(
+                (e) =>
+                  e.type === "legislation_tool_call" &&
+                  e.tool_name === toolName &&
+                  !!e.isStreaming,
+                () => ({
+                  type: "legislation_tool_call",
+                  tool_name: toolName,
+                  status: data.status === "error" ? "error" : "ok",
+                  error:
+                    typeof data.error === "string"
+                      ? (data.error as string)
+                      : undefined,
+                  title:
+                    typeof data.title === "string"
+                      ? (data.title as string)
+                      : undefined,
+                  url:
+                    typeof data.url === "string"
+                      ? (data.url as string)
+                      : undefined,
+                  outstanding_effects:
+                    typeof data.outstanding_effects === "boolean"
+                      ? (data.outstanding_effects as boolean)
+                      : undefined,
+                  isStreaming: false,
+                }),
+              );
+              pushThinkingPlaceholder();
+              continue;
+            }
+
             if (data.type === "doc_read_start") {
               pushEvent({
                 type: "doc_read",

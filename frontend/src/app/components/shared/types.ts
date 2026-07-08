@@ -116,6 +116,18 @@ export type AssistantEvent =
       company?: unknown;
       isStreaming?: boolean;
     }
+  | {
+      type: "legislation_tool_call";
+      tool_name: string;
+      status: "ok" | "error";
+      error?: string;
+      title?: string;
+      url?: string;
+      outstanding_effects?: boolean;
+      /** Structured payload for the side panel (provision text/heading/extent/flags) — set on a successful lookup. */
+      provision?: unknown;
+      isStreaming?: boolean;
+    }
   | { type: "thinking"; isStreaming?: boolean }
   | {
       type: "doc_read";
@@ -210,9 +222,28 @@ export type DocumentCitationAnnotation = {
 };
 
 /**
- * A citation emitted by the assistant, anchored to a document and page.
+ * A citation anchored to a UK statutory provision on legislation.gov.uk
+ * rather than an uploaded/generated document. `legislation_uri` is the
+ * canonical https://www.legislation.gov.uk/... URL, only ever populated
+ * once a legislation tool call confirmed it (see docs/MIGRATION_SPEC.md §4).
  */
-export type CitationAnnotation = DocumentCitationAnnotation;
+export type LegislationCitationAnnotation = {
+  type: "citation_data";
+  kind: "legislation";
+  ref: number;
+  legislation_uri: string;
+  /** e.g. "Companies Act 2006, s.994". */
+  title: string;
+  quote?: string;
+};
+
+/**
+ * A citation emitted by the assistant — anchored to a document/page, or to
+ * a UK statutory provision on legislation.gov.uk.
+ */
+export type CitationAnnotation =
+  | DocumentCitationAnnotation
+  | LegislationCitationAnnotation;
 
 const PAGE_BREAK_SENTINEL = "[[PAGE_BREAK]]";
 
@@ -241,6 +272,10 @@ function expandDocumentQuoteEntry(entry: DocumentCitationQuote): CitationQuote[]
 export function getDocumentCitationQuotes(
   a: CitationAnnotation,
 ): DocumentCitationQuote[] {
+  // Legislation citations have no page/document quote structure to expand —
+  // callers that need PDF-highlight entries only ever deal with document
+  // citations in practice (legislation pills open LegislationPanel instead).
+  if (a.kind === "legislation") return [];
   if (Array.isArray(a.quotes) && a.quotes.length) {
     return a.quotes.filter((entry) => entry.quote.trim().length > 0);
   }
@@ -258,8 +293,13 @@ export function expandCitationToEntries(
   return getDocumentCitationQuotes(a).flatMap(expandDocumentQuoteEntry);
 }
 
-/** Format the page(s) of a citation for display, e.g. "Page 3" or "Page 41-42". */
+/**
+ * Format a citation's location for display — the page(s) for a document
+ * citation, or the provision title for a legislation citation (which has no
+ * page concept).
+ */
 export function formatCitationPage(a: CitationAnnotation): string {
+  if (a.kind === "legislation") return a.title;
   const quotes = getDocumentCitationQuotes(a);
   const pages = Array.from(
     new Set(quotes.map((q) => String(q.page)).filter(Boolean)),
@@ -272,6 +312,7 @@ export function formatCitationPage(a: CitationAnnotation): string {
 
 /** Produce a reader-friendly version of the quote (replaces [[PAGE_BREAK]] with "..."). */
 export function displayCitationQuote(a: CitationAnnotation): string {
+  if (a.kind === "legislation") return a.quote ?? "";
   return getDocumentCitationQuotes(a)
     .map((q) => q.quote.replaceAll(PAGE_BREAK_SENTINEL, "..."))
     .join(" / ");
