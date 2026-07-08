@@ -3,7 +3,12 @@ import { createServerSupabase } from "./supabase";
 import type { UserApiKeys } from "./llm";
 
 type Db = ReturnType<typeof createServerSupabase>;
-export type ApiKeyProvider = "claude" | "gemini" | "openai" | "openrouter";
+export type ApiKeyProvider =
+    | "claude"
+    | "gemini"
+    | "openai"
+    | "openrouter"
+    | "companies_house";
 export type ApiKeySource = "user" | "env" | null;
 export type ApiKeyStatus = Record<ApiKeyProvider, boolean> & {
     sources: Record<ApiKeyProvider, ApiKeySource>;
@@ -21,6 +26,7 @@ const PROVIDERS: ApiKeyProvider[] = [
     "gemini",
     "openai",
     "openrouter",
+    "companies_house",
 ];
 
 function envApiKey(provider: ApiKeyProvider): string | null {
@@ -37,6 +43,8 @@ function envApiKey(provider: ApiKeyProvider): string | null {
             return process.env.OPENAI_API_KEY?.trim() || null;
         case "openrouter":
             return process.env.OPENROUTER_API_KEY?.trim() || null;
+        case "companies_house":
+            return process.env.COMPANIES_HOUSE_API_KEY?.trim() || null;
         default:
             return null;
     }
@@ -107,11 +115,13 @@ export async function getUserApiKeyStatus(
         gemini: false,
         openai: false,
         openrouter: false,
+        companies_house: false,
         sources: {
             claude: null,
             gemini: null,
             openai: null,
             openrouter: null,
+            companies_house: null,
         },
     };
 
@@ -148,6 +158,7 @@ export async function getUserApiKeys(
         gemini: envApiKey("gemini"),
         openai: envApiKey("openai"),
         openrouter: envApiKey("openrouter"),
+        companies_house: envApiKey("companies_house"),
     };
 
     const { data, error } = await db

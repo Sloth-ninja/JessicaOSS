@@ -36,6 +36,13 @@ const MODEL_API_KEY_FIELDS = [
         label: "OpenRouter API Key",
         placeholder: "sk-or-...",
     },
+    {
+        provider: "companies_house",
+        label: "Companies House API Key",
+        description:
+            "Free — register at developer.company-information.service.gov.uk.",
+        placeholder: "Your Companies House API key",
+    },
 ] as const;
 
 export default function ApiKeysPage() {
@@ -56,6 +63,11 @@ export default function ApiKeysPage() {
                     <div key={field.provider}>
                         <ApiKeyField
                             label={field.label}
+                            description={
+                                "description" in field
+                                    ? field.description
+                                    : undefined
+                            }
                             placeholder={field.placeholder}
                             hasSavedKey={
                                 !!profile?.apiKeys[field.provider].configured

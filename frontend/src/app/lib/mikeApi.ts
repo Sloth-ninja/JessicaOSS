@@ -252,7 +252,12 @@ export async function updateUserMfaOnLogin(
     });
 }
 
-export type ApiKeyProvider = "claude" | "gemini" | "openai" | "openrouter";
+export type ApiKeyProvider =
+    | "claude"
+    | "gemini"
+    | "openai"
+    | "openrouter"
+    | "companies_house";
 export type ApiKeySource = "user" | "env" | null;
 export type ApiKeyState = Record<
     ApiKeyProvider,
