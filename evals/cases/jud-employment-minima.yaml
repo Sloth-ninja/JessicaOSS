@@ -1,0 +1,15 @@
+id: jud-employment-minima
+type: judged
+pending: >
+  Requires the Employment Contract vs Statutory Minima workflow (WS4) so
+  input.text can be produced by running the workflow on a fixture employment
+  contract; golden-set inputs to be finalised with an AGL associate. Judge wiring
+  itself is live (see judge.ts).
+description: >
+  Opus-judged case: employment contract vs statutory minima tabular output scored
+  1–5 against the rubric (issue-spotting completeness, correct law, UK
+  terminology, no invented facts).
+rubric: rubrics/employment-minima.md
+min_score: 3
+input:
+  text: ""

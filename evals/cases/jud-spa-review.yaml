@@ -1,0 +1,14 @@
+id: jud-spa-review
+type: judged
+pending: >
+  Requires the English-law SPA Review workflow (WS4) so input.text can be produced
+  by running the workflow on a fixture SPA; golden-set inputs to be finalised with
+  an AGL associate. Judge wiring itself is live (see judge.ts).
+description: >
+  Opus-judged case: English-law SPA Review tabular output scored 1–5 against the
+  rubric (issue-spotting completeness, correct law, UK terminology, no invented
+  facts).
+rubric: rubrics/spa-review.md
+min_score: 3
+input:
+  text: ""

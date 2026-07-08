@@ -1,0 +1,11 @@
+id: cit-lease-lta1954-1
+type: citation
+description: >
+  Commercial Lease Review — LTA 1954 — Security of Tenure column: excerpt recording
+  that the lease was contracted out under s.38A Landlord and Tenant Act 1954. Also
+  exercises the eval harness's regnal-year fallback (LTA 1954 is canonically
+  identified on legislation.gov.uk by regnal year, not calendar year).
+input:
+  text: >
+    The lease recites that it was contracted out of security of tenure under s.38A
+    Landlord and Tenant Act 1954.

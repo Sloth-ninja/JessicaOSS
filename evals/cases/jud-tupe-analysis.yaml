@@ -1,0 +1,13 @@
+id: jud-tupe-analysis
+type: judged
+pending: >
+  Requires the TUPE Analysis workflow (WS4) so input.text can be produced by
+  running the workflow on a fixture transaction description; golden-set inputs to
+  be finalised with an AGL associate. Judge wiring itself is live (see judge.ts).
+description: >
+  Opus-judged case: TUPE Analysis assistant output scored 1–5 against the rubric
+  (issue-spotting completeness, correct law, UK terminology, no invented facts).
+rubric: rubrics/tupe-analysis.md
+min_score: 3
+input:
+  text: ""

@@ -1,0 +1,14 @@
+id: jud-disclosure-review
+type: judged
+pending: >
+  Requires running the (renamed) Disclosure Review workflow on a fixture document
+  set so input.text can be produced; golden-set inputs to be finalised with an AGL
+  associate. Judge wiring itself is live (see judge.ts).
+description: >
+  Opus-judged case: Disclosure Review tabular output (including the three-way
+  privilege split) scored 1–5 against the rubric (issue-spotting completeness,
+  correct law, UK terminology, no invented facts).
+rubric: rubrics/disclosure-review.md
+min_score: 3
+input:
+  text: ""

@@ -1,0 +1,11 @@
+id: cit-due-diligence-snapshot-1
+type: citation
+description: >
+  Companies House Due-Diligence Snapshot — PSC section: excerpt citing s.790C
+  Companies Act 2006 (the registrable-person-with-significant-control test), as the
+  rubric's correct_law dimension expects.
+input:
+  text: >
+    The PSC register must record persons with significant control in accordance with
+    s.790C Companies Act 2006, which sets out who counts as a registrable person
+    with significant control.
