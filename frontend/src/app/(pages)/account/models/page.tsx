@@ -238,7 +238,7 @@ function ModelPreferenceDropdown({
                                         }
                                     >
                                         <span
-                                            className={`flex-1 ${available ? "" : "text-gray-400"}`}
+                                            className={`min-w-0 flex-1 truncate ${available ? "" : "text-gray-400"}`}
                                         >
                                             {m.label}
                                         </span>
