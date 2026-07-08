@@ -654,6 +654,7 @@ export function useAssistantChat({
                     typeof data.outstanding_effects === "boolean"
                       ? (data.outstanding_effects as boolean)
                       : undefined,
+                  provision: data.provision,
                   isStreaming: false,
                 }),
               );

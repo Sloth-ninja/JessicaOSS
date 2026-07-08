@@ -2096,6 +2096,7 @@ export async function runToolCalls(
           title: event.title,
           url: event.url,
           outstanding_effects: event.outstanding_effects,
+          provision: event.provision,
         })}\n\n`,
       );
       continue;
