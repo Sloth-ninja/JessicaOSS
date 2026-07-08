@@ -1,4 +1,5 @@
 import type { Provider } from "./types";
+import { getLocalLlmConfig, isLocalModelId } from "./localConfig";
 
 // ---------------------------------------------------------------------------
 // Canonical model IDs
@@ -49,6 +50,7 @@ const ALL_MODELS = new Set<string>([
 // ---------------------------------------------------------------------------
 
 export function providerForModel(model: string): Provider {
+    if (isLocalModelId(model)) return "local";
     if (model.startsWith("claude")) return "claude";
     if (model.startsWith("gemini")) return "gemini";
     if (model.startsWith("gpt-")) return "openai";
@@ -57,5 +59,9 @@ export function providerForModel(model: string): Provider {
 
 export function resolveModel(id: string | null | undefined, fallback: string): string {
     if (id && ALL_MODELS.has(id)) return id;
+    // Local model ids are dynamic (server env-configured), so the static
+    // registry check above is bypassed for the "local:" prefix whenever
+    // local mode is configured at all.
+    if (id && isLocalModelId(id) && getLocalLlmConfig()) return id;
     return fallback;
 }

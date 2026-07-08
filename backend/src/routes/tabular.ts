@@ -62,11 +62,15 @@ export const tabularRouter = Router();
 function providerLabel(provider: Provider): string {
     if (provider === "claude") return "Anthropic";
     if (provider === "openai") return "OpenAI";
+    if (provider === "local") return "Local";
     return "Gemini";
 }
 
 function missingModelApiKey(model: string, apiKeys: UserApiKeys) {
     const provider = providerForModel(model);
+    // Local models are server-env configured, not gated by a per-user API
+    // key — availability was already checked when the model was surfaced.
+    if (provider === "local") return null;
     if (apiKeys[provider]?.trim()) return null;
     return {
         provider,

@@ -16,6 +16,7 @@ import {
     normalizeApiKeyProvider,
     saveUserApiKey,
 } from "../lib/userApiKeys";
+import { getLocalLlmStatus } from "../lib/llm/localConfig";
 import {
     completeUserMcpConnectorOAuth,
     createUserMcpConnector,
@@ -44,6 +45,14 @@ import {
 export const userRouter = Router();
 
 const MONTHLY_CREDIT_LIMIT = 999999;
+
+// Additive: merges the server-env-only local-model status alongside the
+// per-user ApiKeyStatus fields. There is no per-user local key/base URL
+// (SSRF surface — docs/MIGRATION_SPEC.md §6.5), so this is never stored,
+// just reported from env on each request.
+function withLocalStatus(status: ApiKeyStatus) {
+    return { ...status, local: getLocalLlmStatus() };
+}
 
 type UserProfileRow = {
     display_name: string | null;
@@ -471,7 +480,7 @@ userRouter.get("/profile", requireAuth, async (_req, res) => {
         apiKeyStatus,
     });
     if (error) return void res.status(500).json({ detail: error.message });
-    res.json({ ...data, apiKeyStatus });
+    res.json({ ...data, apiKeyStatus: withLocalStatus(apiKeyStatus) });
 });
 
 // PATCH /user/profile
@@ -495,7 +504,7 @@ userRouter.patch("/profile", requireAuth, async (req, res) => {
     const apiKeyStatus = await getUserApiKeyStatus(userId, db);
     const { data, error } = await loadProfile(db, userId, { apiKeyStatus });
     if (error) return void res.status(500).json({ detail: error.message });
-    res.json({ ...data, apiKeyStatus });
+    res.json({ ...data, apiKeyStatus: withLocalStatus(apiKeyStatus) });
 });
 
 // PATCH /user/security/mfa-login
@@ -541,7 +550,7 @@ userRouter.patch(
         const apiKeyStatus = await getUserApiKeyStatus(userId, db);
         const { data, error } = await loadProfile(db, userId, { apiKeyStatus });
         if (error) return void res.status(500).json({ detail: error.message });
-        res.json({ ...data, apiKeyStatus });
+        res.json({ ...data, apiKeyStatus: withLocalStatus(apiKeyStatus) });
     },
 );
 
@@ -550,7 +559,7 @@ userRouter.get("/api-keys", requireAuth, async (_req, res) => {
     const userId = res.locals.userId as string;
     const db = createServerSupabase();
     const status = await getUserApiKeyStatus(userId, db);
-    res.json(status);
+    res.json(withLocalStatus(status));
 });
 
 // PUT /user/api-keys/:provider
@@ -577,7 +586,7 @@ userRouter.put(
             }
             await saveUserApiKey(userId, provider, apiKey, db);
             const status = await getUserApiKeyStatus(userId, db);
-            res.json(status);
+            res.json(withLocalStatus(status));
         } catch (err) {
             const detail = errorMessage(err);
             console.error("[user/api-keys] save failed", {
