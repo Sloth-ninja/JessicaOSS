@@ -1,0 +1,15 @@
+id: det-companies-house-search
+type: deterministic
+description: >
+  Companies House company search for "aria grace law" must surface ARIA
+  GRACE LAW CIC (company number 13927967) — the pilot firm — verified
+  against the live API on 08/07/2026. Auth is HTTP Basic with the API key
+  as username (handled by the runner via auth: companies_house; skipped
+  when COMPANIES_HOUSE_API_KEY is unset).
+request:
+  url: https://api.company-information.service.gov.uk/search/companies?q=aria%20grace%20law&items_per_page=3
+  auth: companies_house
+  status: 200
+  contains:
+    - "ARIA GRACE LAW CIC"
+    - "13927967"
