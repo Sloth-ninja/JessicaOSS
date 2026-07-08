@@ -1,13 +1,93 @@
 id: jud-due-diligence-snapshot
 type: judged
-pending: >
-  Requires the Companies House due-diligence workflow (WS1/WS4) so input.text can
-  be produced by running the workflow on a fixture; golden-set inputs to be
-  finalised with an AGL associate. Judge wiring itself is live (see judge.ts).
 description: >
-  Opus-judged case: corporate due-diligence snapshot output scored 1–5 against the
-  rubric (issue-spotting completeness, correct law, UK terminology, no invented facts).
+  Opus-judged case scored 1-5 against the rubric. input.text is a PROVISIONAL
+  fixture generated on 08/07/2026 by session agents (live Companies House register data for ARIA GRACE LAW CIC 13927967) and scored 5/5 by
+  an interim Opus judge pass; to be reviewed/replaced with an AGL associate.
+  Runs automatically once ANTHROPIC_API_KEY is configured (skips until then).
 rubric: rubrics/due-diligence-snapshot.md
 min_score: 3
 input:
-  text: ""
+  text: |
+    # Companies House Due-Diligence Snapshot — Aria Grace Law CIC
+
+    **Company number: 13927967** | **Retrieval date: 8 July 2026** (Companies House public register, via `companies_house_get_company`, `companies_house_get_filing_history` and the persons-with-significant-control endpoint). All information below is current only as at the retrieval date; the register may have been updated since.
+
+    ## 1. Company Profile
+
+    - **Registered name:** ARIA GRACE LAW CIC
+    - **Company number:** 13927967
+    - **Registration status:** Active
+    - **Company type:** Private company limited by guarantee, without share capital (Companies House type code `private-limited-guarant-nsc`), registered as a **Community Interest Company** (subtype `community-interest-company`). As a CIC, the company is not required to include "Limited" in its name, which is consistent with the registered name "ARIA GRACE LAW CIC" rather than "... Limited".
+    - **Date of incorporation:** 21 February 2022
+    - **Registered office address:** 20 North Audley Street, London, W1K 6WE, England
+    - **SIC code:** 69102 — Solicitors
+    - **Jurisdiction:** England and Wales
+
+    ## 2. Officers
+
+    **Current officers:** 1 active officer (active officer count: 1; resigned officer count: 0).
+
+    | Name | Role | Appointed | Nationality | Country of residence |
+    |---|---|---|---|---|
+    | Lindsay Paul HEALY | Director | 21 February 2022 | Irish | United Kingdom |
+
+    Mr Healy's identity is verified for Companies House purposes in respect of his directorship, with verification effective from 16 March 2026 (per the identity-verification details on his officer record). Note that his PSC record carries its own, separate identity-verification date — see Section 3.
+
+    No company secretary is currently registered — private companies are not required to appoint one. No officers have resigned recently; the register shows no resignations at all since incorporation.
+
+    ## 3. Persons with Significant Control (PSCs)
+
+    **Active PSCs:** 1 (active PSC count: 1; ceased PSC count: 0; no super-secure PSC protections in place).
+
+    | Name | Notified | Natures of control |
+    |---|---|---|
+    | Mr Lindsay Paul Healy | 21 February 2022 | Voting rights of 75% to 100%; right to appoint or remove a majority of directors |
+
+    The PSC record carries its own identity-verification details, effective from 24 February 2026 — a separate record from the officer-record verification of 16 March 2026 noted in Section 2. A change filing (form PSC04, filed 24 February 2026 — see Section 5) coincides with that PSC verification date, and the current, live PSC entry retrieved today still shows the same individual with the same natures of control as at notification, so the filing appears to be an update to Mr Healy's recorded particulars rather than any change in the substance or level of his control. This inference should be checked against the underlying PSC04 filing document if precision matters to the transaction.
+
+    ## 4. Latest Accounts & Confirmation Statement
+
+    **Accounts**
+    - Last accounts filed: made up to 31 December 2024 (accounts type: total exemption full — small company accounts, filed under audit exemption), filed at Companies House on 22 April 2025.
+    - Next accounts due: 30 September 2026, for the period 1 January 2025 to 31 December 2025.
+    - **Not overdue** as at the retrieval date (8 July 2026) — the filing deadline falls just under three months from now.
+
+    **Confirmation statement**
+    - Last confirmation statement: made up to 20 February 2026, filed at Companies House on 16 March 2026.
+    - Next confirmation statement due: 6 March 2027.
+    - **Not overdue** as at the retrieval date.
+
+    ## 5. Recent Filings of Note
+
+    | Date | Type | Description |
+    |---|---|---|
+    | 16 March 2026 | CS01 | Confirmation statement, no updates (made up to 20 February 2026) |
+    | 24 February 2026 | PSC04 | Change to a person with significant control (Mr Lindsay Healy) |
+    | 22 April 2025 | AA | Full accounts, total exemption full (period end 31 December 2024) |
+    | 20 February 2025 | CS01 | Confirmation statement, no updates |
+    | 19 December 2024 | AA | Full accounts, total exemption full (period end 31 December 2023) |
+    | 1 November 2024 | AD01 | Registered office changed from 167-169 Great Portland Street, 5th Floor, London W1W 5PF to 20 North Audley Street, London W1K 6WE |
+    | 30 September 2024 | AA01 | Accounting reference date shortened — previous period made up to 28 February 2024 superseded, new accounting reference date set so the period ends 31 December 2023 |
+    | 20 February 2024 | CS01 | Confirmation statement, no updates |
+    | 2 January 2024 | AA | Full accounts, total exemption full (period end 28 February 2023) |
+    | 16 October 2023 | AD01 | Registered office changed from 24 Dobree Avenue, London NW10 2AE to 167-169 Great Portland Street, 5th Floor, London W1W 5PF |
+    | 24 March 2023 | CS01 | Confirmation statement, no updates |
+    | 21 February 2022 | CICINC | Incorporation as a community interest company |
+
+    Two points stand out as administrative history rather than transactional activity: the registered office moved twice in just over a year (October 2023, then again November 2024), and the accounting reference date was shortened in September 2024, moving the company's year end from 28 February to 31 December. Neither indicates any change of ownership or control.
+
+    ## 6. Red Flags
+
+    **None identified** from the data retrieved:
+    - No overdue accounts or confirmation statement (both confirmed not overdue above).
+    - Company status is active, with no insolvency history recorded (`has_insolvency_history: false`) and no indication of administration or strike-off.
+    - No officers have resigned recently — the only officer on record has been in place since incorporation.
+    - No registered charges (`has_charges: false`), so there is nothing outstanding or unsatisfied to check.
+    - The registered office is not shown as in dispute or as an undeliverable address.
+
+    **One follow-up point for the reviewing solicitor** (not a red flag on the data available, but not confirmable from this dataset): as a community interest company, Aria Grace Law CIC is required to file a community interest company report for each financial year alongside its annual accounts. The filing history and company profile retrieved here do not separately confirm whether that report has been filed for the most recent accounting period — this should be checked directly against the filed accounts document or with the Office of the Regulator of Community Interest Companies before completing due diligence.
+
+    ---
+
+    **Company number: 13927967. Retrieval date: 8 July 2026.**

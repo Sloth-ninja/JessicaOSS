@@ -1,13 +1,75 @@
 id: jud-tupe-analysis
 type: judged
-pending: >
-  Requires the TUPE Analysis workflow (WS4) so input.text can be produced by
-  running the workflow on a fixture transaction description; golden-set inputs to
-  be finalised with an AGL associate. Judge wiring itself is live (see judge.ts).
 description: >
-  Opus-judged case: TUPE Analysis assistant output scored 1–5 against the rubric
-  (issue-spotting completeness, correct law, UK terminology, no invented facts).
+  Opus-judged case scored 1-5 against the rubric. input.text is a PROVISIONAL
+  fixture generated on 08/07/2026 by session agents (synthetic service-provision-change scenario) and scored 5/5 by
+  an interim Opus judge pass; to be reviewed/replaced with an AGL associate.
+  Runs automatically once ANTHROPIC_API_KEY is configured (skips until then).
 rubric: rubrics/tupe-analysis.md
 min_score: 3
 input:
-  text: ""
+  text: |
+    # TUPE Analysis — Manchester Office Campus Cleaning and Maintenance Contract
+
+    **Scenario considered:** OutsourceCo Ltd ("**OutsourceCo**") currently holds the cleaning and maintenance contract for a Manchester office campus, with 42 staff dedicated to that contract. The campus owner has decided not to renew and has awarded the contract, from 1 September 2026, to NewServe Ltd ("**NewServe**"), which will perform substantially the same services with its own management. NewServe has stated it intends to reduce headcount and change shift patterns after taking over. OutsourceCo has not yet informed or consulted its staff. Neither workforce is unionised and there are no employee representatives in place.
+
+    This analysis considers whether the Transfer of Undertakings (Protection of Employment) Regulations 2006 (SI 2006/246) — "**TUPE**" — apply, and what obligations follow. No facts are assumed beyond those set out above; where the given facts leave a point genuinely open, this is flagged rather than resolved by assumption. This analysis does not rely on any case law.
+
+    ## 1. Relevant Transfer (reg 3)
+
+    TUPE recognises two limbs of "relevant transfer" under reg 3(1): (a) a **business transfer** — a transfer of an economic entity that retains its identity — and (b) a **service provision change**.
+
+    **Business transfer limb (reg 3(1)(a)):** Nothing in the facts describes any transfer of assets, premises, equipment, or an organised economic entity as such between OutsourceCo and NewServe. The campus owner is simply re-awarding a services contract to a new contractor. On the facts given, reg 3(1)(a) is not made out, and I do not infer an asset transfer that has not been described.
+
+    **Service provision change limb (reg 3(1)(b)):** This is the limb squarely in point. The facts describe a client (the campus owner) whose cleaning and maintenance activities were carried out by one contractor (OutsourceCo) and, from 1 September 2026, will instead be carried out by a different contractor (NewServe) on the client's behalf — a change from one contractor to a subsequent contractor, within reg 3(1)(b)(ii).
+
+    For reg 3(1)(b) to apply, reg 3(3) requires that, immediately before the change, there is an organised grouping of employees whose principal purpose is carrying out the client's activities, and that the client intends the activities to continue (rather than relate to a single specific event or task of short-term duration). Both conditions appear satisfied: the 42 staff are described as employed specifically and dedicatedly for the Manchester campus contract — this is the organised grouping — and cleaning and maintenance of an office campus is an ongoing facilities function, not a short-term or one-off task. The facts also state NewServe "will perform substantially the same services," which supports the further requirement that the activities carried on after the change are essentially the same as those carried on before it.
+
+    **Conclusion:** On the facts given, this is a relevant transfer by way of service provision change under reg 3(1)(b) SI 2006/246, with OutsourceCo as transferor and NewServe as transferee. TUPE applies.
+
+    ## 2. Who Transfers (reg 4)
+
+    Under reg 4(1), a relevant transfer does not terminate the contracts of employment of those employed in the organised grouping; instead, those contracts have effect after the transfer as if originally made between the employee and the transferee (NewServe). Reg 4(2) transfers to NewServe all of OutsourceCo's rights, powers, duties and liabilities under or in connection with those contracts.
+
+    Reg 4(3) limits this to employees who are, immediately before the transfer, assigned to the organised grouping of employees that is subject to the relevant transfer. On the facts as given, all 42 staff are described as employed "dedicated to that contract," which I take to mean they are wholly assigned to the Manchester campus grouping and so all 42 transfer to NewServe on 1 September 2026 under reg 4(1)–(3).
+
+    **Uncertainty flagged:** the facts do not address whether any of the 42 in practice split their time across other contracts or locations, which could affect whether a particular individual is "assigned" to this grouping. If that is the case for any employee, their transferring status would need separate assessment; nothing in the facts as given suggests it is.
+
+    A related point also arising under reg 4: any variation of an affected employee's contract terms is void under reg 4(4) if the sole or principal reason for the variation is the transfer itself (or a reason connected with it that is not an economic, technical or organisational reason entailing changes in the workforce), subject to the limited exception in reg 4(5) where the reason is such an ETO reason and the employer and employee agree the variation. This is directly relevant to NewServe's stated intention to change shift patterns after taking over (addressed further in Section 3 below).
+
+    ## 3. Dismissal Protection (reg 7)
+
+    Reg 7(1) makes a dismissal of a transferring (or already-transferred) employee automatically unfair if the sole or principal reason for the dismissal is the transfer itself, or a reason connected with the transfer that is not an economic, technical or organisational reason entailing changes in the workforce ("**ETO reason**"). Reg 7(2) provides that where the sole or principal reason is a genuine ETO reason entailing changes in the workforce, the dismissal is not automatically unfair by virtue of reg 7(1); its fairness then falls to be assessed under ordinary unfair dismissal principles.
+
+    NewServe's stated intention to reduce headcount after taking over the contract is the central issue here. The facts do not disclose *why* NewServe wants to reduce headcount — whether this reflects a genuine post-transfer economic or organisational restructuring of how the cleaning and maintenance function will be run (which could constitute an ETO reason entailing changes in the workforce, e.g. a genuine reduction in the number of roles required), or whether it is simply a wish to cut costs/staff because of, or shortly following, the transfer with no such restructuring reason. This distinction is determinative of whether resulting dismissals fall within reg 7(1) (automatically unfair) or the reg 7(2) exception, and **cannot be resolved on the facts as given** — it requires further information from NewServe about the operational reason for the intended reduction.
+
+    The intended change to shift patterns is better analysed as a variation-of-terms issue under reg 4(4)/(5) (Section 2 above) rather than a dismissal issue, unless NewServe were to dismiss and re-engage employees who do not accept the new shift patterns — in which case the reg 7 analysis above would apply to those dismissals as well, again turning on whether a genuine ETO reason is shown.
+
+    ## 4. Information & Consultation (regs 13–15)
+
+    Reg 13 imposes a duty on both transferor and transferee to inform "appropriate representatives" of their own affected employees, long enough before the transfer to allow for meaningful consultation, of: the fact that the transfer is to take place, its timing and reasons; the legal, economic and social implications of the transfer for affected employees; and the measures that employer envisages taking in connection with the transfer in relation to those employees (or, if none are envisaged, that fact). Where a transferee envisages measures in relation to employees who will transfer to it, it must give the transferor sufficient information about those measures, in good time, so the transferor can in turn inform (and where necessary consult) its own affected employees under reg 13.
+
+    Where an employer envisages that it will take measures in relation to an affected employee in connection with the transfer, reg 13 also imposes a **duty to consult** appropriate representatives with a view to seeking their agreement to the intended measures — this goes beyond mere information. On the facts, NewServe has stated an intention to reduce headcount and change shift patterns after taking over: these are "measures envisaged" in connection with the transfer, which triggers the consultation duty (not just an information duty) in respect of the affected employees, to be discharged via appropriate representatives of OutsourceCo's staff (since OutsourceCo is the employer that must consult its own workforce before the transfer, using information NewServe must supply to it).
+
+    **The absence of representatives is a real practical problem here.** Reg 13 requires information and consultation to be conducted through "appropriate representatives" — either representatives of a recognised independent trade union, or elected employee representatives. The facts state neither workforce is unionised and no employee representatives are in place. OutsourceCo therefore cannot simply proceed to inform or consult a pre-existing body; it must first invite the affected employees to elect representatives specifically for this purpose, following a fair election process, under reg 14. Only if OutsourceCo has genuinely invited the affected employees to elect representatives and they have failed to do so within a reasonable time may it discharge the duty by giving the required information to each affected employee individually.
+
+    On timing: OutsourceCo has not yet informed or consulted its staff at all, and the transfer is due to complete on 1 September 2026. Reg 13 requires information (and, where measures are envisaged, consultation) to begin long enough before the transfer for it to be meaningful — there is no fixed statutory minimum period, but starting an election of representatives and a consultation process only shortly before 1 September 2026 raises a real risk that the process will not be regarded as timely or meaningful. This should be treated as urgent.
+
+    A failure to comply with the reg 13 duties may found a complaint to an employment tribunal under reg 15, which can award appropriate compensation to affected employees, apportioned between transferor and transferee according to responsibility for the failure.
+
+    ## 5. Action List
+
+    1. **Confirm the transferring population.** OutsourceCo should verify that all 42 employees are wholly assigned to the Manchester campus contract (rather than split across other contracts), to fix precisely who transfers to NewServe under reg 4.
+    2. **Request measures information from NewServe.** OutsourceCo should immediately request full particulars from NewServe of the "measures" it envisages — specifically the scope, timing, and rationale of the intended headcount reduction and the proposed shift pattern changes — as NewServe is required to supply this under reg 13 so OutsourceCo can inform and consult.
+    3. **Arrange the election of employee representatives without delay.** As there are no unions or standing representatives, OutsourceCo must invite the 42 affected employees to elect representatives under reg 14, run a fair election process, and only fall back to direct information of employees if a genuine invitation to elect goes unanswered within a reasonable time.
+    4. **Inform and consult through the elected representatives.** OutsourceCo (and NewServe, in respect of its own affected employees, if any) should inform representatives of the fact, timing and reasons for the transfer and its legal, economic and social implications, and consult on the measures NewServe envisages with a view to seeking the representatives' agreement, allowing as much time as possible before 1 September 2026.
+    5. **Clarify the true reason for the intended headcount reduction with NewServe**, in writing, to establish whether it reflects a genuine economic, technical or organisational reason entailing changes in the workforce (potentially bringing any resulting dismissals within the reg 7(2) exception) or is connected to the transfer itself (which would make such dismissals automatically unfair under reg 7(1)).
+    6. **Exchange employee liability information.** OutsourceCo should provide NewServe with the prescribed employee liability information for each of the 42 employees, in writing, not less than 28 days before the transfer, as required under reg 11.
+    7. **Address shift-pattern changes carefully.** Any variation of the transferring employees' shift patterns after 1 September 2026 should be reviewed against reg 4(4)/(5) before implementation, since a variation connected to the transfer that is not for a genuine ETO reason (or not agreed with the employee where it is) will be void.
+    8. **Build TUPE protections into the transaction documents** between the campus owner, OutsourceCo and NewServe — for example, warranties as to the accuracy of employee liability information, indemnities addressing pre-transfer information and consultation failures, and an agreed apportionment of any reg 15 liability.
+    9. **Flag a separate, non-TUPE issue for specialist input:** if NewServe's headcount reduction plans could involve dismissing 20 or more employees at the Manchester site within a 90-day period, a distinct collective consultation obligation may arise under different legislation (the Trade Union and Labour Relations (Consolidation) Act 1992). This is outside the scope of TUPE and would need separate advice if the numbers involved reach that threshold.
+    10. **Keep a written record** of the information and consultation steps taken, to reduce the risk of, and evidence any defence to, an employment tribunal complaint under reg 15.
+
+    ---
+
+    **Uncertainties arising from the facts given, restated for clarity:** (i) whether all 42 employees are in fact wholly dedicated to this contract or whether some split time with other work; (ii) the operational reason behind NewServe's intended headcount reduction, which determines whether reg 7(1) or the reg 7(2) ETO exception applies to any resulting dismissals; (iii) whether NewServe's plans, if they proceed to redundancies, would reach a scale engaging separate collective redundancy consultation duties outside TUPE. None of these points is resolved by inference; each requires further facts before a firm conclusion can be given.
