@@ -514,6 +514,7 @@ function TRChatInput({
     model,
     onModelChange,
     apiKeys,
+    localModels,
     onHeightChange,
 }: {
     isLoading: boolean;
@@ -522,6 +523,7 @@ function TRChatInput({
     model: string;
     onModelChange: (id: string) => void;
     apiKeys?: ApiKeyState;
+    localModels?: string[];
     onHeightChange: (height: number) => void;
 }) {
     const [value, setValue] = useState("");
@@ -606,6 +608,7 @@ function TRChatInput({
                         value={model}
                         onChange={onModelChange}
                         apiKeys={apiKeys}
+                        localModels={localModels}
                     />
                     <button
                         type="button"
@@ -721,6 +724,7 @@ export function TRChatPanel({
 }: Props) {
     const { profile, updateModelPreference } = useUserProfile();
     const apiKeys = profile?.apiKeys;
+    const localModels = profile?.localModels ?? [];
     const currentModel = profile?.tabularModel ?? "gemini-3-flash-preview";
     const [apiKeyModalProvider, setApiKeyModalProvider] =
         useState<ModelProvider | null>(null);
@@ -1069,7 +1073,7 @@ export function TRChatPanel({
 
     async function handleSubmit(trimmed: string) {
         if (!trimmed || isLoading) return;
-        if (apiKeys && !isModelAvailable(currentModel, apiKeys)) {
+        if (apiKeys && !isModelAvailable(currentModel, apiKeys, localModels)) {
             setApiKeyModalProvider(getModelProvider(currentModel));
             return;
         }
@@ -1573,6 +1577,7 @@ export function TRChatPanel({
                     updateModelPreference("tabularModel", id)
                 }
                 apiKeys={apiKeys}
+                localModels={localModels}
                 onHeightChange={setInputHeight}
             />
 

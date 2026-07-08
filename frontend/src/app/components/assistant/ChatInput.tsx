@@ -67,8 +67,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
         id: string;
         title: string;
     } | null>(null);
-    const [model, setModel] = useSelectedModel();
     const { profile } = useUserProfile();
+    const localModels = profile?.localModels ?? [];
+    const [model, setModel] = useSelectedModel(localModels);
     const apiKeys = profile?.apiKeys;
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const controlsRef = useRef<HTMLDivElement>(null);
@@ -127,7 +128,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
     const handleSubmit = () => {
         const query = value.trim();
         if (!query || isLoading) return;
-        if (apiKeys && !isModelAvailable(model, apiKeys)) {
+        if (apiKeys && !isModelAvailable(model, apiKeys, localModels)) {
             setApiKeyModalProvider(getModelProvider(model));
             return;
         }
@@ -307,6 +308,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
                                 value={model}
                                 onChange={setModel}
                                 apiKeys={apiKeys}
+                                localModels={localModels}
                             />
                             <button
                                 type="button"

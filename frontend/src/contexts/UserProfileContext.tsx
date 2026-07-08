@@ -31,6 +31,8 @@ interface UserProfile {
     tabularModel: string;
     mfaOnLogin: boolean;
     apiKeys: ApiKeyState;
+    /** Server-reported local:-prefixed model ids; empty when unconfigured. */
+    localModels: string[];
 }
 
 interface UserProfileContextType {
@@ -87,6 +89,7 @@ function toProfile(data: ApiUserProfile): UserProfile {
         ...profile,
         mfaOnLogin: profile.mfaOnLogin === true,
         apiKeys,
+        localModels: apiKeyStatus.local?.models ?? [],
     };
 }
 
@@ -117,6 +120,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
                 tabularModel: "gemini-3-flash-preview",
                 mfaOnLogin: false,
                 apiKeys: emptyApiKeys(),
+                localModels: [],
             });
         } finally {
             setLoading(false);
