@@ -1,0 +1,17 @@
+id: det-companies-house-psc
+type: deterministic
+description: >
+  Companies House persons-with-significant-control lookup for ARIA GRACE
+  LAW CIC (company number 13927967). Confirms Mr Lindsay Paul Healy is
+  listed as an individual PSC with voting rights of 75-100%, verified
+  against the live API on 08/07/2026. Auth is HTTP Basic with the API key
+  as username (handled by the runner via auth: companies_house; skipped
+  when COMPANIES_HOUSE_API_KEY is unset).
+request:
+  url: https://api.company-information.service.gov.uk/company/13927967/persons-with-significant-control
+  auth: companies_house
+  status: 200
+  contains:
+    - "Mr Lindsay Paul Healy"
+    - "individual-person-with-significant-control"
+    - "voting-rights-75-to-100-percent"

@@ -62,6 +62,7 @@ const API_KEY_PROVIDERS: ApiKeyProvider[] = [
     "gemini",
     "openai",
     "openrouter",
+    "companies_house",
 ];
 
 function emptyApiKeys(): ApiKeyState {
@@ -70,6 +71,7 @@ function emptyApiKeys(): ApiKeyState {
         gemini: { configured: false, source: null },
         openai: { configured: false, source: null },
         openrouter: { configured: false, source: null },
+        companies_house: { configured: false, source: null },
     };
 }
 

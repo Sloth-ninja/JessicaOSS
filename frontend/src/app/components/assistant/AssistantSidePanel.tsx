@@ -9,6 +9,7 @@ import {
 } from "react";
 import { X } from "lucide-react";
 import { DocPanel, type DocPanelMode } from "../shared/DocPanel";
+import { CompanyPanel } from "./CompanyPanel";
 import type {
     CitationAnnotation,
     EditAnnotation,
@@ -49,7 +50,25 @@ export type EditTab = CommonTab & {
     edit: EditAnnotation;
 };
 
-export type AssistantSidePanelTab = DocumentTab | CitationTab | EditTab;
+/**
+ * A company-record tab — not document-backed (no versionId/filename), so
+ * it deliberately does NOT extend CommonTab. Deduped by companyNumber
+ * rather than documentId (see `upsertTab` in ChatView).
+ */
+export type CompanyTab = {
+    id: string;
+    kind: "company";
+    companyNumber: string;
+    companyName?: string;
+    /** Full structured payload (profile/officers/PSCs) from the get_company tool call. */
+    company: unknown;
+};
+
+export type AssistantSidePanelTab =
+    | DocumentTab
+    | CitationTab
+    | EditTab
+    | CompanyTab;
 
 interface Props {
     tabs: AssistantSidePanelTab[];
@@ -104,6 +123,7 @@ function maxPanelWidth() {
 }
 
 function tabTitle(tab: AssistantSidePanelTab): string {
+    if (tab.kind === "company") return tab.companyName || tab.companyNumber;
     return tab.filename;
 }
 
@@ -210,10 +230,12 @@ export function AssistantSidePanel({
                 <div className="flex-1 flex items-end gap-1 overflow-hidden px-2">
                     {tabs.map((tab) => {
                         const isActive = tab.id === active.id;
+                        const versionNumber =
+                            tab.kind === "company" ? null : tab.versionNumber;
                         const showVersionBadge =
-                            typeof tab.versionNumber === "number" &&
-                            Number.isFinite(tab.versionNumber) &&
-                            tab.versionNumber > 1;
+                            typeof versionNumber === "number" &&
+                            Number.isFinite(versionNumber) &&
+                            versionNumber > 1;
                         const title = tabTitle(tab);
                         return (
                             <div
@@ -240,7 +262,7 @@ export function AssistantSidePanel({
                                                 : "border-gray-300 bg-white/70 text-gray-500"
                                         }`}
                                     >
-                                        V{tab.versionNumber}
+                                        V{versionNumber}
                                     </span>
                                 )}
                                 <button
@@ -271,6 +293,23 @@ export function AssistantSidePanel({
             <div className="flex-1 min-h-0 relative">
                 {tabs.map((tab) => {
                     const isActive = tab.id === active.id;
+
+                    if (tab.kind === "company") {
+                        return (
+                            <div
+                                key={tab.id}
+                                className={`absolute inset-0 flex flex-col ${isActive ? "" : "invisible pointer-events-none"}`}
+                                aria-hidden={!isActive}
+                            >
+                                <CompanyPanel
+                                    companyNumber={tab.companyNumber}
+                                    companyName={tab.companyName}
+                                    company={tab.company}
+                                />
+                            </div>
+                        );
+                    }
+
                     const mode: DocPanelMode =
                         tab.kind === "citation"
                             ? {

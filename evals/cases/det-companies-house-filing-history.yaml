@@ -1,0 +1,16 @@
+id: det-companies-house-filing-history
+type: deterministic
+description: >
+  Companies House filing history for MARKS AND SPENCER P.L.C. (company
+  number 00214436, incorporated 17/06/1926) must include confirmation
+  statement (CS01) and accounts (AA) filings, verified against the live
+  API on 08/07/2026. Auth is HTTP Basic with the API key as username
+  (handled by the runner via auth: companies_house; skipped when
+  COMPANIES_HOUSE_API_KEY is unset).
+request:
+  url: https://api.company-information.service.gov.uk/company/00214436/filing-history?items_per_page=100
+  auth: companies_house
+  status: 200
+  contains:
+    - "CS01"
+    - "AA"

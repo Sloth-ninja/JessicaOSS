@@ -9,9 +9,11 @@ import { ChatInput } from "./ChatInput";
 import {
     AssistantSidePanel,
     type AssistantSidePanelTab,
+    type CompanyTab,
 } from "./AssistantSidePanel";
 import { AssistantWorkflowModal } from "./AssistantWorkflowModal";
 import type {
+    AssistantEvent,
     CitationAnnotation,
     EditAnnotation,
     Message,
@@ -155,21 +157,38 @@ export function ChatView({
     );
 
     /**
-     * One tab per document. If a tab for `tab.documentId` already exists,
-     * the panel stays mounted and only the header-relevant fields swap
-     * (kind, citation/edit, version, filename). Per-tab UI state — the
-     * dismissable warning and the saved scroll position — is preserved
-     * so switching headers doesn't blow away viewer state. If no tab
-     * exists for the document, a new one is appended.
+     * One tab per document (or, for company tabs, one tab per company
+     * number — company tabs aren't document-backed, so they dedupe on
+     * `companyNumber` instead of `documentId`). If a matching tab already
+     * exists, the panel stays mounted and only the header-relevant fields
+     * swap (kind, citation/edit, version, filename). Per-tab UI state — the
+     * dismissable warning and the saved scroll position — is preserved for
+     * document-backed tabs so switching headers doesn't blow away viewer
+     * state. If no matching tab exists, a new one is appended.
      */
     const upsertTab = useCallback(
         (tab: AssistantSidePanelTab) => {
             setTabs((prev) => {
+                if (tab.kind === "company") {
+                    const idx = prev.findIndex(
+                        (t) =>
+                            t.kind === "company" &&
+                            t.companyNumber === tab.companyNumber,
+                    );
+                    if (idx >= 0) {
+                        const copy = prev.slice();
+                        copy[idx] = { ...tab, id: prev[idx].id };
+                        return copy;
+                    }
+                    return [...prev, tab];
+                }
+
                 const idx = prev.findIndex(
-                    (t) => t.documentId === tab.documentId,
+                    (t) => t.kind !== "company" && t.documentId === tab.documentId,
                 );
                 if (idx >= 0) {
                     const existing = prev[idx];
+                    if (existing.kind === "company") return prev;
                     const copy = prev.slice();
                     copy[idx] = {
                         ...tab,
@@ -256,6 +275,31 @@ export function ChatView({
                 versionId: args.versionId,
                 versionNumber: args.versionNumber,
             });
+        },
+        [upsertTab],
+    );
+
+    /**
+     * Open a tab showing a Companies House company record. Called from
+     * AssistantMessage when the user clicks a completed
+     * companies_house_get_company tool-call chip.
+     */
+    const openCompany = useCallback(
+        (
+            event: Extract<
+                AssistantEvent,
+                { type: "companies_house_tool_call" }
+            >,
+        ) => {
+            if (!event.company_number) return;
+            const tab: CompanyTab = {
+                kind: "company",
+                id: `company-${event.company_number}`,
+                companyNumber: event.company_number,
+                companyName: event.company_name,
+                company: event.company,
+            };
+            upsertTab(tab);
         },
         [upsertTab],
     );
@@ -362,7 +406,7 @@ export function ChatView({
             // Surface the warning on every tab tied to this document.
             setTabs((prev) =>
                 prev.map((t) =>
-                    t.documentId === args.documentId
+                    t.kind !== "company" && t.documentId === args.documentId
                         ? { ...t, warning: args.message }
                         : t,
                 ),
@@ -621,6 +665,7 @@ export function ChatView({
                                                 }}
                                                 onEditViewClick={openEditor}
                                                 onOpenDocument={openDocument}
+                                                onOpenCompany={openCompany}
                                                 onEditResolveStart={
                                                     handleEditResolveStart
                                                 }
