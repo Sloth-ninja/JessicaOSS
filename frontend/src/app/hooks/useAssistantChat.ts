@@ -576,6 +576,47 @@ export function useAssistantChat({
               continue;
             }
 
+            if (data.type === "companies_house_tool_start") {
+              pushEvent({
+                type: "companies_house_tool_call",
+                tool_name: (data.name as string) ?? "",
+                status: "ok",
+                isStreaming: true,
+              });
+              continue;
+            }
+
+            if (data.type === "companies_house_tool_result") {
+              const toolName = (data.name as string) ?? "";
+              updateMatchingEvent(
+                (e) =>
+                  e.type === "companies_house_tool_call" &&
+                  e.tool_name === toolName &&
+                  !!e.isStreaming,
+                () => ({
+                  type: "companies_house_tool_call",
+                  tool_name: toolName,
+                  status: data.status === "error" ? "error" : "ok",
+                  error:
+                    typeof data.error === "string"
+                      ? (data.error as string)
+                      : undefined,
+                  company_number:
+                    typeof data.company_number === "string"
+                      ? (data.company_number as string)
+                      : undefined,
+                  company_name:
+                    typeof data.company_name === "string"
+                      ? (data.company_name as string)
+                      : undefined,
+                  company: data.company,
+                  isStreaming: false,
+                }),
+              );
+              pushThinkingPlaceholder();
+              continue;
+            }
+
             if (data.type === "doc_read_start") {
               pushEvent({
                 type: "doc_read",

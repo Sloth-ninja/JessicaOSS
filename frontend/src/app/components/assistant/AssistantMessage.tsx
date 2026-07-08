@@ -45,6 +45,39 @@ function toolCallLabel(name: string): string {
     return name ? `Running ${name}...` : "Working...";
 }
 
+/** Human-friendly labels for Companies House tool-call chips (streaming and done states). */
+function companiesHouseToolLabel(
+    event: Extract<AssistantEvent, { type: "companies_house_tool_call" }>,
+): string {
+    if (event.isStreaming) {
+        if (event.tool_name === "companies_house_search_companies")
+            return "Searching Companies House...";
+        if (event.tool_name === "companies_house_get_company")
+            return "Fetching company record...";
+        if (event.tool_name === "companies_house_get_filing_history")
+            return "Fetching filing history...";
+        return "Querying Companies House...";
+    }
+    if (event.status === "error") {
+        return "Companies House lookup failed";
+    }
+    if (event.tool_name === "companies_house_search_companies") {
+        return "Searched Companies House";
+    }
+    if (event.tool_name === "companies_house_get_company") {
+        const suffix = event.company_name
+            ? ` — ${event.company_name}${event.company_number ? ` (${event.company_number})` : ""}`
+            : event.company_number
+              ? ` — ${event.company_number}`
+              : "";
+        return `Company record fetched${suffix}`;
+    }
+    if (event.tool_name === "companies_house_get_filing_history") {
+        return `Filing history fetched${event.company_number ? ` — ${event.company_number}` : ""}`;
+    }
+    return "Companies House lookup complete";
+}
+
 /**
  * Card rendered above the per-edit EditCards when a message produced
  * multiple tracked-change proposals. Lets the user resolve every pending
@@ -515,6 +548,62 @@ function ReasoningBlock({
                     )}
                 </div>
             )}
+        </div>
+    );
+}
+
+/**
+ * Generic tool-call status chip: spinner while streaming, grey dot when
+ * done, red dot + error text on failure. Shared by the mcp_tool_call and
+ * companies_house_tool_call render branches so both connector-style and
+ * UK-data-source tool events render identically without duplicating the
+ * markup.
+ */
+function ToolCallChip({
+    label,
+    isStreaming,
+    isError,
+    error,
+    onClick,
+    showConnector,
+}: {
+    label: string;
+    isStreaming?: boolean;
+    isError?: boolean;
+    error?: string;
+    onClick?: () => void;
+    showConnector?: boolean;
+}) {
+    return (
+        <div className="flex items-start text-sm font-serif text-gray-500 relative">
+            {showConnector && (
+                <div className="absolute bottom-0 w-[1px] bg-gray-300 top-[13px] left-[2.5px] h-[calc(100%+11px)]" />
+            )}
+            <div
+                className={
+                    isStreaming
+                        ? "mt-[7px] h-1.5 w-1.5 shrink-0 animate-spin rounded-full border border-gray-400 border-t-transparent"
+                        : isError
+                          ? "mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-red-500"
+                          : "mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-gray-400"
+                }
+            />
+            <div className="ml-2 min-w-0">
+                {onClick ? (
+                    <button
+                        type="button"
+                        onClick={onClick}
+                        className="text-left font-medium hover:text-gray-700 transition-colors cursor-pointer"
+                    >
+                        {label}
+                    </button>
+                ) : (
+                    <span className="font-medium">{label}</span>
+                )}
+                {isError && error && (
+                    <p className="mt-0.5 text-xs text-red-600">{error}</p>
+                )}
+            </div>
         </div>
     );
 }
@@ -1376,6 +1465,14 @@ interface Props {
         versionNumber: number | null;
     }) => void;
     /**
+     * Opens the CompanyPanel side-panel tab for a completed
+     * companies_house_get_company tool call. Not called for search /
+     * filing-history chips (nothing to show in a company-record panel).
+     */
+    onOpenCompany?: (
+        event: Extract<AssistantEvent, { type: "companies_house_tool_call" }>,
+    ) => void;
+    /**
      * Fires immediately when the user clicks Accept / Reject (single card
      * or the bulk "Accept all" / "Reject all"), before the backend call.
      * Parents use this to flip download cards / editor viewers into a
@@ -1429,6 +1526,7 @@ export function AssistantMessage({
     onWorkflowClick,
     onEditViewClick,
     onOpenDocument,
+    onOpenCompany,
     onEditResolveStart,
     onEditResolved,
     onEditError,
@@ -1709,33 +1807,38 @@ export function AssistantMessage({
                 ? `${event.connector_name}: ${event.tool_name}`
                 : toolCallLabel(event.openai_tool_name);
             return (
-                <div
+                <ToolCallChip
                     key={globalIdx}
-                    className="flex items-start text-sm font-serif text-gray-500 relative"
-                >
-                    {showConnector && (
-                        <div className="absolute bottom-0 w-[1px] bg-gray-300 top-[13px] left-[2.5px] h-[calc(100%+11px)]" />
-                    )}
-                    <div
-                        className={
-                            event.isStreaming
-                                ? "mt-[7px] h-1.5 w-1.5 shrink-0 animate-spin rounded-full border border-gray-400 border-t-transparent"
-                                : isError
-                                  ? "mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-red-500"
-                                  : "mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-gray-400"
-                        }
-                    />
-                    <div className="ml-2 min-w-0">
-                        <span className="font-medium">
-                            {event.isStreaming ? "Using connector..." : label}
-                        </span>
-                        {isError && event.error && (
-                            <p className="mt-0.5 text-xs text-red-600">
-                                {event.error}
-                            </p>
-                        )}
-                    </div>
-                </div>
+                    label={event.isStreaming ? "Using connector..." : label}
+                    isStreaming={event.isStreaming}
+                    isError={isError}
+                    error={event.error}
+                    showConnector={showConnector}
+                />
+            );
+        }
+        if (event.type === "companies_house_tool_call") {
+            const isError = event.status === "error";
+            const label = companiesHouseToolLabel(event);
+            const canOpenCompanyPanel =
+                !event.isStreaming &&
+                !isError &&
+                event.tool_name === "companies_house_get_company" &&
+                !!event.company;
+            return (
+                <ToolCallChip
+                    key={globalIdx}
+                    label={label}
+                    isStreaming={event.isStreaming}
+                    isError={isError}
+                    error={event.error}
+                    showConnector={showConnector}
+                    onClick={
+                        canOpenCompanyPanel && onOpenCompany
+                            ? () => onOpenCompany(event)
+                            : undefined
+                    }
+                />
             );
         }
         if (event.type === "doc_read") {

@@ -105,6 +105,17 @@ export type AssistantEvent =
       error?: string;
       isStreaming?: boolean;
     }
+  | {
+      type: "companies_house_tool_call";
+      tool_name: string;
+      status: "ok" | "error";
+      error?: string;
+      company_number?: string;
+      company_name?: string;
+      /** Full structured payload (profile/officers/PSCs) — only on get_company. */
+      company?: unknown;
+      isStreaming?: boolean;
+    }
   | { type: "thinking"; isStreaming?: boolean }
   | {
       type: "doc_read";
