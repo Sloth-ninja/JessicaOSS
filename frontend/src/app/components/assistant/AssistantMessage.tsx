@@ -432,7 +432,7 @@ function eventErrorMessage(event: AssistantEvent): string | null {
 const THINKING_PHRASES = [
     "Thinking...",
     "Pondering...",
-    "Analyzing...",
+    "Analysing...",
     "Reviewing...",
     "Reasoning...",
 ];

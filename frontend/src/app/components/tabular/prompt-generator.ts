@@ -10,12 +10,12 @@ const PROMPT_PRESETS: Array<{
     {
         matches: /\bchange of control\b/i,
         prompt: () =>
-            'Identify any change of control provisions in the document. Summarize the trigger, the consequences, any consent requirements, and any related termination, acceleration, or notice obligations. If not addressed, state "Not addressed".',
+            'Identify any change of control provisions in the document. Summarise the trigger, the consequences, any consent requirements, and any related termination, acceleration, or notice obligations. If not addressed, state "Not addressed".',
     },
     {
         matches: /\bterminat(e|ion|ing)\b/i,
         prompt: () =>
-            'Extract the termination provisions in the document. Summarize who may terminate, the termination triggers, any notice requirements, cure periods, and the consequences of termination. If not addressed, state "Not addressed".',
+            'Extract the termination provisions in the document. Summarise who may terminate, the termination triggers, any notice requirements, cure periods, and the consequences of termination. If not addressed, state "Not addressed".',
     },
     {
         matches: /\bgoverning law\b|\bjurisdiction\b/i,
@@ -25,17 +25,17 @@ const PROMPT_PRESETS: Array<{
     {
         matches: /\bconfidential(ity)?\b|\bnon-?disclosure\b/i,
         prompt: () =>
-            'Extract the confidentiality provisions in the document. Summarize the scope of confidential information, permitted disclosures, use restrictions, duration, and any carve-outs or exceptions. If not addressed, state "Not addressed".',
+            'Extract the confidentiality provisions in the document. Summarise the scope of confidential information, permitted disclosures, use restrictions, duration, and any carve-outs or exceptions. If not addressed, state "Not addressed".',
     },
     {
         matches: /\bassign(ment|ability)?\b/i,
         prompt: () =>
-            'Identify any assignment provisions in the document. Summarize whether assignment is permitted, restricted, or requires consent, and note any exceptions or deemed assignments. If not addressed, state "Not addressed".',
+            'Identify any assignment provisions in the document. Summarise whether assignment is permitted, restricted, or requires consent, and note any exceptions or deemed assignments. If not addressed, state "Not addressed".',
     },
     {
         matches: /\bpayment\b|\bfees?\b/i,
         prompt: () =>
-            'Extract the payment and fee terms in the document. Summarize payment obligations, amounts, timing, currencies, fee types, and any consequences for late or missed payment. If not addressed, state "Not addressed".',
+            'Extract the payment and fee terms in the document. Summarise payment obligations, amounts, timing, currencies, fee types, and any consequences for late or missed payment. If not addressed, state "Not addressed".',
     },
 ];
 

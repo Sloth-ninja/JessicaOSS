@@ -103,7 +103,7 @@ export type ChatMessage = {
 // Constants
 // ---------------------------------------------------------------------------
 
-const SYSTEM_PROMPT_BEFORE_RESEARCH = `You are Mike, an AI legal assistant for lawyers and legal professionals. Help analyze documents, answer legal questions, and draft legal documents.
+const SYSTEM_PROMPT_BEFORE_RESEARCH = `You are Mike, an AI legal assistant for lawyers and legal professionals. Help analyse documents, answer legal questions, and draft legal documents.
 
 CORE RULES:
 - Be precise, professional, and evidence-aware.

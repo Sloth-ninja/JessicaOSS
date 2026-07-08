@@ -17,7 +17,7 @@ export const BUILTIN_WORKFLOWS: { id: string; title: string; prompt_md: string }
             "  3. Clause — a concise description of the condition precedent\n" +
             "  4. Status — leave blank (empty string) for the user to fill in\n\n" +
             "Use the table field in the section object (not content) for each category's rows.\n\n" +
-            "Before finalizing, double-check that every table is formatted correctly: each table must have exactly the four columns above in the same order, headers must match exactly (Index, Clause Number, Clause, Status), every row must have the same number of cells as the headers, the Index column must be sequential starting from 1 within each category, and no cells should contain stray markdown, newlines, or placeholder text (use an empty string for Status).",
+            "Before finalising, double-check that every table is formatted correctly: each table must have exactly the four columns above in the same order, headers must match exactly (Index, Clause Number, Clause, Status), every row must have the same number of cells as the headers, the Index column must be sequential starting from 1 within each category, and no cells should contain stray markdown, newlines, or placeholder text (use an empty string for Status).",
     },
     {
         id: "builtin-credit-summary",

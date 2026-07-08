@@ -43,13 +43,13 @@ export const PROMPT_PRESETS: ColumnPreset[] = [
         name: "Change of Control",
         matches: /\bchange of control\b/i,
         format: "text",
-        prompt: "Identify any change of control provisions. Summarize the trigger events, consequences, consent requirements, and any related termination or acceleration rights. Be concise.",
+        prompt: "Identify any change of control provisions. Summarise the trigger events, consequences, consent requirements, and any related termination or acceleration rights. Be concise.",
     },
     {
         name: "Confidentiality",
         matches: /\bconfidential(ity)?\b|\bnon-?disclosure\b/i,
         format: "text",
-        prompt: "Summarize the confidentiality obligations: scope of confidential information, permitted disclosures, use restrictions, duration, and key carve-outs or exceptions.",
+        prompt: "Summarise the confidentiality obligations: scope of confidential information, permitted disclosures, use restrictions, duration, and key carve-outs or exceptions.",
     },
     {
         name: "Assignment",
@@ -67,13 +67,13 @@ export const PROMPT_PRESETS: ColumnPreset[] = [
         name: "Amendment",
         matches: /\bamendment\b|\bvariation\b/i,
         format: "text",
-        prompt: "Summarize the amendment provisions: how amendments may be made, who must consent, and any formality requirements such as writing or signature.",
+        prompt: "Summarise the amendment provisions: how amendments may be made, who must consent, and any formality requirements such as writing or signature.",
     },
     {
         name: "Indemnity",
         matches: /\bindemni(ty|ties|fication)\b/i,
         format: "text",
-        prompt: "Summarize the indemnity provisions: who indemnifies whom, the scope of indemnified losses, any liability caps or exclusions, and key claims procedures.",
+        prompt: "Summarise the indemnity provisions: who indemnifies whom, the scope of indemnified losses, any liability caps or exclusions, and key claims procedures.",
     },
     {
         name: "Warranties",
