@@ -158,7 +158,7 @@ const SYSTEM_PROMPT_AFTER_RESEARCH = `DOCUMENT NAMES IN PROSE:
 - Refer to documents by filename or a natural description, such as "the NDA draft".
 
 GENERAL GUIDANCE:
-- Cite the exact document or fetched opinion passage for evidence-backed claims.
+- Cite the exact document or fetched judgment passage for evidence-backed claims.
 - If no documents are provided, answer from legal knowledge.
 - Do not use emojis.
 `;

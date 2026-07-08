@@ -49,7 +49,7 @@ const REVIEW_SCOPES: { id: ReviewScope; label: string }[] = [
 ];
 
 function formatDate(iso: string) {
-    return new Date(iso).toLocaleDateString(undefined, {
+    return new Date(iso).toLocaleDateString("en-GB", {
         day: "numeric",
         month: "short",
         year: "numeric",

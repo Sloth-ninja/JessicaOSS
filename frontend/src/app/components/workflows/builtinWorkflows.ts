@@ -103,7 +103,7 @@ export const BUILT_IN_WORKFLOWS: Workflow[] = [
             "6. **Facilities** — Each facility available (e.g. Revolving Credit Facility, Term Loan A, Term Loan B, Term Loan C), the facility type, tranche name, and any key structural features\n" +
             "7. **Amount** — Total committed amount across all facilities, the currency, and breakdown by tranche if applicable\n" +
             "8. **Purpose** — Stated purpose for which borrowings may be used and any restrictions on use of proceeds\n" +
-            "9. **Interest** — Applicable reference rate (e.g. SOFR, EURIBOR, base rate), the margin, any margin ratchet mechanism, and how interest periods are structured\n" +
+            "9. **Interest** — Applicable reference rate (e.g. SONIA, SOFR, EURIBOR, base rate), the margin, any margin ratchet mechanism, and how interest periods are structured\n" +
             "10. **Commitment Fee** — Commitment or utilisation fees, the applicable rate, how they are calculated, and the basis (e.g. undrawn commitment, average utilisation)\n" +
             "11. **Repayment Schedule** — Repayment profile for each facility, whether by scheduled instalments or bullet repayment, and the repayment dates and amounts\n" +
             "12. **Maturity** — Final maturity date for each facility\n" +
@@ -305,7 +305,7 @@ export const BUILT_IN_WORKFLOWS: Workflow[] = [
                 index: 8,
                 name: "Interest",
                 format: "text",
-                prompt: "What interest rate applies to borrowings under this agreement? Identify the applicable rate (e.g. SOFR, EURIBOR, base rate), the margin, any margin ratchet mechanism, and how interest periods are structured.",
+                prompt: "What interest rate applies to borrowings under this agreement? Identify the applicable rate (e.g. SONIA, SOFR, EURIBOR, base rate), the margin, any margin ratchet mechanism, and how interest periods are structured.",
             },
             {
                 index: 9,
@@ -916,7 +916,7 @@ export const BUILT_IN_WORKFLOWS: Workflow[] = [
                 index: 8,
                 name: "Carried Interest",
                 format: "text",
-                prompt: "What carried interest (carry) is payable to the GP? State the carry percentage, the structure (European/fund-level waterfall vs American/deal-by-deal), and identify each step of the distribution waterfall in sequence (e.g. return of capital, preferred return, GP catch-up, then profit split).",
+                prompt: "What carried interest (carry) is payable to the GP? State the carry percentage, the structure (fund-level waterfall, commonly called 'European', vs deal-by-deal, commonly called 'American'), and identify each step of the distribution waterfall in sequence (e.g. return of capital, preferred return, GP catch-up, then profit split).",
             },
             {
                 index: 9,
@@ -1192,7 +1192,7 @@ export const BUILT_IN_WORKFLOWS: Workflow[] = [
                 index: 4,
                 name: "Compensation",
                 format: "text",
-                prompt: "What is the employee's compensation under this agreement? State the base salary or wage, the currency, and the payment frequency (e.g. monthly, bi-weekly). Include any guaranteed bonus, commission, or other fixed remuneration elements.",
+                prompt: "What is the employee's compensation under this agreement? State the base salary or wage, the currency, and the payment frequency (e.g. monthly, weekly, four-weekly). Include any guaranteed bonus, commission, or other fixed remuneration elements.",
             },
             {
                 index: 5,
