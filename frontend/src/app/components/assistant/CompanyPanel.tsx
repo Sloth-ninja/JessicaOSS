@@ -115,12 +115,11 @@ function humaniseStatus(status?: string): string | null {
     return status.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+// Matches DocPanel's SectionLabel (frontend/src/app/components/shared/DocPanel.tsx)
+// so section headings read identically across doc-backed and company-backed
+// side-panel tabs.
 function SectionLabel({ children }: { children: React.ReactNode }) {
-    return (
-        <p className="text-xs font-medium text-gray-700 uppercase tracking-wide">
-            {children}
-        </p>
-    );
+    return <p className="text-xs font-medium text-gray-700">{children}</p>;
 }
 
 function Field({
@@ -170,9 +169,19 @@ export function CompanyPanel({ companyNumber, companyName, company }: Props) {
     );
     const retrievedAt = formatUkDate(data.retrieved_at);
     const registerUrl = `https://find-and-update.company-information.service.gov.uk/company/${companyNumber}`;
+    const hasProfileFields = !!(
+        profile &&
+        (humaniseStatus(profile.company_status) ||
+            humaniseCompanyType(profile.type) ||
+            incorporationDate ||
+            profile.sic_codes?.length ||
+            accountsDue ||
+            confirmationDue ||
+            registeredOffice)
+    );
 
     return (
-        <div className="flex h-full flex-col overflow-y-auto">
+        <div className="flex h-full flex-col">
             <div className="flex items-start gap-3 px-3 pt-4 pb-3">
                 <div className="min-w-0 flex-1">
                     <h2
@@ -197,11 +206,15 @@ export function CompanyPanel({ companyNumber, companyName, company }: Props) {
                 </a>
             </div>
 
-            <div className="flex flex-col gap-5 px-3 pb-6">
+            <div className="flex flex-1 min-h-0 flex-col gap-5 overflow-y-auto px-3 pb-6">
                 <section className="flex flex-col gap-3 rounded-xl border border-gray-100 bg-white/60 p-3">
                     <SectionLabel>Profile</SectionLabel>
                     {profileError ? (
                         <p className="text-sm text-red-600">{profileError}</p>
+                    ) : !hasProfileFields ? (
+                        <p className="text-sm text-gray-400">
+                            No profile data available.
+                        </p>
                     ) : (
                         <div className="grid grid-cols-2 gap-3">
                             <Field
