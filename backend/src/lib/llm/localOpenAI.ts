@@ -92,7 +92,9 @@ function toLlmMessages(
 
 function extractSseJson(buffer: string): { events: unknown[]; rest: string } {
   const events: unknown[] = [];
-  const chunks = buffer.split(/\n\n/);
+  // Tolerate CRLF-delimited frames — the OpenAI-compatible promise covers
+  // servers beyond Ollama/LM Studio/vLLM, and SSE permits \r\n line endings.
+  const chunks = buffer.split(/\r?\n\r?\n/);
   const rest = chunks.pop() ?? "";
 
   for (const chunk of chunks) {
