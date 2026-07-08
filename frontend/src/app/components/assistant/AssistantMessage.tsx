@@ -33,6 +33,18 @@ const RESPONSE_GLASS_SURFACE =
 const RESPONSE_GLASS_ANNOTATION =
     "inline-flex h-4 w-4 items-center justify-center rounded-full border border-gray-200/60 bg-gray-200/80 text-[12px] font-serif font-medium text-gray-800 shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(243,244,246,0.85),inset_0_-2px_4px_rgba(229,231,235,0.65)] backdrop-blur-xl transition-colors hover:bg-gray-200 hover:text-gray-950";
 
+/**
+ * Tooltip text for a citation pill/annotation button: "<location>: <quote>".
+ * Legislation citations can carry no quote at all (a pill opened straight
+ * from a lookup with no verbatim passage) — omit the trailing `: ""` rather
+ * than showing an empty-quote artifact.
+ */
+function citationTooltip(annotation: CitationAnnotation): string {
+    const location = formatCitationPage(annotation);
+    const quote = displayCitationQuote(annotation).trim();
+    return quote ? `${location}: "${quote}"` : location;
+}
+
 function toolCallLabel(name: string): string {
     if (name === "generate_docx") return "Creating document...";
     if (name === "edit_document") return "Editing document...";
@@ -1144,7 +1156,7 @@ function MarkdownContent({
                             const idx = parseInt(citMatch[1]);
                             const annotation = citationsList[idx];
                             if (annotation) {
-                                const tooltipText = `${formatCitationPage(annotation)}: "${displayCitationQuote(annotation)}"`;
+                                const tooltipText = citationTooltip(annotation);
                                 return (
                                     <button
                                         onClick={() =>
@@ -1377,7 +1389,9 @@ function CitationsBlock({
                                                 className={
                                                     RESPONSE_GLASS_ANNOTATION
                                                 }
-                                                title={`${formatCitationPage(annotation)}: "${displayCitationQuote(annotation)}"`}
+                                                title={citationTooltip(
+                                                    annotation,
+                                                )}
                                             >
                                                 {annotation.ref}
                                             </button>
@@ -1898,9 +1912,12 @@ export function AssistantMessage({
                     }
                     showConnector={showConnector}
                     onClick={
-                        !event.isStreaming && !isError && event.url
+                        !event.isStreaming &&
+                        !isError &&
+                        event.url &&
+                        onOpenLegislation
                             ? () =>
-                                  onOpenLegislation?.({
+                                  onOpenLegislation({
                                       url: event.url as string,
                                       title: event.title ?? event.url ?? "",
                                       provision: event.provision as
