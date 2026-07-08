@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Trimmed real response captured from
+  https://www.legislation.gov.uk/ukpga/2006/46/section/994/data.xml
+  (fetched 2026-07-08, ~1 req/s, JessicaOS/0.1 UA). Commentary/notes/alternatives
+  removed for fixture size; the PrimaryMetadata/UnappliedEffects block and the
+  Body/section-994 fragment are kept verbatim (attribute names/values real).
+-->
+<Legislation xmlns="http://www.legislation.gov.uk/namespaces/legislation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" DocumentURI="http://www.legislation.gov.uk/ukpga/2006/46" IdURI="http://www.legislation.gov.uk/id/ukpga/2006/46" NumberOfProvisions="2120" RestrictExtent="E+W+S+N.I." RestrictStartDate="2026-04-06">
+<ukm:Metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:ukm="http://www.legislation.gov.uk/namespaces/metadata">
+<dc:identifier>http://www.legislation.gov.uk/ukpga/2006/46/section/994</dc:identifier>
+<dc:title>Companies Act 2006</dc:title>
+<ukm:PrimaryMetadata>
+<ukm:DocumentClassification><ukm:DocumentCategory Value="primary"/><ukm:DocumentMainType Value="UnitedKingdomPublicGeneralAct"/><ukm:DocumentStatus Value="revised"/></ukm:DocumentClassification>
+<ukm:Year Value="2006"/><ukm:Number Value="46"/>
+<ukm:UnappliedEffects>
+<ukm:UnappliedEffect AffectedNumber="46" AffectedClass="UnitedKingdomPublicGeneralAct" URI="http://www.legislation.gov.uk/id/effect/key-redacted-effect-id" Comments="IP completion day" RequiresApplied="false" AffectedURI="http://www.legislation.gov.uk/id/ukpga/2006/46" AffectedProvisions="s. 479A(2)(c)(zi)" Row="2213" Type="inserted" AffectingURI="http://www.legislation.gov.uk/id/uksi/2019/177" AffectedExtent="E+W+S+N.I." EffectId="key-redacted-effect-id" AffectingNumber="177" AffectedYear="2006" AffectingYear="2019" AffectingProvisions="reg. 4(b)(i)" Notes="This amendment not applied to legislation.gov.uk. Reg. 4 substituted by regs. 4, 4A immediately before IP completion day by S.I. 2019/1392, regs. 1(2), 4"/>
+<ukm:UnappliedEffect Type="substituted for Sch. 11A para. 17A-17D" AffectedClass="UnitedKingdomPublicGeneralAct" AffectingYear="2026" AffectedYear="2006" AffectingProvisions="Sch. 36 para. 35" AffectedProvisions="Sch. 11A para. 17E-17G" AffectedURI="http://www.legislation.gov.uk/id/ukpga/2006/46" Row="1334" URI="http://www.legislation.gov.uk/id/effect/key-redacted-effect-id" EffectId="key-redacted-effect-id" AffectingURI="http://www.legislation.gov.uk/id/ukpga/2026/23" AffectingNumber="23" AffectedNumber="46" RequiresApplied="true" Notes="This amendment is prospective: Sch. 11A paras. 17E-17G substituted by 2026 c. 23, Sch. 36 para. 35"/>
+</ukm:UnappliedEffects>
+</ukm:PrimaryMetadata>
+</ukm:Metadata>
+<Primary><Body DocumentURI="http://www.legislation.gov.uk/ukpga/2006/46/body" IdURI="http://www.legislation.gov.uk/id/ukpga/2006/46/body" RestrictExtent="E+W+S+N.I." RestrictStartDate="2026-04-06">
+<Part id="part-30" RestrictStartDate="2020-12-31"><Number>Part 30</Number><Title>Protection of members against unfair prejudice</Title>
+<Pblock id="part-30-crossheading-main-provisions" RestrictStartDate="2015-05-26"><Title><Emphasis>Main provisions</Emphasis></Title>
+<P1group RestrictExtent="E+W+S+N.I." RestrictStartDate="2015-05-26"><Title>Petition by company member</Title>
+<P1 id="section-994"><Pnumber PuncAfter="">994</Pnumber>
+<P1para>
+<P2 id="section-994-1"><Pnumber>1</Pnumber><P2para><Text>A member of a company may apply to the court by petition for an order under this Part on the ground&#8212;</Text>
+<P3 id="section-994-1-a"><Pnumber>a</Pnumber><P3para><Text>that the company's affairs are being or have been conducted in a manner that is unfairly prejudicial to the interests of members generally or of some part of its members (including at least himself), or</Text></P3para></P3>
+<P3 id="section-994-1-b"><Pnumber>b</Pnumber><P3para><Text>that an actual or proposed act or omission of the company (including an act or omission on its behalf) is or would be so prejudicial.</Text></P3para></P3>
+</P2para></P2>
+<P2 id="section-994-2"><Pnumber>2</Pnumber><P2para><Text>The provisions of this Part apply to a person who is not a member of a company but to whom shares in the company have been transferred or transmitted by operation of law as they apply to a member of a company.</Text></P2para></P2>
+</P1para></P1>
+</P1group>
+</Pblock></Part>
+</Body></Primary>
+</Legislation>

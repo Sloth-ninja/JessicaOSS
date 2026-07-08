@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adapted from the real response captured from
+  https://www.legislation.gov.uk/ukpga/1996/18/section/98/data.xml
+  (fetched 2026-07-08). The real document DOES carry ukm:UnappliedEffects
+  (Act-wide, unrelated to s.98 itself); this fixture deliberately OMITS that
+  block to exercise the "no outstanding effects" code path with a real
+  CLML body fragment. See ca2006-section994.xml / tupe-regulation4.xml for
+  fixtures that DO carry ukm:UnappliedEffects.
+-->
+<Legislation xmlns="http://www.legislation.gov.uk/namespaces/legislation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" DocumentURI="http://www.legislation.gov.uk/ukpga/1996/18" IdURI="http://www.legislation.gov.uk/id/ukpga/1996/18" NumberOfProvisions="528" RestrictExtent="E+W+S+N.I." RestrictStartDate="2026-04-06">
+<ukm:Metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:ukm="http://www.legislation.gov.uk/namespaces/metadata">
+<dc:identifier>http://www.legislation.gov.uk/ukpga/1996/18/section/98</dc:identifier>
+<dc:title>Employment Rights Act 1996</dc:title>
+<ukm:PrimaryMetadata>
+<ukm:DocumentClassification><ukm:DocumentCategory Value="primary"/><ukm:DocumentMainType Value="UnitedKingdomPublicGeneralAct"/><ukm:DocumentStatus Value="revised"/></ukm:DocumentClassification>
+<ukm:Year Value="1996"/><ukm:Number Value="18"/>
+</ukm:PrimaryMetadata>
+</ukm:Metadata>
+<Primary><Body DocumentURI="http://www.legislation.gov.uk/ukpga/1996/18/body" IdURI="http://www.legislation.gov.uk/id/ukpga/1996/18/body" RestrictExtent="E+W+S+N.I." RestrictStartDate="2026-04-06">
+<Part id="part-X" RestrictExtent="E+W+S" RestrictStartDate="2026-04-06"><Number>Part X</Number><Title>Unfair dismissal</Title>
+<Chapter id="part-X-chapter-I" RestrictExtent="E+W+S" RestrictStartDate="2026-04-06"><Number>Chapter I</Number><Title>Right not to be unfairly dismissed</Title>
+<Pblock id="part-X-chapter-I-crossheading-fairness" RestrictExtent="E+W+S" RestrictStartDate="2014-01-31"><Title>Fairness</Title>
+<P1group RestrictExtent="E+W+S" RestrictStartDate="2014-01-31"><Title>General.</Title>
+<P1 id="section-98"><Pnumber>98</Pnumber>
+<P1para>
+<P2 id="section-98-1" RestrictStartDate="2014-01-31"><Pnumber>1</Pnumber><P2para><Text>In determining for the purposes of this Part whether the dismissal of an employee is fair or unfair, it is for the employer to show&#8212;</Text>
+<P3 id="section-98-1-a"><Pnumber>a</Pnumber><P3para><Text>the reason (or, if more than one, the principal reason) for the dismissal, and</Text></P3para></P3>
+<P3 id="section-98-1-b"><Pnumber>b</Pnumber><P3para><Text>that it is either a reason falling within subsection (2) or some other substantial reason of a kind such as to justify the dismissal of an employee holding the position which the employee held.</Text></P3para></P3>
+</P2para></P2>
+<P2 id="section-98-2"><Pnumber>2</Pnumber><P2para><Text>A reason falls within this subsection if it&#8212;</Text>
+<P3 id="section-98-2-a"><Pnumber>a</Pnumber><P3para><Text>relates to the capability or qualifications of the employee for performing work of the kind which he was employed by the employer to do,</Text></P3para></P3>
+<P3 id="section-98-2-b"><Pnumber>b</Pnumber><P3para><Text>relates to the conduct of the employee,</Text></P3para></P3>
+</P2para></P2>
+</P1para></P1>
+</P1group>
+</Pblock>
+</Chapter>
+</Part>
+</Body></Primary>
+</Legislation>
