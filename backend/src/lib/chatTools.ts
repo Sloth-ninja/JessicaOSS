@@ -36,6 +36,12 @@ import {
   executeCompaniesHouseToolCall,
   type CompaniesHouseToolEvent,
 } from "./legalSourcesTools/companiesHouseTools";
+import {
+  LEGISLATION_TOOLS,
+  LEGISLATION_SYSTEM_PROMPT,
+  executeLegislationToolCall,
+  type LegislationToolEvent,
+} from "./legalSourcesTools/legislationTools";
 
 const STANDARD_FONT_DATA_URL = (() => {
   try {
@@ -127,6 +133,7 @@ Citation rules:
 - For a continuous quote crossing two pages, set "page" to "N-M" and include [[PAGE_BREAK]] at the page break. Otherwise, use separate quote objects.
 - For legacy compatibility, you may also include top-level "page" and "quote" matching the first quote.
 - Omit the <CITATIONS> block when there are no citations.
+- If (and only if) you have access to legislation research tools and have called legislation_lookup or legislation_verify_citations and it confirmed a canonical URL, you may instead cite that provision with a legislation-form entry: {"ref": 3, "legislation_uri": "https://www.legislation.gov.uk/ukpga/2006/46/section/994", "title": "Companies Act 2006, s.994", "quote": "exact verbatim text"}. Never fabricate a "legislation_uri" — only use one a legislation tool call actually returned.
 
 DOCX GENERATION:
 - If the user asks you to create or draft a document, call generate_docx and provide the downloadable Word document rather than only displaying text inline.
@@ -181,7 +188,9 @@ export function buildSystemPrompt(
   if (includeResearchTools && sources.companiesHouse) {
     researchBlocks.push(COMPANIES_HOUSE_SYSTEM_PROMPT);
   }
-  // Seam for WS2 legislation.gov.uk system prompt block.
+  if (includeResearchTools && sources.legislation) {
+    researchBlocks.push(LEGISLATION_SYSTEM_PROMPT);
+  }
   if (!researchBlocks.length) {
     return `${SYSTEM_PROMPT_BEFORE_RESEARCH}\n\n${SYSTEM_PROMPT_AFTER_RESEARCH}`;
   }
@@ -500,7 +509,17 @@ type ParsedDocumentCitation = {
   }[];
 };
 
-type ParsedCitation = ParsedDocumentCitation;
+export type ParsedLegislationCitation = {
+  kind: "legislation";
+  ref: number;
+  /** Canonical https://www.legislation.gov.uk/... URL, as returned by a legislation tool call. */
+  legislation_uri: string;
+  /** e.g. "Companies Act 2006, s.994". */
+  title: string;
+  quote?: string;
+};
+
+type ParsedCitation = ParsedDocumentCitation | ParsedLegislationCitation;
 
 function normalizeCitation(raw: unknown): ParsedCitation | null {
   if (!raw || typeof raw !== "object") return null;
@@ -517,6 +536,20 @@ function normalizeCitation(raw: unknown): ParsedCitation | null {
         : null;
   if (typeof ref !== "number") return null;
   const quote = typeof c.quote === "string" ? c.quote : c.text;
+
+  if (typeof c.legislation_uri === "string" && c.legislation_uri) {
+    const title =
+      typeof c.title === "string" && c.title.trim()
+        ? c.title
+        : c.legislation_uri;
+    return {
+      kind: "legislation",
+      ref,
+      legislation_uri: c.legislation_uri,
+      title,
+      quote: typeof quote === "string" && quote ? quote : undefined,
+    };
+  }
 
   if (typeof c.doc_id !== "string") return null;
   const quotes = normalizeDocumentCitationQuotes(c);
@@ -1946,6 +1979,7 @@ export async function runToolCalls(
   docsEdited: DocEditedResult[];
   mcpEvents: McpToolEvent[];
   companiesHouseEvents: CompaniesHouseToolEvent[];
+  legislationEvents: LegislationToolEvent[];
 }> {
   const toolResults: unknown[] = [];
   const docsRead: { filename: string; document_id?: string }[] = [];
@@ -1960,6 +1994,7 @@ export async function runToolCalls(
   const docsEdited: DocEditedResult[] = [];
   const mcpEvents: McpToolEvent[] = [];
   const companiesHouseEvents: CompaniesHouseToolEvent[] = [];
+  const legislationEvents: LegislationToolEvent[] = [];
   for (const tc of toolCalls) {
     let args: Record<string, unknown> = {};
     try {
@@ -2030,6 +2065,37 @@ export async function runToolCalls(
           // CompanyPanel can render immediately, without waiting for a
           // page reload to re-hydrate from persisted chat history.
           company: event.company,
+        })}\n\n`,
+      );
+      continue;
+    }
+
+    if (tc.function.name.startsWith("legislation_")) {
+      write(
+        `data: ${JSON.stringify({
+          type: "legislation_tool_start",
+          name: tc.function.name,
+        })}\n\n`,
+      );
+      const { content, event } = await executeLegislationToolCall(
+        tc.function.name,
+        args,
+      );
+      toolResults.push({
+        role: "tool",
+        tool_call_id: tc.id,
+        content,
+      });
+      legislationEvents.push(event);
+      write(
+        `data: ${JSON.stringify({
+          type: "legislation_tool_result",
+          name: tc.function.name,
+          status: event.status,
+          error: event.error,
+          title: event.title,
+          url: event.url,
+          outstanding_effects: event.outstanding_effects,
         })}\n\n`,
       );
       continue;
@@ -2736,6 +2802,7 @@ export async function runToolCalls(
     docsEdited,
     mcpEvents,
     companiesHouseEvents,
+    legislationEvents,
   };
 }
 
@@ -2861,6 +2928,16 @@ function parsePartialCitationObjects(text: string): ParsedCitation[] {
 }
 
 function createCitationAnnotation(citation: ParsedCitation, docIndex: DocIndex) {
+  if (citation.kind === "legislation") {
+    return {
+      type: "citation_data",
+      kind: "legislation",
+      ref: citation.ref,
+      legislation_uri: citation.legislation_uri,
+      title: citation.title,
+      quote: citation.quote,
+    };
+  }
   const docInfo = resolveDoc(citation.doc_id, docIndex);
   return {
     type: "citation_data",
@@ -2940,6 +3017,7 @@ type AssistantEvent =
     }
   | McpToolEvent
   | (CompaniesHouseToolEvent & { isStreaming?: boolean })
+  | LegislationToolEvent
   | { type: "content"; text: string }
   | { type: "error"; message: string };
 
@@ -3027,7 +3105,7 @@ export async function runLLMStream(params: {
   const researchTools: OpenAIToolSchema[] = includeResearchTools
     ? [
         ...(researchSources.companiesHouse ? COMPANIES_HOUSE_TOOLS : []),
-        // Seam for WS2 legislation.gov.uk tools.
+        ...(researchSources.legislation ? LEGISLATION_TOOLS : []),
       ]
     : [];
   const mcpTools = await buildUserMcpTools(userId, db);
@@ -3228,6 +3306,7 @@ export async function runLLMStream(params: {
           docsEdited,
           mcpEvents,
           companiesHouseEvents,
+          legislationEvents,
         } = await runToolCalls(
           toolCalls,
           docStore,
@@ -3297,6 +3376,9 @@ export async function runLLMStream(params: {
           events.push(event);
         }
         for (const event of companiesHouseEvents) {
+          events.push(event);
+        }
+        for (const event of legislationEvents) {
           events.push(event);
         }
 
