@@ -16,7 +16,7 @@ import { VersionChip } from "./VersionChip";
 
 function formatDate(iso: string | null) {
     if (!iso) return null;
-    return new Date(iso).toLocaleDateString(undefined, {
+    return new Date(iso).toLocaleDateString("en-GB", {
         day: "numeric",
         month: "short",
         year: "numeric",

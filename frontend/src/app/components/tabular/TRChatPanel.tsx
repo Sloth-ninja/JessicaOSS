@@ -67,7 +67,7 @@ interface Props {
 const THINKING_PHRASES = [
     "Thinking...",
     "Pondering...",
-    "Analyzing...",
+    "Analysing...",
     "Reasoning...",
 ];
 const REASONING_COLLAPSED_MAX_LINES = 6;

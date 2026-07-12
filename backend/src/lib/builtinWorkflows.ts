@@ -17,7 +17,7 @@ export const BUILTIN_WORKFLOWS: { id: string; title: string; prompt_md: string }
             "  3. Clause — a concise description of the condition precedent\n" +
             "  4. Status — leave blank (empty string) for the user to fill in\n\n" +
             "Use the table field in the section object (not content) for each category's rows.\n\n" +
-            "Before finalizing, double-check that every table is formatted correctly: each table must have exactly the four columns above in the same order, headers must match exactly (Index, Clause Number, Clause, Status), every row must have the same number of cells as the headers, the Index column must be sequential starting from 1 within each category, and no cells should contain stray markdown, newlines, or placeholder text (use an empty string for Status).",
+            "Before finalising, double-check that every table is formatted correctly: each table must have exactly the four columns above in the same order, headers must match exactly (Index, Clause Number, Clause, Status), every row must have the same number of cells as the headers, the Index column must be sequential starting from 1 within each category, and no cells should contain stray markdown, newlines, or placeholder text (use an empty string for Status).",
     },
     {
         id: "builtin-credit-summary",
@@ -34,7 +34,7 @@ export const BUILTIN_WORKFLOWS: { id: string; title: string; prompt_md: string }
             "6. **Facilities** — Each facility available (e.g. Revolving Credit Facility, Term Loan A, Term Loan B, Term Loan C), the facility type, tranche name, and any key structural features\n" +
             "7. **Amount** — Total committed amount across all facilities, the currency, and breakdown by tranche if applicable\n" +
             "8. **Purpose** — Stated purpose for which borrowings may be used and any restrictions on use of proceeds\n" +
-            "9. **Interest** — Applicable reference rate (e.g. SOFR, EURIBOR, base rate), the margin, any margin ratchet mechanism, and how interest periods are structured\n" +
+            "9. **Interest** — Applicable reference rate (e.g. SONIA, SOFR, EURIBOR, base rate), the margin, any margin ratchet mechanism, and how interest periods are structured\n" +
             "10. **Commitment Fee** — Commitment or utilisation fees, the applicable rate, how they are calculated, and the basis (e.g. undrawn commitment, average utilisation)\n" +
             "11. **Repayment Schedule** — Repayment profile for each facility, whether by scheduled instalments or bullet repayment, and the repayment dates and amounts\n" +
             "12. **Maturity** — Final maturity date for each facility\n" +

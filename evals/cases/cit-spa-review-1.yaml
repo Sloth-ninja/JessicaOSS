@@ -1,0 +1,11 @@
+id: cit-spa-review-1
+type: citation
+description: >
+  English-law SPA Review — Parties & Target column: excerpt confirming the target's
+  subsidiary status by reference to the Companies Act 2006 definition, as the
+  column prompt instructs the model to do.
+input:
+  text: >
+    The Warrantors warrant that the Target is a wholly-owned subsidiary of the Seller
+    within the meaning of s.1159 Companies Act 2006, with no other person exercising
+    the rights described in that section over its shares.

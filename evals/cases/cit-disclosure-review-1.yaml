@@ -1,0 +1,11 @@
+id: cit-disclosure-review-1
+type: citation
+description: >
+  Disclosure Review (renamed from E-Discovery, MIGRATION_SPEC §6.1): excerpt framing
+  standard disclosure under CPR Part 31, citing the Civil Procedure Rules 1998
+  (SI 1998/3132) by number since the extractor resolves SIs reliably by number, not
+  by title.
+input:
+  text: >
+    Standard disclosure will proceed by list under CPR Part 31, made under the Civil
+    Procedure Rules 1998 (SI 1998/3132).

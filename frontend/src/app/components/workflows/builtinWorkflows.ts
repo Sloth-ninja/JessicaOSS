@@ -59,7 +59,7 @@ export const BUILT_IN_WORKFLOWS: Workflow[] = [
             {
                 index: 3,
                 name: "Change of Control Clause",
-                prompt: "Identify and summarize the change of control clause(s) in this document. Quote the exact triggering language and specify what constitutes a 'change of control'.",
+                prompt: "Identify and summarise the change of control clause(s) in this document. Quote the exact triggering language and specify what constitutes a 'change of control'.",
             },
             {
                 index: 4,
@@ -74,7 +74,7 @@ export const BUILT_IN_WORKFLOWS: Workflow[] = [
             {
                 index: 6,
                 name: "Put/Call Options",
-                prompt: "Are there any put or call options triggered by a change of control? Summarize the terms, pricing, and exercise period.",
+                prompt: "Are there any put or call options triggered by a change of control? Summarise the terms, pricing, and exercise period.",
             },
             {
                 index: 7,
@@ -103,7 +103,7 @@ export const BUILT_IN_WORKFLOWS: Workflow[] = [
             "6. **Facilities** — Each facility available (e.g. Revolving Credit Facility, Term Loan A, Term Loan B, Term Loan C), the facility type, tranche name, and any key structural features\n" +
             "7. **Amount** — Total committed amount across all facilities, the currency, and breakdown by tranche if applicable\n" +
             "8. **Purpose** — Stated purpose for which borrowings may be used and any restrictions on use of proceeds\n" +
-            "9. **Interest** — Applicable reference rate (e.g. SOFR, EURIBOR, base rate), the margin, any margin ratchet mechanism, and how interest periods are structured\n" +
+            "9. **Interest** — Applicable reference rate (e.g. SONIA, SOFR, EURIBOR, base rate), the margin, any margin ratchet mechanism, and how interest periods are structured\n" +
             "10. **Commitment Fee** — Commitment or utilisation fees, the applicable rate, how they are calculated, and the basis (e.g. undrawn commitment, average utilisation)\n" +
             "11. **Repayment Schedule** — Repayment profile for each facility, whether by scheduled instalments or bullet repayment, and the repayment dates and amounts\n" +
             "12. **Maturity** — Final maturity date for each facility\n" +
@@ -305,7 +305,7 @@ export const BUILT_IN_WORKFLOWS: Workflow[] = [
                 index: 8,
                 name: "Interest",
                 format: "text",
-                prompt: "What interest rate applies to borrowings under this agreement? Identify the applicable rate (e.g. SOFR, EURIBOR, base rate), the margin, any margin ratchet mechanism, and how interest periods are structured.",
+                prompt: "What interest rate applies to borrowings under this agreement? Identify the applicable rate (e.g. SONIA, SOFR, EURIBOR, base rate), the margin, any margin ratchet mechanism, and how interest periods are structured.",
             },
             {
                 index: 9,
@@ -382,16 +382,26 @@ export const BUILT_IN_WORKFLOWS: Workflow[] = [
         ],
     },
 
-    // ─── E-Discovery ─────────────────────────────────────────────────────────────
+    // ─── Disclosure Review ───────────────────────────────────────────────────────
+    // NOTE: id intentionally kept as "builtin-ediscovery" (not renamed to
+    // "builtin-disclosure-review") — backend/schema.sql's hidden_workflows table
+    // stores workflow_id as free text keyed on this exact string, so any user who
+    // previously hid this builtin workflow would have it silently reappear if the
+    // id changed. Only the title/content changed; see docs/BUILD_LOG.md for detail.
     {
         id: "builtin-ediscovery",
         user_id: null,
         is_system: true,
         created_at: "",
-        title: "E-Discovery Review",
+        title: "Disclosure Review",
         type: "tabular",
         practice: "Litigation",
-        prompt_md: null,
+        prompt_md:
+            "## Disclosure Review\n\n" +
+            "This workflow supports standard disclosure in English civil litigation under CPR Part 31 " +
+            "(and, in the Business and Property Courts, the Disclosure Review Document regime under PD 57AD). " +
+            "For each document, record factual metadata and flag whether the document is or may be privileged, " +
+            "so a solicitor can review and confirm before the document is added to a disclosure list.",
         columns_config: [
             {
                 index: 0,
@@ -431,9 +441,21 @@ export const BUILT_IN_WORKFLOWS: Workflow[] = [
             },
             {
                 index: 6,
-                name: "Privileged?",
+                name: "Legal Advice Privilege",
                 format: "yes_no",
-                prompt: "Does this document appear to be legally privileged? Answer Yes if it appears to be a communication between a lawyer and client made for the dominant purpose of obtaining or giving legal advice, or created for the dominant purpose of litigation. Answer No otherwise. If uncertain, note the basis for uncertainty.",
+                prompt: "Does this document appear to attract legal advice privilege? Answer Yes if it is (or records) a confidential communication between a solicitor (or other legal adviser) and client made for the dominant purpose of giving or receiving legal advice. Answer No otherwise. State a short basis for your answer, and note explicitly if you are uncertain and why.",
+            },
+            {
+                index: 7,
+                name: "Litigation Privilege",
+                format: "yes_no",
+                prompt: "Does this document appear to attract litigation privilege? Answer Yes if it is a confidential communication or document created for the dominant purpose of litigation that was, at the time, pending, reasonably contemplated, or existing. Answer No otherwise. State a short basis for your answer, and note explicitly if you are uncertain and why.",
+            },
+            {
+                index: 8,
+                name: "Without Prejudice",
+                format: "yes_no",
+                prompt: "Does this document appear to form part of a genuine attempt to negotiate a settlement (without prejudice communication)? Answer Yes only where the document is a genuine settlement negotiation, whether or not headed 'without prejudice'. Answer No otherwise. State a short basis for your answer, and note explicitly if you are uncertain and why.",
             },
         ],
     },
@@ -894,7 +916,7 @@ export const BUILT_IN_WORKFLOWS: Workflow[] = [
                 index: 8,
                 name: "Carried Interest",
                 format: "text",
-                prompt: "What carried interest (carry) is payable to the GP? State the carry percentage, the structure (European/fund-level waterfall vs American/deal-by-deal), and identify each step of the distribution waterfall in sequence (e.g. return of capital, preferred return, GP catch-up, then profit split).",
+                prompt: "What carried interest (carry) is payable to the GP? State the carry percentage, the structure (fund-level waterfall, commonly called 'European', vs deal-by-deal, commonly called 'American'), and identify each step of the distribution waterfall in sequence (e.g. return of capital, preferred return, GP catch-up, then profit split).",
             },
             {
                 index: 9,
@@ -1170,7 +1192,7 @@ export const BUILT_IN_WORKFLOWS: Workflow[] = [
                 index: 4,
                 name: "Compensation",
                 format: "text",
-                prompt: "What is the employee's compensation under this agreement? State the base salary or wage, the currency, and the payment frequency (e.g. monthly, bi-weekly). Include any guaranteed bonus, commission, or other fixed remuneration elements.",
+                prompt: "What is the employee's compensation under this agreement? State the base salary or wage, the currency, and the payment frequency (e.g. monthly, weekly, four-weekly). Include any guaranteed bonus, commission, or other fixed remuneration elements.",
             },
             {
                 index: 5,
@@ -1240,6 +1262,301 @@ export const BUILT_IN_WORKFLOWS: Workflow[] = [
                 prompt: "What is the employee's annual leave entitlement? State the number of days (or weeks) per year, whether this is inclusive of or in addition to public holidays, and any provisions for accrual, carry-over, or payment of untaken leave on termination.",
             },
         ],
+    },
+
+    // ─── English-law SPA Review ──────────────────────────────────────────────────
+    {
+        id: "builtin-spa-review-uk",
+        user_id: null,
+        is_system: true,
+        created_at: "",
+        title: "English-law SPA Review",
+        type: "tabular",
+        practice: "Corporate",
+        prompt_md:
+            "## English-law Share Purchase Agreement Review\n\n" +
+            "Review the uploaded share purchase agreement (SPA) governed by English law and extract the key " +
+            "commercial and legal terms below. Quote clause references, cross-refer to the disclosure letter " +
+            "where relevant, and flag any non-standard or onerous positions.",
+        columns_config: [
+            {
+                index: 0,
+                name: "Parties & Target",
+                format: "bulleted_list",
+                prompt: "Identify all parties to this agreement (seller(s), buyer, target company, and any guarantor). For the target, state its full legal name, company number, and registered office. State whether the target is described as a subsidiary of the seller within the meaning of s.1159 Companies Act 2006, and identify any other group companies whose shares or business are included in the sale.",
+            },
+            {
+                index: 1,
+                name: "Consideration & Mechanism",
+                format: "text",
+                prompt: "What is the consideration and how is it calculated? State the headline price, the currency, and whether the price is determined by completion accounts (post-completion adjustment) or a locked box mechanism (with a locked box date and any leakage/permitted leakage provisions). Note any deferred consideration, earn-out, retention, or escrow arrangements.",
+            },
+            {
+                index: 2,
+                name: "Conditions Precedent",
+                format: "bulleted_list",
+                prompt: "List the conditions precedent to completion (e.g. regulatory or merger control clearances, third-party consents, reorganisation steps). State the long-stop date by which conditions must be satisfied and the consequences if they are not.",
+            },
+            {
+                index: 3,
+                name: "Warranties",
+                format: "text",
+                prompt: "Describe the scope of the seller's warranties (business, title, tax, and any others). State whether a separate tax covenant (tax deed) is included in addition to tax warranties. Note the warranty period(s), any materiality or knowledge qualifiers, and whether warranties are given on a joint, several, or joint and several basis.",
+            },
+            {
+                index: 4,
+                name: "Limitations on Liability",
+                format: "text",
+                prompt: "Summarise the limitations on the seller's liability for warranty and tax covenant claims: the aggregate cap (and whether expressed as a percentage of consideration), the de minimis threshold per claim, the basket/threshold before claims may be brought (excess vs first-pound basis), and the time limits for bringing claims (general warranties vs tax and title warranties).",
+            },
+            {
+                index: 5,
+                name: "Restrictive Covenants",
+                format: "text",
+                prompt: "Identify any restrictive covenants given by the seller (e.g. non-compete, non-solicitation of customers, suppliers, or employees). State the scope of restricted activities, the geographic area, and the duration. Note any reasonableness or severability provisions.",
+            },
+            {
+                index: 6,
+                name: "Indemnities",
+                format: "text",
+                prompt: "Identify any specific indemnities given (as distinct from warranties or the tax covenant), such as for known litigation, specific liabilities, or pre-completion conduct. State the scope of each indemnity and whether it is subject to the general limitations on liability or carved out from the cap and time limits.",
+            },
+            {
+                index: 7,
+                name: "MAC / Termination",
+                format: "text",
+                prompt: "Is there a material adverse change (MAC) clause or other right to terminate between signing and completion? State the trigger, whether it is a walk-away right or a condition to completion, and any carve-outs (e.g. general market or sector-wide events).",
+            },
+            {
+                index: 8,
+                name: "Governing Law & Jurisdiction",
+                format: "text",
+                prompt: "What is the governing law of this agreement and which courts have jurisdiction over disputes? Note whether jurisdiction is exclusive and whether any arbitration or expert determination provisions apply to specific disputes (e.g. completion accounts disputes).",
+            },
+            {
+                index: 9,
+                name: "Disclosure Letter References",
+                format: "text",
+                prompt: "Does the agreement refer to a disclosure letter or disclosure schedules qualifying the warranties? State the mechanism for disclosure (e.g. general disclosure of matters in the public domain vs fair disclosure of specific matters against specific warranties) and list any specific disclosure letter clause or schedule references quoted in the agreement.",
+            },
+        ],
+    },
+
+    // ─── Commercial Lease Review — LTA 1954 ──────────────────────────────────────
+    {
+        id: "builtin-commercial-lease-lta1954",
+        user_id: null,
+        is_system: true,
+        created_at: "",
+        title: "Commercial Lease Review — LTA 1954",
+        type: "tabular",
+        practice: "Real Estate",
+        prompt_md:
+            "## Commercial Lease Review — Landlord and Tenant Act 1954\n\n" +
+            "Review the uploaded commercial lease with particular focus on security of tenure under Part II of " +
+            "the Landlord and Tenant Act 1954. For every column, quote the clause reference relied on. Flag any " +
+            "point on which you are uncertain rather than guessing.",
+        columns_config: [
+            {
+                index: 0,
+                name: "Parties & Premises",
+                format: "text",
+                prompt: "Identify the landlord and tenant (full legal names) and describe the demised premises, including the address, floor(s)/unit, and any title number referenced.",
+            },
+            {
+                index: 1,
+                name: "Term",
+                format: "text",
+                prompt: "What is the contractual term of the lease? State the term commencement and expiry dates.",
+            },
+            {
+                index: 2,
+                name: "Rent & Review Mechanism",
+                format: "text",
+                prompt: "State the initial rent, the payment frequency, and the rent review mechanism (e.g. open market review, upwards-only, indexation). State the review dates.",
+            },
+            {
+                index: 3,
+                name: "Break Clauses",
+                format: "text",
+                prompt: "Are there any break clauses? State the break date(s), which party may exercise the break, the notice period required, and any conditions to a valid break (e.g. vacant possession, payment of rent up to the break date, no material breach).",
+            },
+            {
+                index: 4,
+                name: "Security of Tenure (1954 Act)",
+                format: "yes_no",
+                prompt: "Is this lease inside or outside the security of tenure provisions of Part II of the Landlord and Tenant Act 1954? Answer Yes if the tenant has security of tenure (i.e. the lease is NOT contracted out) and No if it has been validly excluded. To determine this, look for: (a) recitals referring to contracting out under s.38A Landlord and Tenant Act 1954; (b) a landlord's warning notice and a tenant (or director/partner) declaration or statutory declaration confirming receipt of the warning notice before completion; and (c) confirmation of whether the declaration was a simple or statutory declaration (relevant to the notice period required before completion). If any of these elements is missing or ambiguous, say so explicitly rather than assuming the exclusion is valid — an invalid contracting-out procedure means the tenant retains rights to apply for a new tenancy under Landlord and Tenant Act 1954, s 24.",
+            },
+            {
+                index: 5,
+                name: "Alienation",
+                format: "text",
+                prompt: "What are the tenant's rights to assign, underlet, charge, or share occupation of the premises? State whether landlord consent is required (and whether it must not be unreasonably withheld), any authorised guarantee agreement (AGA) requirement on assignment, and any restrictions on underletting at less than the passing rent.",
+            },
+            {
+                index: 6,
+                name: "Repair (FRI?)",
+                format: "yes_no",
+                prompt: "Is this a full repairing and insuring (FRI) lease? Answer Yes if the tenant bears the full repair and insurance cost (whether directly or via service charge), No if the landlord retains repair obligations for structure/exterior. State the extent of the tenant's repair covenant and note any schedule of condition limiting it.",
+            },
+            {
+                index: 7,
+                name: "Service Charge",
+                format: "text",
+                prompt: "Is there a service charge? Describe what is included, the tenant's proportion, any cap, and the reconciliation mechanism.",
+            },
+            {
+                index: 8,
+                name: "Forfeiture",
+                format: "text",
+                prompt: "What are the landlord's forfeiture (re-entry) rights on tenant default? State the trigger events and any notice or waiver provisions.",
+            },
+            {
+                index: 9,
+                name: "1954 Act Red Flags",
+                format: "bulleted_list",
+                prompt: "List any red flags relevant to security of tenure and lease renewal risk: missing or defective warning notice/declaration, ambiguity over whether the lease is contracted out, absence of any Landlord and Tenant Act 1954 wording at all (which typically means the tenant has security of tenure by default), unclear service of s.25/s.26 notices, or any other point that should be checked against the original completed and dated declaration before relying on the contracting-out position.",
+            },
+        ],
+    },
+
+    // ─── TUPE Analysis ────────────────────────────────────────────────────────────
+    {
+        id: "builtin-tupe-analysis",
+        user_id: null,
+        is_system: true,
+        created_at: "",
+        title: "TUPE Analysis",
+        type: "assistant",
+        practice: "Employment",
+        prompt_md:
+            "## TUPE Analysis\n\n" +
+            "Analyse the uploaded document(s) (e.g. business sale agreement, outsourcing/services agreement, " +
+            "or a description of a proposed transaction) to determine whether the Transfer of Undertakings " +
+            "(Protection of Employment) Regulations 2006 (SI 2006/246) — commonly known as TUPE — apply, and " +
+            "what obligations follow if they do.\n\n" +
+            "Structure your analysis as follows, giving a statutory reference for each conclusion:\n\n" +
+            "1. **Relevant Transfer (reg 3)** — Does the transaction amount to a relevant transfer? Consider both " +
+            "limbs: (a) a business transfer — a transfer of an economic entity that retains its identity, and " +
+            "(b) a service provision change — where a client engages a new contractor, brings work in-house, or " +
+            "changes contractor, and an organised grouping of employees is assigned to the activities. State which " +
+            "limb (if any) applies and why, quoting the facts relied on.\n" +
+            "2. **Who Transfers (reg 4)** — If there is a relevant transfer, identify the employees assigned to the " +
+            "organised grouping or the transferring business who transfer automatically to the transferee, and note " +
+            "any employees whose assignment is disputed or unclear.\n" +
+            "3. **Dismissal Protection (reg 7)** — Are any dismissals connected to the transfer? State whether a " +
+            "dismissal is automatically unfair as being by reason of the transfer itself, or potentially fair as an " +
+            "economic, technical, or organisational (ETO) reason entailing changes in the workforce.\n" +
+            "4. **Information & Consultation (regs 13–15)** — What are the transferor's and transferee's obligations " +
+            "to inform (and, where measures are envisaged, consult) appropriate representatives of affected " +
+            "employees? Identify the timing required (long enough before the transfer to allow meaningful " +
+            "consultation) and any measures envisaged by either party in relation to affected employees.\n" +
+            "5. **Action List** — Produce a numbered action list of practical next steps (e.g. employee liability " +
+            "information request, consultation timetable, indemnity provisions in the transaction documents).\n\n" +
+            "Cite the specific regulation number for every conclusion (e.g. \"reg 3(1)(b) SI 2006/246\"). " +
+            "Verify statutory references where verification tools are available before finalising your answer, " +
+            "and state clearly if a point turns on facts not present in the uploaded document(s) rather than " +
+            "inferring them.",
+        columns_config: null,
+    },
+
+    // ─── Employment Contract vs Statutory Minima ─────────────────────────────────
+    {
+        id: "builtin-employment-statutory-minima",
+        user_id: null,
+        is_system: true,
+        created_at: "",
+        title: "Employment Contract vs Statutory Minima",
+        type: "tabular",
+        practice: "Employment",
+        prompt_md:
+            "## Employment Contract vs Statutory Minima\n\n" +
+            "For each uploaded employment contract, compare the stated contractual terms against the relevant " +
+            "statutory floor under English employment law. For each column: (1) extract the contractual term as " +
+            "stated, (2) state the applicable statutory minimum, and (3) flag clearly whether the contractual term " +
+            "meets, exceeds, or falls short of the statutory minimum.",
+        columns_config: [
+            {
+                index: 0,
+                name: "Written Particulars",
+                format: "text",
+                prompt: "Does the contract provide the written statement of particulars of employment required by s.1 Employment Rights Act 1996 (e.g. names of parties, start date, pay, hours, holiday entitlement, place of work, job title)? List any of the statutory required particulars that appear to be missing.",
+            },
+            {
+                index: 1,
+                name: "Notice Period",
+                format: "text",
+                prompt: "State the contractual notice period(s) for termination by employer and employee. State the statutory minimum notice under s.86 Employment Rights Act 1996 (one week per complete year of continuous employment up to 12 years, subject to a minimum of one week after one month's employment). Flag if the contractual notice for either party is below the statutory minimum.",
+            },
+            {
+                index: 2,
+                name: "Holiday Entitlement",
+                format: "text",
+                prompt: "State the contractual annual leave entitlement (including whether it is inclusive of bank/public holidays). State the statutory minimum under reg 13 and reg 13A Working Time Regulations 1998 (SI 1998/1833) — 5.6 weeks per year for a full-time worker, inclusive of bank holidays unless the contract provides them in addition. Flag any shortfall, including where entitlement is expressed in a way that is ambiguous as to whether bank holidays are included.",
+            },
+            {
+                index: 3,
+                name: "Working Hours / 48-Hour Opt-Out",
+                format: "text",
+                prompt: "State the contractual working hours. Does the contract include a valid opt-out of the 48-hour average weekly working time limit under reg 4 Working Time Regulations 1998 (SI 1998/1833)? An opt-out must be a separate, freely given written agreement — flag if the opt-out appears to be a non-negotiable term of the main contract or otherwise looks non-compliant.",
+            },
+            {
+                index: 4,
+                name: "Pay vs National Minimum Wage",
+                format: "text",
+                prompt: "State the contractual rate of pay and pay frequency. Compare this against the National Minimum Wage Act 1998 minimum hourly rate for the relevant worker category (note that the specific current rate changes annually and should be verified rather than assumed). Flag if the stated rate, once actual hours worked are accounted for, may fall below the applicable minimum.",
+            },
+            {
+                index: 5,
+                name: "Sick Pay (SSP)",
+                format: "text",
+                prompt: "What contractual sick pay does the employee receive? State whether this is enhanced (contractual) sick pay or limited to statutory sick pay (SSP). Flag if the contract purports to exclude SSP altogether or is silent as to the interaction between contractual and statutory sick pay, since SSP is a statutory floor that cannot be excluded for qualifying employees.",
+            },
+            {
+                index: 6,
+                name: "Pension Auto-Enrolment",
+                format: "yes_no",
+                prompt: "Does the contract reference pension auto-enrolment obligations under the Pensions Act 2008? Answer Yes if the contract confirms the employer will auto-enrol the employee into a qualifying pension scheme (or states applicable exemptions), No if there is no reference to auto-enrolment at all. Note the stated contribution rates if given.",
+            },
+        ],
+    },
+
+    // ─── Companies House Due-Diligence Snapshot ──────────────────────────────────
+    {
+        id: "builtin-companies-house-snapshot",
+        user_id: null,
+        is_system: true,
+        created_at: "",
+        title: "Companies House Due-Diligence Snapshot",
+        type: "assistant",
+        practice: "Corporate",
+        prompt_md:
+            "## Companies House Due-Diligence Snapshot\n\n" +
+            "Produce a structured due-diligence snapshot of a UK company using the Companies House research " +
+            "tools (`companies_house_search_companies`, `companies_house_get_company`, " +
+            "`companies_house_get_filing_history`). If the user has not given a company name or number, use " +
+            "`companies_house_search_companies` to find the company first and confirm the match before proceeding.\n\n" +
+            "Structure your output as follows:\n\n" +
+            "1. **Company Profile** — Full registered name, company number, registration status, company type " +
+            "(e.g. private limited by shares, plc, LLP), date of incorporation, registered office address, and " +
+            "SIC code(s) with their descriptions.\n" +
+            "2. **Officers** — Current officers (directors, secretary) with appointment dates and roles, and any " +
+            "officers who have resigned recently (note the resignation date).\n" +
+            "3. **Persons with Significant Control (PSCs)** — Each PSC or relevant legal entity, and the nature(s) " +
+            "of control held (e.g. ownership of shares, voting rights, right to appoint/remove directors).\n" +
+            "4. **Latest Accounts & Confirmation Statement** — Last accounts filed (period end and filing date) " +
+            "and the next accounts due date; last confirmation statement filed (date) and next due date. State " +
+            "clearly if either is overdue.\n" +
+            "5. **Recent Filings of Note** — Any recent filings of particular due-diligence interest (e.g. charges " +
+            "registered or satisfied, changes to share capital, changes of registered office, resolutions).\n" +
+            "6. **Red Flags** — Overdue accounts or confirmation statement, company status indicating insolvency, " +
+            "administration, or strike-off (including any active strike-off notice), recent mass resignation of " +
+            "officers, or registered charges not marked as satisfied.\n\n" +
+            "Always state the company number and the retrieval date (today's date) at the top of the snapshot, so " +
+            "the reader knows how current the data is. Do not invent any register data — if the Companies House " +
+            "tools are not available (no API key configured) or a lookup fails, say so plainly rather than guessing " +
+            "or filling gaps with assumed information.",
+        columns_config: null,
     },
 ];
 
