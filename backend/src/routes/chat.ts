@@ -536,9 +536,13 @@ chatRouter.post("/", requireAuth, async (req, res) => {
         docIndex,
     );
     const { api_keys: apiKeys } = await getUserModelSettings(userId, db);
-    // Research sources are available whenever a key is configured (server
-    // env or user key) — no feature toggle (docs/MIGRATION_SPEC.md §6.3).
-    const researchSources = { companiesHouse: !!apiKeys.companies_house?.trim() };
+    // Research sources: Companies House whenever a key is configured (server
+    // env or user key) — no feature toggle; legislation.gov.uk needs no key,
+    // so it's always available (docs/MIGRATION_SPEC.md §6.3).
+    const researchSources = {
+      companiesHouse: !!apiKeys.companies_house?.trim(),
+      legislation: true,
+    };
     const includeResearchTools = Object.values(researchSources).some(Boolean);
     const apiMessages = buildMessages(
         enrichedMessages,

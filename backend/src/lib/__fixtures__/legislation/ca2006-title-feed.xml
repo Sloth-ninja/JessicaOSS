@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xmlns:leg="http://www.legislation.gov.uk/namespaces/legislation" xmlns:ukm="http://www.legislation.gov.uk/namespaces/metadata" xmlns:theme="http://www.legislation.gov.uk/namespaces/theme" xmlns:openSearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:parameters="http://a9.com/-/spec/opensearch/extensions/parameters/1.0/">
+			<id>http://www.legislation.gov.uk/search/data.feed?type=ukpga&amp;title=Companies%20Act%202006</id>
+			<link rel="self" type="application/atom+xml" href="http://www.legislation.gov.uk/search/data.feed?type=ukpga&amp;title=Companies%20Act%202006"/>
+			
+			<link rel="alternate" type="text/csv" href="http://www.legislation.gov.uk/search/data.csv?type=ukpga&amp;title=Companies%20Act%202006"/>
+			<updated>2026-05-20T23:59:59Z</updated>
+			<title>Search Results</title>
+			<openSearch:Query role="request" leg:type="ukpga" leg:title="Companies Act 2006"> </openSearch:Query>
+			<openSearch:itemsPerPage>20</openSearch:itemsPerPage>
+			<openSearch:startIndex>1</openSearch:startIndex>
+			<leg:page>1</leg:page>
+			<leg:morePages>1</leg:morePages>
+			<leg:facets>
+								
+								<leg:facetTypes remove="http://www.legislation.gov.uk/title/companies%20act%202006/data.feed"><leg:facetType type="UnitedKingdomPublicGeneralAct" href="http://www.legislation.gov.uk/search/data.feed?type=ukpga&amp;title=Companies%20Act%202006" value="1"/></leg:facetTypes>
+								<leg:facetYears><leg:facetYear year="2006" href="http://www.legislation.gov.uk/search/data.feed?type=ukpga&amp;year=2006&amp;title=Companies%20Act%202006" total="1"/></leg:facetYears>
+								<leg:facetHundreds/>
+								
+							</leg:facets>
+			<leg:title><leg:and><leg:term>Companies</leg:term><leg:term>Act</leg:term><leg:term>2006</leg:term></leg:and></leg:title>
+			<openSearch:totalResults>1</openSearch:totalResults>
+			<link rel="first" type="application/atom+xml" href="http://www.legislation.gov.uk/search/data.feed?type=ukpga&amp;title=Companies%20Act%202006"/><entry>
+			<id>http://www.legislation.gov.uk/id/ukpga/2006/46</id>
+			<title>Companies Act 2006</title>
+			<link rel="self" href="http://www.legislation.gov.uk/id/ukpga/2006/46"/>
+			<link href="http://www.legislation.gov.uk/ukpga/2006/46/2026-04-06"/>
+			<link rel="alternate" type="application/xml" href="http://www.legislation.gov.uk/ukpga/2006/46/2026-04-06/data.xml" title="XML"/><link rel="alternate" type="application/rdf+xml" href="http://www.legislation.gov.uk/ukpga/2006/46/2026-04-06/data.rdf" title="RDF/XML"/><link rel="alternate" type="application/akn+xml" href="http://www.legislation.gov.uk/ukpga/2006/46/2026-04-06/data.akn" title="AKN"/><link rel="alternate" type="application/xhtml+xml" href="http://www.legislation.gov.uk/ukpga/2006/46/2026-04-06/data.xht" title="HTML snippet"/><link rel="alternate" type="application/akn+xhtml" href="http://www.legislation.gov.uk/ukpga/2006/46/2026-04-06/data.html" title="HTML5"/><link rel="alternate" type="text/html" href="http://www.legislation.gov.uk/ukpga/2006/46/2026-04-06/data.htm" title="Website (XHTML) Default View"/><link rel="alternate" type="text/csv" href="http://www.legislation.gov.uk/ukpga/2006/46/2026-04-06/data.csv" title="CSV"/><link rel="alternate" type="application/pdf" href="http://www.legislation.gov.uk/ukpga/2006/46/2026-04-06/data.pdf" title="PDF"/>
+			<link rel="http://purl.org/dc/terms/tableOfContents" type="application/xml" href="http://www.legislation.gov.uk/ukpga/2006/46/contents" title="Table of Contents"/>
+			<author><name/></author>
+			<updated>2026-05-20T23:36:05+01:00</updated>
+			<published>2010-10-15T00:00:00+01:00</published>
+			<ukm:DocumentMainType Value="UnitedKingdomPublicGeneralAct"/><ukm:Year Value="2006"/><ukm:Number Value="46"/><ukm:ISBN Value="0105446068"/><ukm:CreationDate Date="2006-11-08"/>
+			
+			
+			<category term="Legislation"/><category term="Local Government"/><category term="Reference Libraries"/>
+			<summary>An Act to reform company law and restate the greater part of the enactments relating to companies; to make other provision relating to companies and other forms of business organisation; to make provision about directors' disqualification, business names, auditors and actuaries; to amend Part 9 of the Enterprise Act 2002; and for connected purposes.</summary>
+		</entry>
+		</feed>

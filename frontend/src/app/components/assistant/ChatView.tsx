@@ -10,7 +10,12 @@ import {
     AssistantSidePanel,
     type AssistantSidePanelTab,
     type CompanyTab,
+    type DocumentTab,
+    type CitationTab,
+    type EditTab,
+    type LegislationTab,
 } from "./AssistantSidePanel";
+import type { LegislationProvisionPayload } from "./LegislationPanel";
 import { AssistantWorkflowModal } from "./AssistantWorkflowModal";
 import type {
     AssistantEvent,
@@ -167,7 +172,9 @@ export function ChatView({
      * state. If no matching tab exists, a new one is appended.
      */
     const upsertTab = useCallback(
-        (tab: AssistantSidePanelTab) => {
+        // Legislation tabs are managed directly by openLegislation (deduped
+        // by url), so they never flow through here.
+        (tab: DocumentTab | CitationTab | EditTab | CompanyTab) => {
             setTabs((prev) => {
                 if (tab.kind === "company") {
                     const idx = prev.findIndex(
@@ -184,7 +191,10 @@ export function ChatView({
                 }
 
                 const idx = prev.findIndex(
-                    (t) => t.kind !== "company" && t.documentId === tab.documentId,
+                    (t) =>
+                        t.kind !== "company" &&
+                        t.kind !== "legislation" &&
+                        t.documentId === tab.documentId,
                 );
                 if (idx >= 0) {
                     const existing = prev[idx];
@@ -193,8 +203,11 @@ export function ChatView({
                     copy[idx] = {
                         ...tab,
                         id: existing.id,
-                        warning: existing.warning,
-                        initialScrollTop: existing.initialScrollTop,
+                        warning: existing.kind === "legislation" ? null : existing.warning,
+                        initialScrollTop:
+                            existing.kind === "legislation"
+                                ? null
+                                : existing.initialScrollTop,
                     };
                     return copy;
                 }
@@ -207,11 +220,59 @@ export function ChatView({
     );
 
     /**
+     * Open (or re-select) a tab showing a UK statutory provision on
+     * legislation.gov.uk. Has no `documentId`, so it dedupes by canonical
+     * URL directly rather than going through `upsertTab`. Called from a
+     * completed legislation_lookup tool-call chip or a legislation
+     * citation pill.
+     */
+    const openLegislation = useCallback(
+        (args: {
+            url: string;
+            title: string;
+            quote?: string;
+            provision?: LegislationProvisionPayload;
+        }) => {
+            const id = `legislation:${args.url}`;
+            setTabs((prev) => {
+                const idx = prev.findIndex(
+                    (t) => t.kind === "legislation" && t.url === args.url,
+                );
+                const tab: LegislationTab = {
+                    id,
+                    kind: "legislation",
+                    url: args.url,
+                    title: args.title,
+                    quote: args.quote,
+                    provision: args.provision,
+                };
+                if (idx >= 0) {
+                    const copy = prev.slice();
+                    copy[idx] = tab;
+                    return copy;
+                }
+                return [...prev, tab];
+            });
+            setActiveTabId(id);
+            showPanel();
+        },
+        [showPanel],
+    );
+
+    /**
      * Open a tab showing a single citation quote. Called from
      * AssistantMessage when the user clicks a numbered citation pill.
      */
     const openCitation = useCallback(
         (citation: CitationAnnotation, options?: { showQuotes?: boolean }) => {
+            if (citation.kind === "legislation") {
+                openLegislation({
+                    url: citation.legislation_uri,
+                    title: citation.title,
+                    quote: citation.quote,
+                });
+                return;
+            }
             const showQuotes = options?.showQuotes ?? true;
             if (!showQuotes) {
                 upsertTab({
@@ -234,7 +295,7 @@ export function ChatView({
                 citation,
             });
         },
-        [upsertTab],
+        [upsertTab, openLegislation],
     );
 
     /**
@@ -406,7 +467,9 @@ export function ChatView({
             // Surface the warning on every tab tied to this document.
             setTabs((prev) =>
                 prev.map((t) =>
-                    t.kind !== "company" && t.documentId === args.documentId
+                    t.kind !== "company" &&
+                    t.kind !== "legislation" &&
+                    t.documentId === args.documentId
                         ? { ...t, warning: args.message }
                         : t,
                 ),
@@ -666,6 +729,9 @@ export function ChatView({
                                                 onEditViewClick={openEditor}
                                                 onOpenDocument={openDocument}
                                                 onOpenCompany={openCompany}
+                                                onOpenLegislation={
+                                                    openLegislation
+                                                }
                                                 onEditResolveStart={
                                                     handleEditResolveStart
                                                 }

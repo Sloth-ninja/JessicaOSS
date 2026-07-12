@@ -13,6 +13,7 @@ import {
     Download,
     File,
     FileText,
+    Landmark,
     Loader2,
 } from "lucide-react";
 import { MikeIcon } from "@/components/chat/mike-icon";
@@ -23,6 +24,7 @@ import type {
     EditAnnotation,
 } from "../shared/types";
 import { EditCard, applyOptimisticResolution } from "./EditCard";
+import type { LegislationProvisionPayload } from "./LegislationPanel";
 import { PreResponseWrapper } from "../shared/PreResponseWrapper";
 import { supabase } from "@/lib/supabase";
 
@@ -30,6 +32,18 @@ const RESPONSE_GLASS_SURFACE =
     "rounded-xl border border-white/70 bg-white/55 shadow-[0_3px_9px_rgba(15,23,42,0.03),inset_0_1px_0_rgba(255,255,255,0.9),inset_0_-4px_9px_rgba(255,255,255,0.05)] backdrop-blur-2xl";
 const RESPONSE_GLASS_ANNOTATION =
     "inline-flex h-4 w-4 items-center justify-center rounded-full border border-gray-200/60 bg-gray-200/80 text-[12px] font-serif font-medium text-gray-800 shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(243,244,246,0.85),inset_0_-2px_4px_rgba(229,231,235,0.65)] backdrop-blur-xl transition-colors hover:bg-gray-200 hover:text-gray-950";
+
+/**
+ * Tooltip text for a citation pill/annotation button: "<location>: <quote>".
+ * Legislation citations can carry no quote at all (a pill opened straight
+ * from a lookup with no verbatim passage) — omit the trailing `: ""` rather
+ * than showing an empty-quote artifact.
+ */
+function citationTooltip(annotation: CitationAnnotation): string {
+    const location = formatCitationPage(annotation);
+    const quote = displayCitationQuote(annotation).trim();
+    return quote ? `${location}: "${quote}"` : location;
+}
 
 function toolCallLabel(name: string): string {
     if (name === "generate_docx") return "Creating document...";
@@ -41,6 +55,9 @@ function toolCallLabel(name: string): string {
     if (name === "read_workflow") return "Loading workflow...";
     if (name === "list_workflows") return "Loading workflows...";
     if (name === "list_documents") return "Loading documents...";
+    if (name === "legislation_lookup") return "Looking up legislation...";
+    if (name === "legislation_verify_citations") return "Verifying citations...";
+    if (name === "legislation_search") return "Searching legislation...";
     if (name.startsWith("mcp_")) return "Using connector...";
     return name ? `Running ${name}...` : "Working...";
 }
@@ -553,27 +570,42 @@ function ReasoningBlock({
 }
 
 /**
- * Generic tool-call status chip: spinner while streaming, grey dot when
- * done, red dot + error text on failure. Shared by the mcp_tool_call and
- * companies_house_tool_call render branches so both connector-style and
- * UK-data-source tool events render identically without duplicating the
- * markup.
+ * Generic tool-call chip: spinning dot while streaming, solid dot when
+ * done (red on error), optional error text, optional trailing note (e.g.
+ * legislation's "outstanding amendments" amber flag), optional click to
+ * open a side-panel view of the result. Originally the inline
+ * mcp_tool_call branch; shared by the mcp_tool_call,
+ * companies_house_tool_call and legislation_tool_call render branches so
+ * connector-style and UK-data-source tool events render identically.
  */
 function ToolCallChip({
     label,
     isStreaming,
     isError,
-    error,
-    onClick,
+    errorMessage,
+    note,
     showConnector,
+    onClick,
 }: {
     label: string;
     isStreaming?: boolean;
     isError?: boolean;
-    error?: string;
-    onClick?: () => void;
+    errorMessage?: string;
+    note?: string;
     showConnector?: boolean;
+    onClick?: () => void;
 }) {
+    const content = (
+        <>
+            <span className="font-medium">{label}</span>
+            {isError && errorMessage && (
+                <p className="mt-0.5 text-xs text-red-600">{errorMessage}</p>
+            )}
+            {!isError && note && (
+                <p className="mt-0.5 text-xs text-amber-600">{note}</p>
+            )}
+        </>
+    );
     return (
         <div className="flex items-start text-sm font-serif text-gray-500 relative">
             {showConnector && (
@@ -588,22 +620,17 @@ function ToolCallChip({
                           : "mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-gray-400"
                 }
             />
-            <div className="ml-2 min-w-0">
-                {onClick ? (
-                    <button
-                        type="button"
-                        onClick={onClick}
-                        className="text-left font-medium hover:text-gray-700 transition-colors cursor-pointer"
-                    >
-                        {label}
-                    </button>
-                ) : (
-                    <span className="font-medium">{label}</span>
-                )}
-                {isError && error && (
-                    <p className="mt-0.5 text-xs text-red-600">{error}</p>
-                )}
-            </div>
+            {onClick ? (
+                <button
+                    type="button"
+                    onClick={onClick}
+                    className="ml-2 min-w-0 text-left hover:text-gray-700 transition-colors cursor-pointer"
+                >
+                    {content}
+                </button>
+            ) : (
+                <div className="ml-2 min-w-0">{content}</div>
+            )}
         </div>
     );
 }
@@ -1129,7 +1156,7 @@ function MarkdownContent({
                             const idx = parseInt(citMatch[1]);
                             const annotation = citationsList[idx];
                             if (annotation) {
-                                const tooltipText = `${formatCitationPage(annotation)}: "${displayCitationQuote(annotation)}"`;
+                                const tooltipText = citationTooltip(annotation);
                                 return (
                                     <button
                                         onClick={() =>
@@ -1195,10 +1222,14 @@ type CitationSourceRow = {
 };
 
 function citationSourceKey(annotation: CitationAnnotation): string {
+    if (annotation.kind === "legislation") {
+        return `legislation:${annotation.legislation_uri}`;
+    }
     return `document:${annotation.document_id}`;
 }
 
 function citationSourceLabel(annotation: CitationAnnotation): string {
+    if (annotation.kind === "legislation") return annotation.title;
     return annotation.filename;
 }
 
@@ -1211,6 +1242,9 @@ function CitationSourceIcon({
 }: {
     annotation: CitationAnnotation;
 }) {
+    if (annotation.kind === "legislation") {
+        return <Landmark className="h-3.5 w-3.5 text-emerald-600" />;
+    }
     const ext = documentExtension(annotation.filename);
     if (ext === "pdf") return <File className="h-3.5 w-3.5 text-red-500" />;
     return <FileText className="h-3.5 w-3.5 text-blue-500" />;
@@ -1355,7 +1389,9 @@ function CitationsBlock({
                                                 className={
                                                     RESPONSE_GLASS_ANNOTATION
                                                 }
-                                                title={`${formatCitationPage(annotation)}: "${displayCitationQuote(annotation)}"`}
+                                                title={citationTooltip(
+                                                    annotation,
+                                                )}
                                             >
                                                 {annotation.ref}
                                             </button>
@@ -1473,6 +1509,16 @@ interface Props {
         event: Extract<AssistantEvent, { type: "companies_house_tool_call" }>,
     ) => void;
     /**
+     * Opens the legislation side panel for a completed legislation_lookup
+     * (etc.) tool-call chip. Legislation citation pills use
+     * onOpenCitationSource instead — this is only for the chip click.
+     */
+    onOpenLegislation?: (args: {
+        url: string;
+        title: string;
+        provision?: LegislationProvisionPayload;
+    }) => void;
+    /**
      * Fires immediately when the user clicks Accept / Reject (single card
      * or the bulk "Accept all" / "Reject all"), before the backend call.
      * Parents use this to flip download cards / editor viewers into a
@@ -1527,6 +1573,7 @@ export function AssistantMessage({
     onEditViewClick,
     onOpenDocument,
     onOpenCompany,
+    onOpenLegislation,
     onEditResolveStart,
     onEditResolved,
     onEditError,
@@ -1650,7 +1697,7 @@ export function AssistantMessage({
             onOpenCitationSource(citation);
             return;
         }
-        if (!onOpenDocument) return;
+        if (!onOpenDocument || citation.kind === "legislation") return;
         onOpenDocument({
             documentId: citation.document_id,
             filename: citation.filename,
@@ -1812,7 +1859,7 @@ export function AssistantMessage({
                     label={event.isStreaming ? "Using connector..." : label}
                     isStreaming={event.isStreaming}
                     isError={isError}
-                    error={event.error}
+                    errorMessage={event.error}
                     showConnector={showConnector}
                 />
             );
@@ -1831,7 +1878,7 @@ export function AssistantMessage({
                     label={label}
                     isStreaming={event.isStreaming}
                     isError={isError}
-                    error={event.error}
+                    errorMessage={event.error}
                     showConnector={showConnector}
                     onClick={
                         canOpenCompanyPanel && onOpenCompany
@@ -1841,9 +1888,50 @@ export function AssistantMessage({
                 />
             );
         }
+
+        if (event.type === "legislation_tool_call") {
+            const isError = event.status === "error";
+            const doneLabel = event.title
+                ? `${toolCallLabel(event.tool_name).replace(/\.\.\.$/, "")}: ${event.title}`
+                : toolCallLabel(event.tool_name);
+            return (
+                <ToolCallChip
+                    key={globalIdx}
+                    label={
+                        event.isStreaming
+                            ? toolCallLabel(event.tool_name)
+                            : doneLabel
+                    }
+                    isStreaming={event.isStreaming}
+                    isError={isError}
+                    errorMessage={event.error}
+                    note={
+                        !event.isStreaming && event.outstanding_effects
+                            ? "Outstanding amendments not yet applied to this text."
+                            : undefined
+                    }
+                    showConnector={showConnector}
+                    onClick={
+                        !event.isStreaming &&
+                        !isError &&
+                        event.url &&
+                        onOpenLegislation
+                            ? () =>
+                                  onOpenLegislation({
+                                      url: event.url as string,
+                                      title: event.title ?? event.url ?? "",
+                                      provision: event.provision as
+                                          | LegislationProvisionPayload
+                                          | undefined,
+                                  })
+                            : undefined
+                    }
+                />
+            );
+        }
         if (event.type === "doc_read") {
             const ann = annotations.find(
-                (a) => a.filename === event.filename,
+                (a) => a.kind !== "legislation" && a.filename === event.filename,
             );
             return (
                 <DocReadBlock

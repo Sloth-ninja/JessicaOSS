@@ -7,6 +7,53 @@
 
 ---
 
+## 2026-07-08 — legislation.gov.uk integration (branch `ws2-legislation`, WS2)
+
+**Scope:** legislation.gov.uk research tools per `docs/MIGRATION_SPEC.md` §4 — a no-key client, three LLM tools (`legislation_lookup`, `legislation_search`, `legislation_verify_citations`), the `[N]`/`<CITATIONS>` extension for legislation-kind citations, chat wiring so legislation research is always on (no key needed), and the matching frontend surface (tool chips, citation pills, `LegislationPanel`). First vitest harness in the repo.
+
+**Backend**
+- New `lib/legislation.ts`: `parseCitation` (natural UK citation parser — section-first/act-first, SI bare-number, regulation/article + SI title, article vs regulation), `resolveByTitle`/`search` (Atom title feed, TYPE_ORDER `ukpga,uksi,asp,asc,anaw,nisr`), `getProvision` (CLML fetch + extraction), `lookupCitation`/`verifyCitation` (orchestration). Local token-bucket limiter (burst 5, 1 req/s, retry-once-on-5xx, UA `JessicaOS/0.1 (+repo)`) and bounded TTL caches (title→URI 24h, current-version provision 6h, point-in-time 7d) — not shared with WS1's Companies House limiter.
+- New `lib/legalSourcesTools/legislationTools.ts`: `LEGISLATION_TOOLS`, `LEGISLATION_SYSTEM_PROMPT` (verify-before-final-answer instruction; explicit "no case-law source, never invent neutral citations" per the CourtListener-excision gap), `executeLegislationToolCall`.
+- `chatTools.ts`: `ParsedCitation` widened to `ParsedDocumentCitation | ParsedLegislationCitation`; `normalizeCitation`/`createCitationAnnotation` branch on `legislation_uri`; CITATIONS prompt block documents the legislation JSON shape; `buildSystemPrompt(includeResearchTools, sources: ResearchSources)` splices `LEGISLATION_SYSTEM_PROMPT` when `sources.legislation`; `buildMessages` gained the `sources` positional param; `runLLMStream` populates the (previously empty) `researchTools` seam from `researchSources.legislation`; `runToolCalls` gained a `legislation_*` branch mirroring the MCP branch 1:1 (`legislation_tool_start`/`legislation_tool_result` SSE pair, `legislationEvents` accumulator, pushed into `AssistantEvent[]` in `runLLMStream`'s `runTools` callback exactly like `mcpEvents`).
+- `AssistantEvent` gained `LegislationToolEvent` (`type: "legislation_tool_call"`, `status`, `title`/`url`/`outstanding_effects`/`provision` on success).
+- `routes/chat.ts` / `routes/projectChat.ts`: replaced the hardcoded `includeResearchTools: false` with `{ legislation: true }` (no key needed, so always on per the MIGRATION_SPEC §6.3 Companies House gating decision WS1 mirrors) and threaded `researchSources` through.
+
+**CLML elements actually verified against live responses** (fetched 2026-07-08, ~1 req/s, captured into `backend/src/lib/__fixtures__/legislation/`):
+- Outstanding/prospective-amendment flag: `ukm:PrimaryMetadata` (Acts) / `ukm:SecondaryMetadata` (SIs) → zero or more `ukm:UnappliedEffects > ukm:UnappliedEffect`, attributes `Type`, `Notes`, `AffectedProvisions`, `RequiresApplied`. Present **Act/SI-wide**, not scoped to the fetched section — matches the sitewide "outstanding changes" banner, so `outstandingEffects` is surfaced regardless of which fragment was requested (never hidden, per CLAUDE.md).
+- Provision heading = nearest preceding `<Title>` (verified: "Petition by company member" for CA2006 s.994, "Effect of relevant transfer on contracts of employment" for TUPE reg.4, "General." for ERA1996 s.98).
+- Both Acts and SIs wrap the requested fragment in `<P1 id="section-994">` / `<P1 id="regulation-4">` — only `id` varies by type.
+- Extent = `RestrictExtent="E+W+S+N.I."` on the nearest ancestor.
+- **Pre-1963 Acts are catalogued under regnal-year ids** (e.g. `Landlord and Tenant Act 1954` → `/id/ukpga/Eliz2/2-3/56`, not `/ukpga/1954/56`) — discovered while verifying the golden citation case. Fixed in both `backend/src/lib/legislation.ts` (`resolveByTitle`) and `evals/src/citations.ts` (`resolveActUri`): match the Atom entry by its `<ukm:Year Value="…">` and take the id's full path suffix, falling back only when the modern `/year/number` regex misses. Backward compatible — modern Acts still match the fast path first.
+
+**Frontend**
+- `shared/types.ts`: `legislation_tool_call` `AssistantEvent` variant; `LegislationCitationAnnotation`; `CitationAnnotation` re-widened to a union; kind-guards added to `getDocumentCitationQuotes`/`expandCitationToEntries`/`formatCitationPage`/`displayCitationQuote`.
+- `useAssistantChat.ts`: `legislation_tool_start`/`legislation_tool_result` handled via the MCP start/result pairing pattern.
+- `AssistantMessage.tsx`: extracted the inline `mcp_tool_call` JSX into a shared `ToolCallChip` (reused for both mcp and legislation chips — not cloned); legislation chip shows an amber "Outstanding amendments not yet applied to this text" note when flagged; `toolCallLabel` gained the three legislation tool names; citation-source helpers (`citationSourceKey`/`citationSourceLabel`/`CitationSourceIcon`) branch on `kind`, using a `Landmark` icon for legislation.
+- New `LegislationPanel.tsx`: heading + text, extent, prominent amber banner when flagged, "View on legislation.gov.uk" canonical link. Degrades honestly when opened from a citation pill (title/URL/quote only, no heading/extent/flag data) rather than fabricating an "all clear" state.
+- `AssistantSidePanel.tsx` gained a `LegislationTab` kind (no `documentId` — doesn't extend `CommonTab`); `ChatView.tsx` gained `openLegislation` (dedupes by URL, bypasses `upsertTab`'s document-keyed dedupe) and `openCitation` now branches on `citation.kind`.
+- `projects/[id]/assistant/chat/[chatId]/page.tsx` (a second, simpler project-chat surface not covered by the frontend seam map, no `LegislationPanel` there): `handleCitationClick` falls back to opening the canonical legislation.gov.uk link in a new tab for a legislation citation, rather than erroring — flagged as a follow-up gap in the WS2 report, not a hard rule violation.
+
+**Unit tests (vitest — new)**
+- `backend/package.json`: `"test": "vitest run"`, devDep `"vitest": "^3.2.4"`; `backend/vitest.config.ts` added byte-identical to WS1's copy per the shared-seam contract.
+- `legislation.test.ts` (29 cases): citation parsing variants, Atom resolution (incl. the regnal-year case), CLML extraction (incl. unapplied-effects and the "no outstanding effects" path) against captured fixtures, caching, 5xx retry, never-throws contract.
+- `legislationTools.test.ts` (9 cases): tool schema shape, prompt content, all three tool executions incl. failure paths, unknown-tool fallback.
+- Fixtures in `backend/src/lib/__fixtures__/legislation/` are trimmed real captures (documented as such in-file), not invented data.
+
+**Evals**
+- `evals/src/citations.ts`: `resolveActUri` regnal-year fix (see above) — improves, doesn't change, existing case behaviour.
+- New cases: `det-legislation-tupe-reg4`, `det-legislation-era1996-s98`, `det-legislation-title-feed` (not smoke-flagged), `cit-legislation-tool-outputs-resolve` (citation-type, four citation styles incl. the pre-1963 Act, all verified to resolve live before committing).
+
+**Decisions**
+- Generic `legislation_tool_start`/`legislation_tool_result` SSE pair, mirroring the MCP pattern exactly (per the shared seam contract with WS1) rather than inventing a new event-pairing shape.
+- `resolveActUri`/`resolveByTitle` fixed for regnal-year Acts rather than avoiding the citation in the golden case — a real correctness gap that would otherwise resurface for WS4's LTA 1954 workflow template.
+- Legislation research is unconditionally on (`{ legislation: true }`) since the API needs no key — no new env var, no feature toggle, matching the Companies House "available whenever configured" precedent for the no-key case.
+
+**Verification**
+- `cd backend && npx tsc --noEmit` clean; `npm test` → 38/38 vitest passing.
+- `cd frontend && npx tsc --noEmit` clean; `npm run lint` → 112 problems (35 errors/77 warnings), identical to the `ws2-legislation` base commit — no new lint errors, and zero findings in any WS2 file.
+- Backend boots with dummy env (`SUPABASE_URL=http://x SUPABASE_SECRET_KEY=x DOWNLOAD_SIGNING_SECRET=x USER_API_KEYS_ENCRYPTION_SECRET=x`) → `GET /health` → `{"ok":true}`.
+- `npm run evals` from repo root: 7 passed, 1 skipped (Companies House, no key — expected), 1 pending (judged, awaits WS1/WS4 fixtures) — all legislation + citation cases pass live, including the 4 new ones.
+
 ## 2026-07-08 — WS1: Companies House integration (branch `ws1-companies-house`)
 
 **Scope:** First UK data integration per `docs/MIGRATION_SPEC.md` §3 — a Companies House client, chat tools, and a side-panel viewer, wired through the `researchTools`/`buildSystemPrompt` seam left by the CourtListener excision. No feature toggle: available whenever a Companies House key is configured (server env or per-user), per decision §6.3.

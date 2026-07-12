@@ -490,6 +490,13 @@ export default function ProjectAssistantChatPage({ params }: Props) {
     };
 
     const handleCitationClick = (citation: CitationAnnotation) => {
+        // This project-chat page doesn't have a LegislationPanel (see
+        // AssistantSidePanel/ChatView for that) — fall back to the canonical
+        // legislation.gov.uk link rather than silently doing nothing.
+        if (citation.kind === "legislation") {
+            window.open(citation.legislation_uri, "_blank", "noopener,noreferrer");
+            return;
+        }
         openTab(
             citation.document_id,
             citation.filename,

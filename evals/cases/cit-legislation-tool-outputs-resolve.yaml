@@ -1,0 +1,19 @@
+id: cit-legislation-tool-outputs-resolve
+type: citation
+description: >
+  Realistic short assistant answer (as legislation_lookup /
+  legislation_verify_citations tool outputs would support) citing a UK Act
+  section, an act-first section reference, a Statutory Instrument by number
+  with a regulation reference, and a pre-1963 Act (regnal-year id on
+  legislation.gov.uk, not a plain calendar year — see the resolveActUri fix
+  in evals/src/citations.ts). Every citation must resolve live.
+input:
+  text: >
+    A minority shareholder may petition under s.994 Companies Act 2006 for
+    relief from unfairly prejudicial conduct. Separately, Employment Rights
+    Act 1996, s 98 sets out the employer's burden to show a fair reason for
+    dismissal. Where a business transfer is in scope, reg 4 of SI 2006/246
+    preserves the transferring employees' contracts of employment. Any lease
+    renewal question should also be checked against s.24 Landlord and Tenant
+    Act 1954, which gives business tenants a right to apply for a new
+    tenancy.

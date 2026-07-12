@@ -1,0 +1,13 @@
+id: det-legislation-tupe-reg4
+type: deterministic
+description: >
+  legislation.gov.uk must serve reg 4 of the TUPE Regulations 2006 (effect of
+  a relevant transfer on contracts of employment) and the fetched CLML must
+  contain the regulation's heading and the operative "transfer of the
+  contract" wording, verified live before committing.
+request:
+  url: https://www.legislation.gov.uk/uksi/2006/246/regulation/4/data.xml
+  status: 200
+  contains:
+    - "Effect of relevant transfer on contracts of employment"
+    - "shall not operate so as to terminate the contract of employment"

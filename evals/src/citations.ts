@@ -103,6 +103,21 @@ async function resolveActUri(title: string, year: string): Promise<string | null
       titleUriCache.set(cacheKey, uri);
       return uri;
     }
+
+    // Pre-1963 Acts are catalogued under regnal-year ids (e.g.
+    // /id/ukpga/Eliz2/2-3/56 for the Landlord and Tenant Act 1954) rather
+    // than a plain calendar year in the path. Match the entry by its
+    // <ukm:Year Value="…"> instead of assuming the URI contains the year.
+    for (const entryMatch of atom.matchAll(/<entry>([\s\S]*?)<\/entry>/g)) {
+      const entry = entryMatch[1];
+      if (!new RegExp(`<ukm:Year Value="${year}"`).test(entry)) continue;
+      const regnalMatch = new RegExp(`/id/${type}/([^"<\\s]+)`).exec(entry);
+      if (regnalMatch) {
+        const uri = `/${type}/${regnalMatch[1]}`;
+        titleUriCache.set(cacheKey, uri);
+        return uri;
+      }
+    }
   }
   titleUriCache.set(cacheKey, null);
   return null;
