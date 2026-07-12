@@ -1,14 +1,266 @@
 id: jud-disclosure-review
 type: judged
-pending: >
-  Requires running the (renamed) Disclosure Review workflow on a fixture document
-  set so input.text can be produced; golden-set inputs to be finalised with an AGL
-  associate. Judge wiring itself is live (see judge.ts).
 description: >
-  Opus-judged case: Disclosure Review tabular output (including the three-way
-  privilege split) scored 1–5 against the rubric (issue-spotting completeness,
-  correct law, UK terminology, no invented facts).
+  Opus-judged case scored 1-5 against the rubric. input.text is a PROVISIONAL
+  fixture generated on 12/07/2026 by session agents (Disclosure Review output over a
+  synthetic 7-document disclosure set, committed at evals/fixtures/disclosure-review-source.md)
+  and scored 5/5 on all four dimensions by an interim Opus judge pass; to be
+  reviewed/replaced with an AGL associate. Every statutory citation verified
+  against live legislation.gov.uk (HTTP 200) on 12/07/2026. Runs automatically
+  once ANTHROPIC_API_KEY is configured (skips until then).
 rubric: rubrics/disclosure-review.md
 min_score: 3
 input:
-  text: ""
+  text: |
+    # Disclosure Review
+
+    This review supports standard disclosure in English civil litigation under CPR Part 31
+    (Civil Procedure Rules 1998, SI 1998/3132) and, where the Business and Property Courts
+    Disclosure Review Document regime applies, PD 57AD. For each document the factual metadata is
+    recorded and privilege is assessed separately under the three heads — legal advice privilege,
+    litigation privilege and without prejudice — for a solicitor to review and confirm before any
+    document is added to a disclosure list. No case-law citations are given; privilege assessments
+    apply the general dominant-purpose tests and are provisional views only, not legal advice.
+
+    Matter: Ashworth Precision Components Ltd ("Ashworth") / Brightmoor Logistics Ltd
+    ("Brightmoor") — dispute under the Warehousing and Fulfilment Services Agreement dated
+    03/02/2025. Documents reviewed: 7.
+
+    ---
+
+    ## Row 1 — Document 1
+
+    - **Date:** 14/04/2025
+    - **Type of Document:** Email
+    - **Sender:** Priya Shah, Head of Supply Chain, Ashworth Precision Components Ltd
+    - **Recipient(s):**
+      - To: Daniel Okafor, Account Director, Brightmoor Logistics Ltd
+      - Cc: Tom Whitfield, Warehouse & Logistics Manager, Ashworth Precision Components Ltd
+    - **Summary:** Ashworth raises formal concerns about Brightmoor's March performance against
+      the clause 4.1 / Schedule 2 service levels (99.5% on-time dispatch; 99.8% pick accuracy),
+      citing Brightmoor's own March report showing 94.1% on-time dispatch and 97.6% pick
+      accuracy, and 42 mis-picked orders. It records written complaints from two customers,
+      Retten Engineering Ltd and Foxglove Hydraulics Ltd, and a warning from Retten that it may
+      re-tender. A written remediation plan is requested by 25/04/2025.
+    - **Persons Mentioned:**
+      - Alan Curbishley — purchasing manager, Retten Engineering Ltd
+    - **Legal Advice Privilege:** No — an ordinary business communication between the commercial
+      teams of the two contracting parties; no solicitor or other legal adviser is party to it
+      and it was not made for the purpose of giving or receiving legal advice.
+    - **Litigation Privilege:** No — created to raise service-level concerns and seek remediation
+      in the ordinary course of the contract; on the face of the document litigation was not then
+      pending or reasonably in contemplation, and in any event a communication sent to the
+      counterparty is not confidential as against it.
+    - **Without Prejudice:** No — an open complaint and request for a remediation plan, not a
+      genuine attempt to negotiate a settlement of a dispute.
+
+    ---
+
+    ## Row 2 — Document 2
+
+    - **Date:** 17/04/2025
+    - **Type of Document:** Email
+    - **Sender:** Daniel Okafor, Account Director, Brightmoor Logistics Ltd
+    - **Recipient(s):**
+      - To: Priya Shah, Head of Supply Chain, Ashworth Precision Components Ltd
+      - Cc: Lisa Hardcastle, Operations Director, Brightmoor Logistics Ltd
+    - **Summary:** Brightmoor accepts that March performance fell short of the Schedule 2 service
+      levels and apologises. It attributes the shortfall to high operative absence at the
+      Wakefield fulfilment centre in March and to picking errors following the 03/03/2025
+      go-live of a new warehouse management system. It states that a new site manager started on
+      07/04/2025 and is recruiting twelve additional operatives, promises restoration of
+      contracted performance by 31/05/2025, and confirms a written remediation plan will be
+      provided by 25/04/2025.
+    - **Persons Mentioned:**
+      - Craig Doyle — site manager, Brightmoor Logistics Ltd (started 07/04/2025)
+    - **Legal Advice Privilege:** No — a commercial response between the parties' business teams;
+      no legal adviser involved and no legal advice sought or given.
+    - **Litigation Privilege:** No — created for the ordinary business purpose of responding to a
+      service complaint and proposing remediation, not for the dominant purpose of litigation
+      pending or reasonably in contemplation; also sent to the counterparty. Note: it contains an
+      admission that performance fell short, which is significant for disclosure but does not
+      affect privilege.
+    - **Without Prejudice:** No — open correspondence about remediation of performance, not a
+      genuine negotiation to settle a dispute.
+
+    ---
+
+    ## Row 3 — Document 3
+
+    - **Date:** 28/04/2025
+    - **Type of Document:** Email (formal contractual notice, with spreadsheet attachment:
+      "Schedule of mis-picked orders and customer credits (April 2025).xlsx")
+    - **Sender:** Priya Shah, Head of Supply Chain, Ashworth Precision Components Ltd
+    - **Recipient(s):**
+      - To: Daniel Okafor, Account Director, Brightmoor Logistics Ltd
+      - Cc: Margaret Ellison, Chief Operating Officer, Ashworth Precision Components Ltd
+    - **Summary:** Ashworth records that no remediation plan was received by 25/04/2025 and that
+      a call on 25/04/2025 did not resolve matters. The email gives formal written notice under
+      clause 18.1 of the Agreement of material breach of clause 4.1 and Schedule 2, requiring
+      remedy within 30 days. The attached schedule details the 42 mis-picked orders from March
+      and customer credits issued to date totalling £58,400. Ashworth reserves its rights,
+      including termination under clause 19.
+    - **Persons Mentioned:** None (beyond the sender and recipients identified above).
+    - **Legal Advice Privilege:** No — a contractual notice sent between the parties' commercial
+      representatives; no lawyer–client communication and no legal advice purpose.
+    - **Litigation Privilege:** No — an open contractual notice sent to the counterparty; not a
+      confidential communication and, on its face, created to operate the clause 18.1 remediation
+      mechanism rather than for the dominant purpose of litigation.
+    - **Without Prejudice:** No — an open assertion of breach and reservation of rights, not a
+      genuine attempt to negotiate a settlement.
+
+    ---
+
+    ## Row 4 — Document 4
+
+    - **Date:** 09/05/2025
+    - **Type of Document:** Internal memorandum
+    - **Sender:** Tom Whitfield, Warehouse & Logistics Manager, Ashworth Precision Components Ltd
+    - **Recipient(s):**
+      - To: Priya Shah, Head of Supply Chain, Ashworth Precision Components Ltd
+      - To: Margaret Ellison, Chief Operating Officer, Ashworth Precision Components Ltd
+    - **Summary:** Report of a 06/05/2025 site visit to Brightmoor's Wakefield fulfilment centre:
+      only 9 of 14 pick stations staffed, and recruitment of the promised twelve operatives
+      stalled with only three started. A picker, Kevin Barraclough, is reported as saying pickers
+      are paid £9.10 per hour and that he has worked sixty-hour weeks since February without
+      signing any opt-out — which the memo says, if accurate, suggests pay below the applicable
+      National Minimum Wage rate (the current rate for the relevant period should be verified
+      against official sources — no rate figure is asserted here) and hours above the 48-hour
+      weekly average limit, in breach of the clause 14.2 compliance-with-laws warranty (which
+      expressly covers the National Minimum Wage Act 1998 and the Working Time Regulations
+      1998). Total commercial exposure is estimated at approximately £184,000, including the
+      £58,400 of scheduled customer credits. The memo recommends instructing solicitors to
+      advise on options including termination under clause 19.
+    - **Persons Mentioned:**
+      - Craig Doyle — site manager, Brightmoor Logistics Ltd
+      - Kevin Barraclough — picker at Brightmoor's Wakefield fulfilment centre
+      - Daniel Okafor — Account Director, Brightmoor Logistics Ltd (his email of 17/04/2025 is
+        referred to)
+    - **Legal Advice Privilege:** No — an internal communication between employees of Ashworth;
+      no legal adviser is a party and it was not made for the dominant purpose of giving or
+      receiving legal advice. The closing recommendation to instruct solicitors does not itself
+      make the memorandum privileged.
+    - **Litigation Privilege:** No, though uncertain — the memorandum's dominant purpose on its
+      face is operational reporting on remediation progress and commercial exposure. It predates
+      the instruction of solicitors (15/05/2025, per Document 5). If it could be shown that
+      litigation was already reasonably in contemplation on 09/05/2025 and that the memo was
+      created for the dominant purpose of that litigation, the answer could differ; a solicitor
+      should confirm. Contains sensitive material (the minimum wage and working time
+      allegations) — flag for careful review before disclosure.
+    - **Without Prejudice:** No — an internal document, not a communication in settlement
+      negotiations.
+
+    ---
+
+    ## Row 5 — Document 5
+
+    - **Date:** 30/05/2025
+    - **Type of Document:** Letter (solicitors' letter of advice, marked "Private & Confidential —
+      Legally Privileged")
+    - **Sender:** Eleanor Byrne, Partner, Calderwood & Finch LLP (solicitors for Ashworth)
+    - **Recipient(s):**
+      - To: Margaret Ellison, Chief Operating Officer, Ashworth Precision Components Ltd
+        (addressee only)
+    - **Summary:** Advice on the merits following instruction on 15/05/2025. The letter assesses
+      strong prospects of establishing breach of the clause 4.1 / Schedule 2 service levels and
+      of the term implied by s.13 Supply of Goods and Services Act 1982 (reasonable care and
+      skill). It advises that the reported conversation with Mr Barraclough, if substantiated,
+      indicates breach of the clause 14.2 warranty by reference to s.1 National Minimum Wage Act
+      1998 (rates prescribed under the National Minimum Wage Regulations 2015, SI 2015/621 — the
+      letter itself advises verifying the rate applicable to the relevant pay reference periods
+      before pleading; no rate figure is asserted) and reg.4(1) of the Working Time Regulations
+      1998, SI 1998/1833. It assesses quantum in the region of £184,000, notes the clause 18.1
+      remediation period expired on 28/05/2025, advises that termination under clause 19 is
+      available, and recommends a letter of claim under the Practice Direction on Pre-Action
+      Conduct together with document preservation.
+    - **Persons Mentioned:**
+      - Tom Whitfield — Warehouse & Logistics Manager, Ashworth (his memorandum of 09/05/2025 is
+        reviewed)
+      - Kevin Barraclough — picker at Brightmoor's Wakefield site (his reported account is
+        assessed)
+    - **Legal Advice Privilege:** Yes — a confidential communication from Ashworth's solicitors
+      to their client made for the dominant purpose of giving legal advice on the merits,
+      remedies and next steps. Do not disclose; list by category only.
+    - **Litigation Privilege:** Yes — by 30/05/2025 the letter itself treats proceedings as
+      contemplated (advising a letter of claim and document preservation), and it was created in
+      confidence for the dominant purpose of the contemplated litigation. Privilege is in any
+      event established under the legal advice head.
+    - **Without Prejudice:** No — advice to the sender's own client, not a communication with the
+      opposing party in settlement negotiations.
+
+    ---
+
+    ## Row 6 — Document 6
+
+    - **Date:** 12/06/2025
+    - **Type of Document:** Email (letter of instruction to an independent expert)
+    - **Sender:** Eleanor Byrne, Partner, Calderwood & Finch LLP (solicitors for Ashworth)
+    - **Recipient(s):**
+      - To: Dr Sarah Pemberton, Director, Kestrel Supply Chain Consulting Ltd
+      - Cc: Margaret Ellison, Chief Operating Officer, Ashworth Precision Components Ltd
+    - **Summary:** Instruction of Dr Pemberton, for the purpose of contemplated court proceedings
+      against Brightmoor (a letter of claim being finalised for sending the following week), to
+      prepare a confidential report on (a) whether Brightmoor's March–May 2025 performance
+      against the Schedule 2 service levels fell below the standard of a competent fulfilment
+      provider and (b) causation and quantification of losses, working from the £58,400 schedule
+      of credits and the wider loss estimate of approximately £184,000. An instruction bundle is
+      to follow by secure transfer; a fee estimate and confirmation of availability are requested
+      by 19/06/2025.
+    - **Persons Mentioned:** None (beyond the sender and recipients identified above).
+    - **Legal Advice Privilege:** No — a communication between the client's solicitor and a
+      third-party expert, not a lawyer–client communication, so the legal advice head does not
+      apply.
+    - **Litigation Privilege:** Yes — a confidential communication between the solicitor and a
+      third party created when litigation was reasonably in contemplation (the email states
+      proceedings are in reasonable contemplation and a letter of claim is being finalised) and
+      for the dominant purpose of conducting that litigation. Do not disclose; list by category
+      only.
+    - **Without Prejudice:** No — an instruction to an expert, not a settlement negotiation with
+      the opposing party.
+
+    ---
+
+    ## Row 7 — Document 7
+
+    - **Date:** 26/06/2025
+    - **Type of Document:** Letter (settlement offer, headed "Without Prejudice Save As To Costs")
+    - **Sender:** Gregory Napier, Partner, Napier Rowe LLP (solicitors for Brightmoor)
+    - **Recipient(s):**
+      - To: Calderwood & Finch LLP (solicitors for Ashworth), for the attention of Eleanor Byrne
+    - **Summary:** Response to Ashworth's letter of claim dated 16/06/2025. Liability is not
+      accepted and the clause 14.2 warranty allegation is denied, with an open response to
+      follow. Without admission of liability, Brightmoor offers in full and final settlement:
+      (a) £70,000 within 28 days of a concluded settlement agreement; (b) a 10% service credit
+      on monthly fees for six months from 01/08/2025; and (c) a jointly agreed performance
+      improvement plan overseen by Lisa Hardcastle. The offer is open until 17:00 on 24/07/2025.
+    - **Persons Mentioned:**
+      - Lisa Hardcastle — Operations Director, Brightmoor Logistics Ltd (proposed overseer of the
+        performance improvement plan)
+    - **Legal Advice Privilege:** No — correspondence between the parties' respective solicitors,
+      not a confidential lawyer–own-client communication for the purpose of legal advice.
+    - **Litigation Privilege:** No — although created in the context of contemplated proceedings,
+      it was sent to the opposing party's solicitors and so is not confidential as against the
+      opponent; its protection derives from the without prejudice rule, not litigation privilege.
+    - **Without Prejudice:** Yes — a genuine attempt to negotiate a settlement, containing a
+      concrete offer of compromise (payment, service credits and an improvement plan) expressly
+      made without admission of liability and headed without prejudice save as to costs. Protected
+      from being referred to in proceedings except on costs; flag for the without prejudice
+      section of the review.
+
+    ---
+
+    ## Review notes for the supervising solicitor
+
+    - Documents 5 and 6 should be withheld from inspection as privileged (legal advice privilege
+      and litigation privilege respectively) and listed by category in the disclosure list under
+      CPR Part 31.
+    - Document 7 is without prejudice save as to costs: excluded from use in the proceedings
+      except on costs.
+    - Document 4 is disclosable on the present assessment but is sensitive (the National Minimum
+      Wage and Working Time Regulations allegations); the litigation privilege position at
+      09/05/2025 should be confirmed before listing. Where the National Minimum Wage is relevant,
+      verify the current rate for the relevant pay reference periods against official sources
+      rather than relying on any figure in the documents.
+    - Documents 1–3 are ordinary business correspondence and disclosable; Document 2 contains an
+      admission of performance shortfall and Document 3 is the clause 18.1 notice — both likely
+      adverse/supportive documents for standard disclosure under CPR Part 31.

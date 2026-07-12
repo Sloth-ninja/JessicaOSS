@@ -1,14 +1,73 @@
 id: jud-spa-review
 type: judged
-pending: >
-  Requires the English-law SPA Review workflow (WS4) so input.text can be produced
-  by running the workflow on a fixture SPA; golden-set inputs to be finalised with
-  an AGL associate. Judge wiring itself is live (see judge.ts).
 description: >
-  Opus-judged case: English-law SPA Review tabular output scored 1–5 against the
-  rubric (issue-spotting completeness, correct law, UK terminology, no invented
-  facts).
+  Opus-judged case scored 1-5 against the rubric. input.text is a PROVISIONAL
+  fixture generated on 12/07/2026 by session agents (English-law SPA Review tabular output over a
+  synthetic English-law share purchase agreement, committed at evals/fixtures/spa-review-source.md)
+  and scored 5/5 on all four dimensions by an interim Opus judge pass; to be
+  reviewed/replaced with an AGL associate. Every statutory citation verified
+  against live legislation.gov.uk (HTTP 200) on 12/07/2026. Runs automatically
+  once ANTHROPIC_API_KEY is configured (skips until then).
 rubric: rubrics/spa-review.md
 min_score: 3
 input:
-  text: ""
+  text: |
+    # English-law Share Purchase Agreement Review
+
+    Review of the share purchase agreement dated 04/06/2026 relating to the entire issued share capital of Larkspur Analytics Limited. Clause references are to that agreement. Non-standard or onerous positions are flagged.
+
+    ## Parties & Target
+
+    - **Sellers:** (1) Pennard Holdings Limited (company number 06214873, registered office Harbour Gate House, 14 Quayside Walk, Bristol BS1 6FQ), holder of 900,000 ordinary shares of £0.01 each (90%); and (2) Dr Eleri Vaughan (of 22 Cathedral Green, Wells, Somerset BA5 2UE), holder of 100,000 ordinary shares of £0.01 each (10%) (Recital (B), clause 3.2, Schedule 2).
+    - **Buyer:** Wessex Bidco Limited (company number 15733492, registered office 3rd Floor, Aldermoor Court, 51 Basinghall Avenue, London EC2V 5DD).
+    - **Guarantor:** Wessex Group Plc (company number 04188056, same registered office as the Buyer), guaranteeing the Buyer's payment obligations, including the Completion Payment, the Retention and the Deferred Consideration (clause 13.1).
+    - **Target:** Larkspur Analytics Limited (company number 09847215, registered office Unit 7, Templeback Science Park, Avon Street, Bristol BS2 0PS) (Recital (A)). Recital (C) expressly states that the target is a subsidiary of Pennard Holdings Limited within the meaning of s.1159 Companies Act 2006.
+    - **Other group companies in the sale:** the sale includes the transfer at Completion of the entire issued share capital of Larkspur Data Services Limited (company number 11302958), a dormant wholly-owned subsidiary of the target (Recital (E)). The target otherwise has no subsidiaries or interests in any other undertaking.
+
+    ## Consideration & Mechanism
+
+    Headline consideration is £42,500,000, payable in pounds sterling (clause 3.1), structured as: (a) a Completion Payment of £35,750,000 in cash; (b) a Retention of £4,250,000 paid into an interest-bearing escrow account with Fenwick Marsh LLP as escrow agent, available for Warranty, Tax Covenant and Specific Indemnity claims and released to the Sellers 18 months after Completion subject to outstanding notified claims (clause 3.1(b), Schedule 7); and (c) Deferred Consideration of £2,500,000 payable on the first anniversary of Completion (clause 3.1(c)).
+
+    The price is determined by **completion accounts**, not a locked box — clause 4.4 expressly confirms there is no locked box mechanism or locked box date. The Headline Consideration is adjusted pound-for-pound against a Target Working Capital of £3,200,000 and reduced by Net Debt (or increased by Net Cash) (clauses 4.1–4.2), with draft Completion Accounts due from the Buyer within 60 Business Days after Completion. There is no earn-out or other contingent consideration (clause 3.3). The Buyer may set off agreed or finally determined claims against the Deferred Consideration (clauses 3.1(c) and 9.8) — a useful buyer protection, though set-off is confined to claims agreed by the Sellers' Representative or determined by a court before the payment date.
+
+    ## Conditions Precedent
+
+    - **National security clearance:** approval of the acquisition by the Secretary of State under the National Security and Investment Act 2021, or establishment to the Buyer's reasonable satisfaction that no mandatory notification under that Act is required (clause 5.1(a)). This Condition cannot be waived (clause 5.2).
+    - **Change-of-control consent:** written consent of Halewood Utilities plc under clause 19.2 of the master services agreement dated 15/03/2023 between the target and Halewood Utilities plc (clause 5.1(b)) — waivable only by the Buyer.
+    - **Guarantee release:** release of the guarantee dated 08/11/2024 given by the target in respect of Pennard's revolving credit facility with Severnside Bank plc, in a form reasonably satisfactory to the Buyer (clause 5.1(c)) — waivable only by the Buyer.
+    - **Long-stop date:** 30/11/2026 (clause 1.1). If the Conditions are not satisfied or waived by 17:00 on that date, either the Buyer or the Sellers' Representative may terminate by written notice; no break fee is payable, and only accrued rights and the Surviving Provisions survive (clause 5.3).
+    - **Endeavours:** the Buyer bears a reasonable-endeavours obligation on the NSI Condition; the Sellers bear it on the consent and guarantee-release Conditions (clause 5.2).
+
+    ## Warranties
+
+    The warranty package comprises: (i) Title and Capacity Warranties (clause 6.1) — power and authority, sole legal and beneficial ownership, shares fully paid and unencumbered — given by each Seller **severally** in respect of itself and its own shares only; (ii) Business Warranties in Schedule 3 and (iii) Tax Warranties in Part 1 of Schedule 4, both given by the Sellers **jointly and severally** (clause 6.2). A separate tax covenant is included in addition to the Tax Warranties: the Sellers jointly and severally covenant in Part 2 of Schedule 4 to pay an amount equal to pre-Completion Tax liabilities of the target, adopting the definition of "connected" persons in s.1122 Corporation Tax Act 2010 (clauses 8.1 and 1.1).
+
+    The Business Warranties expressly noted in clause 6.6 include employment compliance with the National Minimum Wage Act 1998 and the Working Time Regulations 1998 (SI 1998/1833) (Schedule 3 paragraph 14.3 — the warranty is of compliance only and states no rate; the buyer should **verify the current national minimum wage rate** independently rather than rely on any figure), anti-bribery compliance and adequate procedures under the Bribery Act 2010 (paragraph 17.1), data protection compliance under the Data Protection Act 2018 and UK GDPR save for the disclosed Templeback Incident (paragraph 18.2), and no litigation save for the disclosed Okafor Proceedings (paragraph 9.1).
+
+    Warranty periods and qualifiers: Business Warranty claims must be notified within 18 months of Completion; Tax Warranty/Tax Covenant claims by the seventh anniversary; Title and Capacity Warranty claims by the sixth anniversary (clause 9.4). Knowledge qualifiers are confined to the actual knowledge of Marcus Pennard, Sofia Grech and Dr Eleri Vaughan, having made reasonable enquiry of senior management (clauses 1.1 and 6.4). The Warranties are given at signing only and are **not repeated at Completion**, save for the Title and Capacity Warranties, which are deemed repeated immediately before Completion (clause 6.5) — buyer-side counsel should note that Business Warranty protection does not bridge the signing-to-Completion gap (the MAC Condition in clause 12 is the principal gap protection).
+
+    ## Limitations on Liability
+
+    **Aggregate cap:** Business Warranty claims are capped at £12,750,000, expressed as 30% of the Headline Consideration; all claims under the agreement (including Title and Capacity Warranties, Tax Warranties, Tax Covenant and Specific Indemnities) are capped at an amount equal to the Consideration actually received by the Sellers (clause 9.1). **De minimis:** £25,000 per individual claim under the Business or Tax Warranties, with claims arising from the same or substantially similar facts aggregated (clause 9.2). **Basket:** £425,000 (1% of the Headline Consideration); once exceeded, the Sellers are liable for the **whole amount, not only the excess** — a first-pound (tipping) basket, which is the more buyer-friendly position and worth flagging to seller-side reviewers (clause 9.3). The de minimis and basket do not apply to Title and Capacity Warranty, Tax Covenant or Specific Indemnity claims (clause 9.7).
+
+    **Time limits:** 18 months from Completion for Business Warranties; seventh anniversary for Tax Warranties and the Tax Covenant; sixth anniversary for Title and Capacity Warranties (clause 9.4). A notified claim is deemed withdrawn unless proceedings are commenced and served within nine months of notification (clause 9.5) — a comparatively short prosecution window that buyer-side counsel should diarise. None of the limitations applies to claims arising from fraud or fraudulent misrepresentation (clause 9.6).
+
+    ## Restrictive Covenants
+
+    Each Seller severally undertakes (extending to members of its group) for **three years from Completion**: (a) a non-compete against any business competing with the target's business of data analytics for the regulated utilities sector as carried on at Completion, within the United Kingdom or the Republic of Ireland; (b) non-solicitation of the custom of any customer or supplier of the target in the 24 months before Completion, in relation to a competing business; and (c) non-solicitation of senior employees or consultants of the target as at Completion (clause 11.1). A carve-out permits passive investment holdings of up to 3% of any class of listed securities (clause 11.2). Clause 11.3 contains express reasonableness and severability/blue-pencil provisions, including deemed modification of duration, area or scope where necessary for enforceability. **Flag:** a three-year duration across all three covenants is at the longer end of the commonly negotiated range for share sales and, together with the two-jurisdiction geographic scope, should be assessed for enforceability as no wider than reasonably necessary to protect the goodwill acquired.
+
+    ## Indemnities
+
+    Two Specific Indemnities are given jointly and severally on a pound-for-pound basis (clause 10.1): (a) the **Okafor Proceedings** — the Employment Tribunal claim by former employee Mr Daniel Okafor under case number 1402317/2026, alleging unfair dismissal and unlawful deductions from wages, with liability under this indemnity capped at £150,000; and (b) the **Templeback Incident** — the personal-data security incident of 21/02/2026 affecting the target's customer-analytics platform, notified to the Information Commissioner's Office on 23/02/2026, covering any monetary penalty notice under the Data Protection Act 2018 and reasonable remediation costs. Both indemnities sit outside the de minimis and basket and are **not qualified by the Disclosure Letter**, but both remain subject to the overall cap in clause 9.1(b); the Templeback Incident indemnity must be claimed by the third anniversary of Completion (clause 10.2). **Flag:** the Templeback indemnity is uncapped in amount short of the overall consideration cap and covers regulatory penalties — an onerous position for the Sellers; conversely, the three-year claim window may be tested if ICO enforcement extends beyond it.
+
+    ## MAC / Termination
+
+    Yes — clause 12.1 gives the Buyer a **walk-away right** (termination by written notice, without liability of the Buyer) if a Material Adverse Change occurs between signing and Completion; it is framed as a termination right rather than merely a condition to completion. The trigger is quantified: an event which has resulted, or would reasonably be expected to result, in a reduction of 15% or more in the target's consolidated revenue for the following 12-month period (clause 12.2). Carve-outs cover general economic, market or political conditions (including interest and exchange rate movements), conditions generally affecting the data analytics or utilities sectors, post-signing changes in law, regulation or accounting standards, and acts or omissions of the Buyer — subject to a disproportionate-effect claw-back for the first three categories (clause 12.2(a)–(d)). Separately, either party may terminate if the Conditions are unsatisfied by the Long-stop Date (clause 5.3), and clause 7.2 gives the non-defaulting party the option to defer Completion by up to 10 Business Days, complete so far as practicable, or terminate on a material Completion default. The quantified 15% revenue trigger makes this MAC more objectively testable than a general-words formulation, which favours the Buyer.
+
+    ## Governing Law & Jurisdiction
+
+    The agreement and any dispute or claim (including non-contractual disputes or claims) arising out of or in connection with it is governed by the law of England and Wales (clause 22.1). The courts of England and Wales have **exclusive** jurisdiction (clause 22.2). There is no arbitration provision; however, jurisdiction is expressly subject to clause 4.3, under which Completion Accounts disputes are referred to an independent chartered accountant (agreed, or nominated by the President of the Institute of Chartered Accountants in England and Wales) acting as **expert and not as arbitrator**, whose determination is final and binding absent manifest error or fraud.
+
+    ## Disclosure Letter References
+
+    Yes — the Warranties are qualified by a Disclosure Letter of the same date as the agreement, together with an annexed bundle of documents (clause 1.1 definition; clause 6.2). The disclosure standard is **fair disclosure**: matters must be disclosed with sufficient detail to enable a reasonable buyer to identify the nature and scope of the matter disclosed (clause 6.3). General disclosure is narrowly confined to (a) the target's Companies House register entries publicly available two Business Days before the date of the agreement and (b) the agreed-form data room index annexed to the Disclosure Letter (clause 6.3) — a relatively buyer-friendly formulation. Specific disclosure references quoted in the agreement: paragraph 9 of the Disclosure Letter (the Okafor Proceedings, against Schedule 3 paragraph 9.1) and paragraph 18 of the Disclosure Letter (the Templeback Incident, against Schedule 3 paragraph 18.2) (clause 6.6(c)–(d)). The Specific Indemnities are expressly not qualified by the Disclosure Letter (clause 10.2), and the countersigned Disclosure Letter is a Completion deliverable (clause 7.1).
