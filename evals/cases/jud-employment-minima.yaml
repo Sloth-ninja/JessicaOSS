@@ -1,15 +1,87 @@
 id: jud-employment-minima
 type: judged
-pending: >
-  Requires the Employment Contract vs Statutory Minima workflow (WS4) so
-  input.text can be produced by running the workflow on a fixture employment
-  contract; golden-set inputs to be finalised with an AGL associate. Judge wiring
-  itself is live (see judge.ts).
 description: >
-  Opus-judged case: employment contract vs statutory minima tabular output scored
-  1–5 against the rubric (issue-spotting completeness, correct law, UK
-  terminology, no invented facts).
+  Opus-judged case scored 1-5 against the rubric. input.text is a PROVISIONAL
+  fixture generated on 12/07/2026 by session agents (Employment Contract vs Statutory Minima output over a
+  synthetic employment contract with deliberate sub-minima terms, committed at evals/fixtures/employment-minima-source.md)
+  and scored 5/5 on all four dimensions by an interim Opus judge pass; to be
+  reviewed/replaced with an AGL associate. Every statutory citation verified
+  against live legislation.gov.uk (HTTP 200) on 12/07/2026. Runs automatically
+  once ANTHROPIC_API_KEY is configured (skips until then).
 rubric: rubrics/employment-minima.md
 min_score: 3
 input:
-  text: ""
+  text: |
+    # Employment Contract vs Statutory Minima
+
+    **Document:** Statement of Terms and Conditions of Employment — Harrowgate Fulfilment Services Limited and Daniel Chukwuemeka Okafor, dated 27/03/2023 (commencement 03/04/2023)
+
+    | Column | Conclusion |
+    |---|---|
+    | Written Particulars | Partial — several required particulars missing |
+    | Notice Period | **Shortfall** (employer notice below statutory minimum) |
+    | Holiday Entitlement | **Shortfall** (20 days inclusive vs 28-day statutory minimum) |
+    | Working Hours / 48-Hour Opt-Out | **Non-compliant opt-out** (embedded, non-negotiable) |
+    | Pay vs National Minimum Wage | **Potential shortfall** — verify current rate |
+    | Sick Pay (SSP) | **Shortfall** (purports to exclude all sick pay; SSP cannot be excluded) |
+    | Pension Auto-Enrolment | **No** |
+
+    ---
+
+    ## Written Particulars
+
+    **Contractual term as stated.** The document is a written statement of terms and includes: the names of the parties (clause heading and parties block); date of commencement and continuous employment (clauses 1.1–1.2); job title (clause 2.1); place of work (clause 3.1); remuneration of £24,000 per annum payable monthly (clause 4.1); hours of work of 45 hours per week in nine-hour shifts, Monday to Saturday (clause 5.1); holiday entitlement (clause 7.2); sickness absence terms (clause 8); notice (clause 9); collective agreements (clause 10); disciplinary and grievance procedures (clause 11); and a probationary period (clause 12).
+
+    **Statutory minimum.** s.1 Employment Rights Act 1996 requires a written statement of particulars containing, among other matters, particulars of any terms relating to pensions and pension schemes, any entitlement to training provided by the employer, and any other paid leave beyond holiday entitlement.
+
+    **Assessment: falls short in part.** The following statutorily required particulars appear to be missing from the document: (a) any particulars of pensions or pension schemes — the contract is entirely silent on pensions; (b) any particulars of training entitlement; and (c) any particulars of paid leave other than holiday. The sick pay particular is present (clause 8.2) but its substance is non-compliant — see Sick Pay (SSP) below.
+
+    ## Notice Period
+
+    **Contractual term as stated.** Clause 9.1: the employment may be terminated by either party giving not less than **one week's notice** in writing, with the Company reserving a right to pay in lieu (clause 9.3) and to dismiss without notice for gross misconduct (clause 9.2).
+
+    **Statutory minimum.** s.86 Employment Rights Act 1996: the employer must give a minimum of one week's notice per complete year of continuous employment (up to a maximum of 12 weeks), subject to a minimum of one week once the employee has one month's service. The employee's statutory minimum notice to the employer is one week.
+
+    **Assessment: falls short.** The employment commenced on 03/04/2023, so the Employee completed three years' continuous employment on 03/04/2026. From two complete years' service onwards, the flat one-week employer notice in clause 9.1 is below the s.86 minimum; at three or more complete years the statutory floor for employer notice is at least three weeks and rises by one week per further complete year to a maximum of 12. Statutory minimum notice overrides the shorter contractual term. The Employee's one-week notice to the Company meets the statutory minimum for notice given by an employee.
+
+    ## Holiday Entitlement
+
+    **Contractual term as stated.** Clause 7.2: **20 days' paid holiday per holiday year, inclusive of all bank and public holidays**, with days worked on bank holidays deducted in lieu from the 20-day entitlement rather than added to it.
+
+    **Statutory minimum.** reg 13 and reg 13A Working Time Regulations 1998 (SI 1998/1833): 5.6 weeks' annual leave per leave year. There is no statutory right to bank holidays as such, so the entitlement may lawfully be inclusive of bank holidays — but the total must still reach 5.6 weeks. On the contractual working pattern of five nine-hour shifts per week (clause 5.1), 5.6 weeks equates to **28 days**.
+
+    **Assessment: falls short.** 20 days inclusive of bank and public holidays is **8 days below** the 28-day statutory minimum for this working pattern. The lieu-day mechanism in clause 7.2 does not cure the shortfall, as it redistributes rather than increases the entitlement. Clause 7.3's bar on carry-over and on payment in lieu (except on termination) is also inconsistent with the position under reg 13, under which statutory leave may not be replaced by a payment in lieu except on termination and cannot simply be forfeited where the worker was denied the opportunity to take it.
+
+    ## Working Hours / 48-Hour Opt-Out
+
+    **Contractual term as stated.** Clause 5.1: normal hours of **45 hours per week**, in nine-hour shifts (each including a 30-minute unpaid break) between 06:00 and 22:00, Monday to Saturday, per rota. Clause 5.2 requires additional hours as reasonably necessary, unpaid unless overtime is authorised in advance. Clause 6.1 states that **by signing the agreement the Employee agrees the 48-hour average weekly limit shall not apply**, and that this clause "is a condition of the Employee's employment with the Company".
+
+    **Statutory minimum.** reg 4 Working Time Regulations 1998 (SI 1998/1833) imposes a 48-hour limit on average weekly working time. That limit can only be disapplied by an individual agreement satisfying reg 5 SI 1998/1833 — a written agreement freely entered into by the worker, terminable by the worker on notice.
+
+    **Assessment: non-compliant.** The purported opt-out is embedded in the main contract and expressed to be a non-negotiable condition of employment, and contains no provision for the Employee to withdraw it on notice. It therefore does not appear to satisfy reg 5, and the reg 4 48-hour average limit should be treated as continuing to apply. The normal 45-hour week sits below 48 hours, but clause 5.2's open-ended additional-hours obligation could take average working time over the limit in the absence of a valid opt-out.
+
+    ## Pay vs National Minimum Wage
+
+    **Contractual term as stated.** Clause 4.1: salary of **£24,000 per annum**, paid monthly in arrears. Contracted hours are 45 per week (clause 5.1), of which 30 minutes per nine-hour shift is an unpaid break, giving 42.5 working hours across five shifts. Clause 5.2 permits additional unpaid hours unless overtime is authorised in advance.
+
+    **Statutory minimum.** The National Minimum Wage Act 1998 (s.1) entitles the worker to at least the national minimum wage for the worker's category. The applicable hourly rate changes annually (each April) and **should be verified against the current published rate rather than assumed** — this workflow does not assert a current figure.
+
+    **Assessment: potential shortfall — verify current rate.** On 42.5 working hours per week (2,210 hours per year), £24,000 equates to approximately **£10.86 per hour**; on the stated 45-hour figure (2,340 hours per year) it is approximately **£10.26 per hour**. Both effective rates are low enough that compliance turns on the current minimum wage rate for the Employee's age category, which must be verified. Any unpaid additional hours worked under clause 5.2 would depress the effective hourly rate further in the relevant pay reference periods. This term should be treated as at risk of falling below the statutory floor pending rate verification and a review of hours actually worked.
+
+    ## Sick Pay (SSP)
+
+    **Contractual term as stated.** Clause 8.2: "The Company does not operate any sick pay scheme and no payment will be made by the Company in respect of any period of absence due to sickness or injury."
+
+    **Statutory minimum.** Statutory sick pay under s.151 Social Security Contributions and Benefits Act 1992 is a statutory floor: an employer is liable to pay SSP to a qualifying employee for qualifying days of incapacity, and this liability cannot be excluded by contract.
+
+    **Assessment: falls short.** There is no enhanced (contractual) sick pay, and clause 8.2 as drafted purports to exclude *all* payment during sickness absence, which on its face includes SSP. The contract is silent on the interaction between the exclusion and the statutory scheme. The blanket exclusion is ineffective as against SSP for a qualifying employee, and the clause should be flagged as non-compliant and misleading as drafted.
+
+    ## Pension Auto-Enrolment
+
+    **No.**
+
+    The contract contains no reference to pension auto-enrolment, to any pension scheme, or to any employer or employee contribution rates — it is entirely silent on pensions. The employer's duty under the Pensions Act 2008 (s.3 — automatic enrolment of eligible jobholders into a qualifying scheme) applies irrespective of the contract's silence, so the omission does not remove the obligation; it does mean the written particulars are incomplete on this point (see Written Particulars above). No contribution rates are stated.
+
+    ---
+
+    *Statutory references cited: s.1 and s.86 Employment Rights Act 1996; reg 4, reg 5, reg 13 and reg 13A Working Time Regulations 1998 (SI 1998/1833); s.1 National Minimum Wage Act 1998; s.151 Social Security Contributions and Benefits Act 1992; s.3 Pensions Act 2008. Current National Minimum Wage rates change annually and must be verified against the current published rates.*

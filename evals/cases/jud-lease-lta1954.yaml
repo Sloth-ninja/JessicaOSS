@@ -1,14 +1,98 @@
 id: jud-lease-lta1954
 type: judged
-pending: >
-  Requires the Commercial Lease Review — LTA 1954 workflow (WS4) so input.text can
-  be produced by running the workflow on a fixture lease; golden-set inputs to be
-  finalised with an AGL associate. Judge wiring itself is live (see judge.ts).
 description: >
-  Opus-judged case: commercial lease security-of-tenure review output scored 1–5
-  against the rubric (issue-spotting completeness, correct law, UK terminology, no
-  invented facts).
+  Opus-judged case scored 1-5 against the rubric. input.text is a PROVISIONAL
+  fixture generated on 12/07/2026 by session agents (Commercial Lease Review — LTA 1954 output over a
+  synthetic contracted-out commercial lease, committed at evals/fixtures/lease-lta1954-source.md)
+  and scored 5/5 on all four dimensions by an interim Opus judge pass; to be
+  reviewed/replaced with an AGL associate. Every statutory citation verified
+  against live legislation.gov.uk (HTTP 200) on 12/07/2026. Runs automatically
+  once ANTHROPIC_API_KEY is configured (skips until then).
 rubric: rubrics/lease-lta1954.md
 min_score: 3
 input:
-  text: ""
+  text: |
+    # Commercial Lease Review — LTA 1954
+
+    **Workflow:** Commercial Lease Review — LTA 1954 (`builtin-commercial-lease-lta1954`, tabular)
+    **Document reviewed:** Lease dated 24/06/2025 — Harwick Estates (Holborn) Limited (1) and Bluegate Analytics Limited (2), Third Floor, Lantern House, 42 Merchant's Row, Leeds LS1 4QT
+
+    | # | Column | Format | Answer |
+    |---|--------|--------|--------|
+    | 0 | Parties & Premises | text | See below |
+    | 1 | Term | text | See below |
+    | 2 | Rent & Review Mechanism | text | See below |
+    | 3 | Break Clauses | text | See below |
+    | 4 | Security of Tenure (1954 Act) | yes_no | **No** |
+    | 5 | Alienation | text | See below |
+    | 6 | Repair (FRI?) | yes_no | **Yes** |
+    | 7 | Service Charge | text | See below |
+    | 8 | Forfeiture | text | See below |
+    | 9 | 1954 Act Red Flags | bulleted_list | See below |
+
+    ---
+
+    ## 0. Parties & Premises
+
+    **Landlord:** Harwick Estates (Holborn) Limited (company number 09814472), registered office 5 Chancery Gate, London WC2A 1FF (LR3).
+    **Tenant:** Bluegate Analytics Limited (company number 12466091), registered office Unit 9, Riverbank Business Park, York YO19 5PN (LR3).
+    **Premises:** The whole of the Third Floor, Lantern House, 42 Merchant's Row, Leeds LS1 4QT, being part of the Building registered at HM Land Registry under title number **WYK812345** (LR4; clause 1.1). The demise is internal only: it includes raised floors, suspended ceilings, internal non-structural walls and internal surfaces of external walls, but excludes the structure, load-bearing walls, roof, foundations, Common Parts and Service Media serving other parts of the Building (clause 1.1, definition of "Premises").
+
+    ## 1. Term
+
+    A contractual term of **10 years**, commencing on and including **24/06/2025** and expiring on and including **23/06/2035** (LR6; clause 1.1, definition of "Contractual Term"). The lease is dated 24/06/2025 (LR1).
+
+    ## 2. Rent & Review Mechanism
+
+    **Initial rent:** £185,000 per annum exclusive of VAT, payable by equal quarterly instalments in advance on the usual quarter days (25 March, 24 June, 29 September, 25 December), first payment apportioned from 24/06/2025 to 28/09/2025 (clauses 1.1, 2.1(a)). Interest runs on late payment at 4% per annum above Bank of England base rate after 10 working days (clause 2.2).
+    **Review mechanism:** A single review on **24/06/2030** to the higher of the passing rent and the open market rent on the Schedule 2 assumptions and disregards — i.e. an **upwards-only open market review** (clauses 4.1–4.2). Disputes go to an independent chartered surveyor acting as **arbitrator**, appointed by the President of the RICS (clause 4.2). Time is not of the essence for the review (clause 4.3).
+
+    ## 3. Break Clauses
+
+    **Tenant-only break** on **24/06/2030** on not less than **nine months' prior written notice**; time is **of the essence** for service of the Break Notice, which may not be served by email (clauses 5.1, 10.4). The break is **conditional**: it is of no effect unless on the Break Date (a) all Annual Rent and VAT on it due up to and including the Break Date has been paid in full, and (b) the Tenant gives **vacant possession** of the whole of the Premises (clause 5.2). The Landlord must refund rent apportioned to the period after the Break Date within 20 working days (clause 5.3). The Landlord has **no break right** (clause 5.4). Practical caution: the vacant-possession and rent-paid conditions are strict — compliance should be diarised and verified well before 24/06/2030.
+
+    ## 4. Security of Tenure (1954 Act)
+
+    **No** — on the face of the lease, the tenancy has been **contracted out** of the security of tenure provisions of Part II of the Landlord and Tenant Act 1954, so the Tenant does not have security of tenure, subject to the verification points below.
+
+    Evidence in the document for each element of the s.38A Landlord and Tenant Act 1954 procedure:
+
+    - **(a) Contracting-out recitals:** Recitals (C)–(F) and clause 9 record an agreement pursuant to **s.38A Landlord and Tenant Act 1954** that **ss.24–28 Landlord and Tenant Act 1954** are excluded, and LR8 carries the corresponding prescribed statement.
+    - **(b) Warning notice and declaration:** The landlord's warning notice is recited as served on **16/06/2025**, before the Tenant became contractually bound, in the form set out in Schedule 1 to the **Regulatory Reform (Business Tenancies) (England and Wales) Order 2003 (SI 2003/3096)** (Recital (C); clause 9.1(a)). A declaration by **Priya Nandakumar, a director of the Tenant**, dated **18/06/2025**, in the form in paragraph 8 of Schedule 2 to SI 2003/3096, is recited at Recital (D) and clause 9.1(b), with certified copies stated to be annexed at Annexure 1.
+    - **(c) Simple or statutory declaration:** A **statutory declaration**, made before a solicitor (Recital (D)). This is the correct form here: the lease is dated 24/06/2025 and the warning notice is recited as served on 16/06/2025 — **fewer than 14 days** before completion — in which case the 2003 Order requires a statutory (not simple) declaration, which is what the recital records.
+
+    The recitals are internally consistent, but this conclusion rests on recited facts. Before relying on the contracting-out position, the original completed and dated Warning Notice and Statutory Declaration at Annexure 1 must be inspected (see column 9). If the exclusion were invalid, the Tenant would retain the right to apply for a new tenancy under **s.24 Landlord and Tenant Act 1954**.
+
+    ## 5. Alienation
+
+    - **Assignment:** whole only; no assignment of part (clause 6.2). Landlord's prior written consent required, **not to be unreasonably withheld or delayed**; the lease acknowledges the Landlord's statutory duties under the **Landlord and Tenant Act 1988** (clause 6.2). As a pre-agreed circumstance under **s.19(1A) Landlord and Tenant Act 1927**, the Landlord may require an **authorised guarantee agreement (AGA)** within the meaning of **s.16 Landlord and Tenant (Covenants) Act 1995** from the outgoing tenant, and a guarantee of the AGA from any guarantor of the outgoing tenant (clause 6.2(a)–(b)).
+    - **Underletting:** whole only, with consent not to be unreasonably withheld or delayed; any underlease must be at **not less than open market rent** (not the passing rent), without fine or premium, must itself be **contracted out of ss.24–28 Landlord and Tenant Act 1954** before grant, and must prohibit further underletting (clause 6.3). Note: the restriction is by reference to open market rent at the date of grant, not the passing rent under this lease (clause 6.3(a)).
+    - **Charging:** whole only, to a bona fide bank or institutional lender, with consent not to be unreasonably withheld or delayed (clause 6.4).
+    - **Sharing occupation:** permitted with a Group Company (as defined by reference to s.42 Landlord and Tenant Act 1954) provided no landlord-and-tenant relationship arises; notice to the Landlord within 20 working days of the sharing beginning or ending (clauses 1.1, 6.5).
+
+    ## 6. Repair (FRI?)
+
+    **Yes** — this is a full repairing and insuring lease in effect. The Tenant covenants to **keep the Premises in good and substantial repair and condition** (damage by an Insured Risk excepted, unless the insurance is vitiated by the Tenant's act or default) (clause 3.1). The lease states expressly that there is **no schedule of condition** and the repairing obligation is **not limited** by reference to the condition of the Premises at the date of the lease (clause 3.1) — so "keep in repair" may require putting the Premises into repair. The Landlord insures the Building and repairs the structure, exterior and Common Parts, but recovers those costs from the tenants through the **Insurance Rent** (clauses 1.1, 3.4) and the **Service Charge** (clause 7.1; Schedule 3), so the full repair and insurance cost sits with the Tenant directly or via those routes. Decoration in every fifth year and the last three months of the term; yield-up in repair with reinstatement of alterations if required (clauses 3.2–3.3).
+
+    ## 7. Service Charge
+
+    Yes. The Tenant pays a fixed **Tenant's Proportion of 14.75%** of the Service Costs, stated to reflect net internal floor areas and subject to adjustment under Schedule 3 (clauses 1.1, 7.1). **Included services:** repair, maintenance and cleaning of the structure, roof, foundations and Common Parts; the two passenger lifts and the heating/comfort-cooling plant; lighting, cleaning and security of Common Parts; forecourt landscaping; managing agents' reasonable fees (clause 7.1). **Exclusions:** initial construction costs, costs attributable to other lettable units, and costs recovered under insurance (clause 7.5). **Cap:** £42,000 per service charge year, indexed upwards each 1 January in line with CPI (clause 7.3) — the cap figure is as at the 2025 service charge year; the indexed cap for any later year should be recalculated at the time, not assumed. **Mechanism:** quarterly on-account instalments on the Rent Payment Days against the Landlord's estimate; service charge year ends 31 December; certificate of actual costs within **four months** of year end; shortfall payable within 20 working days of demand, overpayments credited or repaid after the End of the Term (clauses 7.2, 7.4).
+
+    ## 8. Forfeiture
+
+    The Landlord may re-enter the whole or part of the Premises and forfeit the lease if (a) any reserved rent is unpaid **21 days** after falling due, whether formally demanded or not; (b) the Tenant breaches any covenant or term of the lease; or (c) the Tenant or any guarantor suffers an Insolvency Event (winding-up petition, administrator or administrative receiver, CVA, or bankruptcy order for an individual) (clause 8.1(a)–(c)). Forfeiture is without prejudice to antecedent breaches (clause 8.2). For breaches other than non-payment of rent, the statutory notice procedure under **s.146 Law of Property Act 1925** applies and is expressly preserved (clause 8.2). Clause 8.3 provides that acceptance of rent with knowledge of a breach is not a waiver of the right to forfeit for a **continuing** breach — but this clause does not address once-and-for-all breaches, so waiver risk on rent demands after a known one-off breach should still be managed carefully.
+
+    ## 9. 1954 Act Red Flags
+
+    - **Recitals are not the declaration.** The contracting-out position rests on Recitals (C)–(F) and clause 9. Before relying on the exclusion, inspect the original completed and dated **Warning Notice (16/06/2025)** and **Statutory Declaration (18/06/2025)** stated to be annexed at Annexure 1, and confirm they match the forms in Schedules 1 and 2 to SI 2003/3096.
+    - **Sub-14-day service means the statutory declaration route was mandatory.** The Warning Notice (16/06/2025) was served fewer than 14 days before the lease was completed (24/06/2025). A simple declaration would not suffice on that timeline; confirm the annexed declaration is genuinely a **statutory** declaration, sworn before an independent person authorised to take declarations, and dated **after** service of the Warning Notice but **before** the Tenant became contractually bound.
+    - **Confirm there was no earlier agreement for lease.** Clause 9.1(c) states there is no agreement for lease. If any earlier binding agreement in fact existed pre-dating the Warning Notice, the notice would have been served too late and the exclusion could fail, leaving the Tenant with the right to apply for a new tenancy under s.24 Landlord and Tenant Act 1954.
+    - **Confirm the declarant's authority.** The Statutory Declaration was made by Priya Nandakumar as a director of the Tenant (Recital (D); she is also a signatory to the deed). Verify she was duly authorised at the date of the declaration.
+    - **Check the declaration correctly describes the tenancy.** The declaration must identify the correct premises, landlord and proposed term; a material mismatch with the lease as granted should be checked against the annexed copy.
+    - **Underletting dependency.** Any underlease must itself be validly contracted out before grant (clause 6.3(b)); the same s.38A procedure and evidential checks will apply at that point.
+    - **No s.25/s.26 notice issues arise on the face of this document** — this is a new lease dated 24/06/2025, and no notices under s.25 or s.26 Landlord and Tenant Act 1954 are referred to in it. If the exclusion is valid, the renewal regime (including ss.24–28) does not apply; if it is not, the position changes fundamentally.
+    - **Consequence if the exclusion fails:** the Tenant would hold with security of tenure and the conditional tenant-only break (clause 5) and expiry date (23/06/2035) would no longer define the Landlord's recovery position — the Landlord would need to operate the Part II renewal/termination machinery instead.
+
+    ---
+
+    *Statutory references relied on (all verified against legislation.gov.uk): Landlord and Tenant Act 1954, Part II, ss.24, 25, 26, 28 and 38A; Regulatory Reform (Business Tenancies) (England and Wales) Order 2003, SI 2003/3096; Landlord and Tenant Act 1927, s.19(1A); Landlord and Tenant Act 1988; Landlord and Tenant (Covenants) Act 1995, s.16; Law of Property Act 1925, s.146. No case law is cited. Where a figure is index-linked (e.g. the CPI-indexed service charge cap), verify the current rate at the time of advice rather than relying on the base figure.*
