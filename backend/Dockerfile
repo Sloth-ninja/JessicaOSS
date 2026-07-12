@@ -38,16 +38,19 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3001
 
-COPY package.json package-lock.json ./
+# node:22-slim ships a non-root "node" user (uid 1000) already; use it instead
+# of running the server as root. Ownership is set per-COPY (and by running
+# npm ci as that user) rather than via a trailing `chown -R`, which would
+# duplicate every file into an extra image layer. WORKDIR creates /app owned
+# by root, so hand the (still empty) directory to node first — non-recursive,
+# so the layer stays tiny.
+RUN chown node:node /app
+COPY --chown=node:node package.json package-lock.json ./
+USER node
 RUN npm ci --omit=dev \
     && npm cache clean --force
 
-COPY --from=build /app/dist ./dist
-
-# node:22-slim ships a non-root "node" user (uid 1000) already; use it instead
-# of running the server as root.
-RUN chown -R node:node /app
-USER node
+COPY --from=build --chown=node:node /app/dist ./dist
 
 EXPOSE 3001
 
