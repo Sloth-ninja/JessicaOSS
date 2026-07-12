@@ -48,8 +48,8 @@ body:
       options:
         - Assistant chat (no workflow)
         - Tabular review (general)
-        - SPA Review (English law)
-        - Commercial Lease Review (LTA 1954)
+        - English-law SPA Review
+        - Commercial Lease Review — LTA 1954
         - TUPE Analysis
         - Employment Contract vs Statutory Minima
         - Companies House Due-Diligence Snapshot
