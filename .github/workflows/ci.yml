@@ -1,0 +1,93 @@
+# CI merge gate (BUILD_PLAN §7): typecheck → lint → unit tests → full eval suite
+# (citation hard gate included). Human merge only — this workflow gates, it never merges.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Cancel superseded runs of the same branch/PR; never cancel in-flight runs on main.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (typecheck + unit tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Unit tests (vitest)
+        run: npx vitest run
+
+  frontend:
+    name: Frontend (typecheck + lint + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      # Public (non-secret) values — configure as repository *variables*.
+      # `next build` prerenders pages through the root layout, whose provider tree
+      # constructs the Supabase client at module scope (frontend/src/lib/supabase.ts);
+      # @supabase/supabase-js throws on an empty URL/key, so syntactically valid
+      # placeholders are supplied when the repository variables are unset.
+      NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co' }}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY || 'sb_publishable_ci_placeholder' }}
+      NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Lint
+        run: npm run lint
+      - name: Build
+        run: npm run build
+
+  evals:
+    name: Evals (golden set, citation hard gate)
+    runs-on: ubuntu-latest
+    env:
+      # Without these secrets the runner skips (loudly) the Companies House and
+      # LLM-judged cases rather than failing, so this job still passes on forks.
+      # NB: a key that is set but invalid makes judged cases FAIL, not skip.
+      COMPANIES_HOUSE_API_KEY: ${{ secrets.COMPANIES_HOUSE_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: evals/package-lock.json
+      # The repo root has no lockfile (root package.json is scripts-only); the eval
+      # harness is its own npm project under evals/.
+      - name: Install eval harness dependencies
+        run: npm ci
+        working-directory: evals
+      - name: Run full eval suite
+        run: npm run evals
