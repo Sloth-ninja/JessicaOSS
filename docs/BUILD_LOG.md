@@ -7,6 +7,89 @@
 
 ---
 
+## 2026-07-08 — Pilot deployment workstream (branch `ws6-pilot-deployment`, WS6)
+
+**Scope:** Owner decision (8 July 2026) to pilot-first: complete the product,
+deploy privately at `jessicaoss.com` for a small group of Aria Grace Law
+solicitors, gather feedback, optimise, then public launch. This workstream is
+docs + deploy artefacts only, produced in parallel with five feature PRs
+(#4–#8); expect a trivial conflict on this file against those parallel
+entries.
+
+**Added**
+- `docs/DEPLOYMENT.md` — pilot deployment guide: architecture (Cloudflare
+  Workers frontend, containerised backend, production Supabase, R2), a
+  backend-hosting comparison (Fly.io recommended default; Railway already has
+  partial groundwork via the existing `backend/nixpacks.toml`; Render; a
+  small VM), a production Supabase checklist (new project, schema, invite-only
+  sign-up, custom SMTP, TOTP MFA), R2 setup, a full backend + frontend env
+  var matrix, DNS guidance, a post-deploy smoke checklist, and an explicit
+  "decisions needed from the owner" section.
+- `backend/Dockerfile` + `backend/.dockerignore` — multi-stage production
+  image (`node:22-slim` build stage running `tsc`; runtime stage installing
+  `libreoffice-writer` via apt for the `soffice` binary that
+  `backend/src/lib/convert.ts` shells out to, non-root `node` user, `PORT`
+  respected, `CMD ["node", "dist/index.js"]`). Not built or run in this
+  sandbox — no Docker daemon available; the guide says so explicitly and
+  gives the local verification command.
+- `docs/PILOT.md` — pilot programme doc: Supabase-invite-only invite flow,
+  synthetic/public-documents-only ground rule pending a data-protection
+  review, what feedback is wanted (workflow accuracy, UK terminology,
+  citation trust, speed, confusion points), how to give it (the new issue
+  form), ~2-week expected cadence, and the "AI-generated, solicitor review
+  required" reminder.
+- `.github/ISSUE_TEMPLATE/pilot-feedback.yml` — structured GitHub issue form
+  (what were you trying to do / what happened / expected / workflow-template
+  dropdown / severity / UK-terminology checkbox / contact-ok). The
+  workflow/template dropdown's six UK-specific options (SPA Review,
+  Commercial Lease Review, TUPE Analysis, Employment Contract vs Statutory
+  Minima, Companies House Due-Diligence Snapshot, Disclosure Review) are
+  taken from `docs/BUILD_PLAN.md` §3 (WS4) and `docs/MIGRATION_SPEC.md` §6
+  decision 1 (E-Discovery → Disclosure Review rename); **WS4 had not merged
+  into this branch at time of writing**, so exact final titles should be
+  checked against the merged workflow list before the pilot starts. An
+  "Other / not sure" option covers drift in the meantime.
+- `docs/BUILD_PLAN.md` — appended a WS6 entry to §3 (scope + re-sequencing
+  note: the §9 launch checklist now sits after a pilot feedback window, not
+  immediately after day 3). No other edits to that file.
+
+**Verification**
+- Every claim in `docs/DEPLOYMENT.md` was checked against the repo before
+  writing it: `backend/src/index.ts` (CORS/`FRONTEND_URL`, `trust proxy`/
+  `TRUST_PROXY_HOPS`, HSTS gated on `NODE_ENV=production`, `/health`, rate
+  limit vars), `backend/src/lib/convert.ts` (`docxToPdf`/`soffice` binary
+  resolution, the existing Railway-nixpacks error message), `backend/schema.sql`
+  (`revoke all` grants now at lines 760-780, post-CourtListener-excision —
+  CLAUDE.md's cited 792-823 is stale), `backend/migrations/` (38 files,
+  latest `20260706_remove_courtlistener.sql`), `backend/package.json` /
+  `frontend/package.json` scripts, `backend/.env.example` /
+  `frontend/.env.local.example`, `frontend/open-next.config.ts`, and
+  `docs/MIGRATION_SPEC.md` for the not-yet-merged WS1/WS3 env vars
+  (`COMPANIES_HOUSE_API_KEY`, `LOCAL_LLM_*`) marked "planned" rather than
+  live. Confirmed `backend/src` currently has no Companies House,
+  legislation.gov.uk, or local-model code yet (WS1–WS3 are parallel,
+  unmerged PRs at time of writing).
+- **Gap found and documented, not silently fixed:** no `wrangler.toml` /
+  `wrangler.jsonc` exists anywhere in the repo, so the frontend's `npm run
+  deploy` script (`opennextjs-cloudflare build && opennextjs-cloudflare
+  deploy`) has nothing to deploy against yet. Recorded as an owner decision
+  item in `docs/DEPLOYMENT.md` §8 rather than invented, since it needs live
+  Cloudflare account details (account ID, route, compatibility date) not
+  available in this sandbox.
+- `.github/ISSUE_TEMPLATE/pilot-feedback.yml` validated with `npx --yes
+  yaml-lint` (pyyaml was not installed in this environment, so the
+  `python3 -c "import yaml..."` fallback from the brief was not usable;
+  yaml-lint reported "YAML Lint successful").
+- `git status --short` clean of anything unexpected before each commit; no
+  `.env*` files read, created, or edited; no migrations touched; no secrets
+  or real company numbers/API keys in any new file — all env values in
+  `docs/DEPLOYMENT.md` are placeholders.
+- Not verified (explicitly out of scope for this sandbox): the Dockerfile
+  was not built or run (`docker build`) — no Docker daemon available; no
+  actual deploy to Cloudflare Workers, Fly.io/Railway/Render, or Supabase was
+  performed — no accounts available. `docs/DEPLOYMENT.md` states this
+  plainly rather than implying anything was deployed.
+
 ## 2026-07-08 — UK terminology sweep + UK workflow templates (branch `ws4-uk-workflows`, WS4)
 
 **Addendum 2026-07-08 (same branch, post-review):** owner sign-off applied — 'lawyers' kept in persona; opinion→judgment in the core prompt; SONIA added to reference-rate examples (SOFR/EURIBOR kept for USD tranches); parties example now England & Wales Ltd; UK-first examples throughout (English Law leads, GBP illustrative currency, en-GB pinned in the five browser-locale date spots, four-weekly pay frequency); LPA waterfall reworded to lead with the descriptive term while keeping both market labels. All agent legal-language judgments now logged in `docs/LEGAL_LANGUAGE_REVIEW.md` for solicitor review. Also: provisional judged-eval fixtures committed for the due-diligence snapshot (live register data, 13927967) and TUPE analysis (synthetic scenario) — generated by session agents, scored 5/5 by an interim Opus judge pass (the first snapshot draft scored 3 for an ambiguous identity-verification narrative; the register genuinely carries two separate verification dates — officer record 16/03/2026, PSC record 24/02/2026 — reworded and re-judged 5/5); these cases skip until ANTHROPIC_API_KEY exists, then run automatically; inputs to be reviewed with an AGL associate.

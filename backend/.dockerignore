@@ -1,0 +1,21 @@
+# Never send local env/secrets into the build context.
+.env
+.env.*
+!.env.example
+
+node_modules
+dist
+*.tsbuildinfo
+
+# Editor/OS noise
+.DS_Store
+*.log
+*.raw-llm-stream.json
+logs/
+
+.git
+
+# backend/migrations/ is intentionally NOT excluded here: it is small,
+# contains no secrets, and is harmless to include in the build context even
+# though the runtime image never copies it in (see Dockerfile — only dist/
+# and production node_modules ship in the final stage).

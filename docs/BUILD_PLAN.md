@@ -74,6 +74,25 @@ If the 50% Fable cap bites early: demote comprehension and bulk edits to Sonnet;
 
 **WS5 — Landing page + README.** README: what/why, fork lineage + AGPL attribution up top, eval table placeholder, transparent roadmap (Find Case Law pending TNA licence; HMLR Business Gateway), self-hosting guide, AGL pilot note.
 
+**WS6 — Pilot deployment (added 8 July 2026, owner decision: pilot-first).**
+Owner decided to pilot privately at `jessicaoss.com` with a small group of
+Aria Grace Law solicitors before public launch: complete the product, deploy
+privately, gather feedback, optimise, then launch publicly. Scope: the pilot
+deployment guide (`docs/DEPLOYMENT.md` — architecture, backend hosting
+comparison, production Supabase checklist, R2, env matrix, DNS, post-deploy
+smoke checklist, and open decisions for the owner), a production
+`backend/Dockerfile` + `.dockerignore`, and the pilot programme docs
+(`docs/PILOT.md` and the `pilot-feedback` GitHub issue form). Docs and deploy
+artefacts only — no feature code, no actual deploy (this sandbox has no
+Docker daemon and no Cloudflare account, so the Dockerfile and deploy guide
+are reviewed, not executed).
+
+**Re-sequencing note:** §9's launch checklist below now sits *after* a pilot
+feedback window, not immediately after day 3. Public launch (demo video,
+AGL quotes, README eval table, LinkedIn/Show HN/press outreach) is deferred
+until pilot feedback has been gathered and acted on — see `docs/PILOT.md`
+for the expected ~2-week cadence.
+
 ---
 
 ## 4. Eval harness (built in Phase 0, before features)
