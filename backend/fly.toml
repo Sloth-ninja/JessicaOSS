@@ -1,0 +1,44 @@
+# Fly.io configuration for the JessicaOS backend (pilot deployment).
+# See docs/DEPLOYMENT.md §2. First deploy, from backend/:
+#   fly auth login
+#   fly launch --copy-config --no-deploy   # creates the app under your account
+#   fly secrets set SUPABASE_URL=... SUPABASE_SECRET_KEY=... DOWNLOAD_SIGNING_SECRET=... \
+#     USER_API_KEYS_ENCRYPTION_SECRET=... R2_ENDPOINT_URL=... R2_ACCESS_KEY_ID=... \
+#     R2_SECRET_ACCESS_KEY=... COMPANIES_HOUSE_API_KEY=... ANTHROPIC_API_KEY=...
+#   fly deploy
+# Generate DOWNLOAD_SIGNING_SECRET / USER_API_KEYS_ENCRYPTION_SECRET fresh for
+# production (openssl rand -hex 32) — do not reuse development values.
+
+app = "jessicaoss-api"
+primary_region = "lhr" # London — keep pilot data processing in the UK
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "3001"
+  NODE_ENV = "production"
+  # Fly's edge proxy adds one X-Forwarded-For hop; needed for accurate rate limiting.
+  TRUST_PROXY_HOPS = "1"
+  # CORS allow-origin — must match the deployed frontend origin exactly.
+  FRONTEND_URL = "https://app.jessicaoss.com"
+
+[http_service]
+  internal_port = 3001
+  force_https = true
+  # Pilot UX: keep one machine warm — no cold starts, and SSE chat streams are
+  # never cut by autostop. Roughly $6–11/month for one shared-cpu machine.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "15s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

@@ -17,9 +17,9 @@
   (`frontend/package.json` — `preview`/`deploy`/`upload` scripts run
   `opennextjs-cloudflare build` then the matching Cloudflare command;
   `frontend/open-next.config.ts` calls `defineCloudflareConfig()` with no
-  overrides). **Gap found:** there is no `wrangler.toml` / `wrangler.jsonc`
-  anywhere in the repo, so `wrangler` (a devDependency) has nothing to deploy
-  against yet — see [§8](#8-decisions-needed-from-the-owner).
+  overrides). Deploy config: `frontend/wrangler.jsonc` (Worker name
+  `jessicaoss`, `nodejs_compat`, assets from `.open-next/assets`; attach the
+  custom domain in the dashboard or via the commented `routes` entry).
 - **Backend** — Express API on a container host at `api.jessicaoss.com`
   (host TBD, see [§2](#2-backend-hosting-comparison)).
 - **Database/Auth** — Supabase Postgres, a dedicated **production** project
@@ -221,18 +221,16 @@ of which are safe to expose to the browser (per `docs/safe-local-testing.md`).
 
 ## 8. Decisions needed from the owner
 
-1. **Backend host.** Fly.io is recommended (§2) but not chosen yet; Railway
-   already has partial groundwork (`backend/nixpacks.toml`) and is a
-   reasonable alternative if the team prefers to avoid Docker entirely for
-   now.
-2. **Cloudflare Workers deploy config is missing.** No `wrangler.toml` /
-   `wrangler.jsonc` exists anywhere in the repo, so `npm run deploy --prefix
-   frontend` (which runs `opennextjs-cloudflare build && opennextjs-cloudflare
-   deploy`) cannot succeed as-is. Someone with Cloudflare account access
-   needs to create the wrangler config (account ID, Workers project name,
-   custom domain route for `jessicaoss.com`, compatibility date) — out of
-   scope for this docs-only workstream since it requires live Cloudflare
-   account details this sandbox does not have.
+1. **Backend host: DECIDED — Fly.io (owner, 14/07/2026).** Config committed at
+   `backend/fly.toml` (app `jessicaoss-api`, region `lhr`, one warm
+   shared-cpu-1x/1GB machine, `/health` checks; secrets via
+   `fly secrets set` — see the file header for the first-deploy commands).
+   Railway remains a fallback via `backend/nixpacks.toml`.
+2. **Cloudflare Workers deploy config: RESOLVED.** `frontend/wrangler.jsonc`
+   committed; `npm run deploy --prefix frontend` works once authenticated
+   (`npx wrangler login`). Remaining owner step: attach the production
+   hostname (dashboard, or the commented `routes` entry) and set
+   `NEXT_PUBLIC_API_BASE_URL` to the backend URL before deploying.
 3. **Real client documents vs synthetic-only.** Default recommendation:
    **synthetic-only** until a data-protection/data-flow review has happened
    with the supervising solicitor — see `docs/PILOT.md` and the existing
