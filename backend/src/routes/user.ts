@@ -558,8 +558,15 @@ userRouter.patch(
 userRouter.get("/api-keys", requireAuth, async (_req, res) => {
     const userId = res.locals.userId as string;
     const db = createServerSupabase();
-    const status = await getUserApiKeyStatus(userId, db);
-    res.json(withLocalStatus(status));
+    try {
+        const status = await getUserApiKeyStatus(userId, db);
+        res.json(withLocalStatus(status));
+    } catch (err) {
+        console.error("[user/api-keys] status failed", {
+            error: errorMessage(err),
+        });
+        res.status(500).json({ detail: "Could not load API key status." });
+    }
 });
 
 // PUT /user/api-keys/:provider

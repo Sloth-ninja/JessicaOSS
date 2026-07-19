@@ -239,7 +239,9 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
                 return true;
             } catch (error) {
                 if (isMfaRequiredError(error)) throw error;
-                return false;
+                // Rethrow so the caller can surface the server's explanation
+                // (e.g. the 409 "configured by the server environment" detail).
+                throw error;
             }
         },
         [user],

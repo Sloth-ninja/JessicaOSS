@@ -8,12 +8,23 @@ import {
     MfaVerificationPopup,
     needsMfaVerification,
 } from "@/app/components/shared/MfaVerificationPopup";
-import { isMfaRequiredError } from "@/app/lib/mikeApi";
+import { isMfaRequiredError, MikeApiError } from "@/app/lib/mikeApi";
 import {
     accountGlassIconButtonClassName,
     accountGlassInputClassName,
 } from "../accountStyles";
 import { AccountSection } from "../AccountSection";
+
+function saveErrorMessage(
+    action: "save" | "remove",
+    label: string,
+    error: unknown,
+): string {
+    if (error instanceof MikeApiError && error.message) {
+        return `Could not ${action} ${label}: ${error.message}`;
+    }
+    return `Failed to ${action} ${label}.`;
+}
 
 const MODEL_API_KEY_FIELDS = [
     {
@@ -144,7 +155,7 @@ function ApiKeyField({
             if (isMfaRequiredError(error)) {
                 setPendingMfaAction("save");
             } else {
-                alert(`Failed to save ${label}.`);
+                alert(saveErrorMessage("save", label, error));
             }
         } finally {
             setIsSaving(false);
@@ -164,7 +175,7 @@ function ApiKeyField({
             if (isMfaRequiredError(error)) {
                 setPendingMfaAction("remove");
             } else {
-                alert(`Failed to remove ${label}.`);
+                alert(saveErrorMessage("remove", label, error));
             }
         } finally {
             setIsSaving(false);
