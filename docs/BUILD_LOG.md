@@ -7,6 +7,48 @@
 
 ---
 
+## 2026-07-19 — Rebrand user-facing strings: Mike → JessicaOS (branch `rebrand-user-facing`)
+
+**Scope:** Tier-1 rebrand sweep (owner decision 19/07/2026): every user-facing and
+operator-facing "Mike" string becomes "JessicaOS". Internal identifiers, filenames,
+CSS classes, crypto salts, protocol identifiers, and fork attribution are explicitly
+out of scope (minimal-diff hard rule 8; attribution hard rule 3).
+
+**Changed (24 files, 37 lines)**
+- Frontend metadata/branding: `layout.tsx` (tab/og/twitter titles → "JessicaOS - AI
+  Legal Platform", siteName, image alt), `global-error.tsx` title, `site-logo.tsx`
+  and `AppSidebar.tsx` visible wordmark text, `WorkflowList.tsx` system-workflow
+  badge.
+- Frontend copy: api-keys page ("instance of JessicaOS"), support page (question
+  description + link placeholder → `https://jessicaoss.com/...`), tabular/workflow
+  column-prompt placeholders, MFA TOTP `friendlyName` ("JessicaOS" and the
+  `` `JessicaOS ${Date.now()}` `` retry), privacy-data fallback export filenames
+  (`jessicaoss-*-export.json`).
+- Backend user/operator strings: startup log, chat + tabular system prompts ("You
+  are JessicaOS…"), DOCX tracked-changes author default, MCP OAuth `client_name`
+  (consent-screen display name, both registration paths), MCP tool-confirmation
+  error, OAuth popup HTML copy, export filename prefix in `userDataExport.ts`.
+- Names: `backend/package.json` → `jessicaoss-backend`, `frontend/package.json` →
+  `jessicaoss` (lockfile name fields updated to match); `backend/schema.sql` header
+  comment → "JessicaOS (fork of Mike) Supabase schema" (nothing else in the file).
+
+**Deliberately left:** `MikeIcon`/`MikeLayout`/`MikeApiError`/`mikeApi.ts` and all
+`mike-*`/`mike:`/`application/mike-*` internal identifiers, storage keys, and MIME
+types; scrypt salts (`mike-user-api-keys-v1`, `mike-user-mcp-v1` — changing them
+would orphan every encrypted key); MCP `CLIENT_INFO` protocol name; R2 bucket
+default `"mike"`; code comments; `mikeoss.com` functional URLs (layout metadataBase/
+og url, signup terms/privacy links, site-logo landing href) — flagged for a
+follow-up once `jessicaoss.com` pages exist; all attribution/licence text.
+
+**Verification:** backend `tsc --noEmit` clean; backend vitest 97/97 (7 files);
+frontend `tsc --noEmit` clean; frontend ESLint 34 errors/77 warnings — byte-identical
+to `main` baseline (pre-existing debt, no new issues); `npm run evals:smoke` 3
+passed / 0 failed / 1 skipped (Companies House key not in worktree env); final
+`grep -rn "Mike" frontend/src backend/src` audited — all 30 remaining hits are
+internal identifiers or code comments.
+
+---
+
 ## 2026-07-19 — Process/docs adoption (branch `process-docs-adoption`)
 
 **Scope:** Docs-only. Adopted the highest-value documentation/operating practices from

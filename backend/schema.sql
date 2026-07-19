@@ -1,7 +1,7 @@
--- Mike Supabase schema
+-- JessicaOS (fork of Mike) Supabase schema
 -- Use this for a fresh Supabase database. Existing deployments should instead
 -- apply the dated incremental migration files in backend/migrations that are
--- newer than the version of Mike they currently have deployed.
+-- newer than the version of JessicaOS they currently have deployed.
 
 create extension if not exists "pgcrypto";
 

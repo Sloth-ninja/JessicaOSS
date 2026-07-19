@@ -56,7 +56,7 @@ export default function ApiKeysPage() {
             <p className="text-sm text-gray-500 mb-4">
                 You must provide your own API keys for the app to work or add
                 your API keys into the .env file if you are running your own
-                instance of Mike. All API keys are encrypted in storage.
+                instance of JessicaOS. All API keys are encrypted in storage.
             </p>
             <AccountSection>
                 {MODEL_API_KEY_FIELDS.map((field, index) => (

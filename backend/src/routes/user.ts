@@ -137,7 +137,7 @@ function mcpOAuthPopupHtml(payload: {
   <body>
     <main>
       <h1>${payload.success ? "Authorization complete" : "Authorization failed"}</h1>
-      <p>${payload.success ? "You can return to Mike." : "Return to Mike and try connecting again."}</p>
+      <p>${payload.success ? "You can return to JessicaOS." : "Return to JessicaOS and try connecting again."}</p>
     </main>
     <script nonce="${nonce}">
       const message = ${message};
