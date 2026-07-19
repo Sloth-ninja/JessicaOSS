@@ -103,7 +103,7 @@ export type ChatMessage = {
 // Constants
 // ---------------------------------------------------------------------------
 
-const SYSTEM_PROMPT_BEFORE_RESEARCH = `You are Mike, an AI legal assistant for lawyers and legal professionals. Help analyse documents, answer legal questions, and draft legal documents.
+const SYSTEM_PROMPT_BEFORE_RESEARCH = `You are Jessica, an AI legal assistant for lawyers and legal professionals. Help analyse documents, answer legal questions, and draft legal documents.
 
 CORE RULES:
 - Be precise, professional, and evidence-aware.
@@ -1410,7 +1410,7 @@ export async function runEditDocument(params: {
     bytes: editedBytes,
     changes,
     errors,
-  } = await applyTrackedEdits(current.bytes, edits, { author: "Mike" });
+  } = await applyTrackedEdits(current.bytes, edits, { author: "Jessica" });
 
   if (changes.length === 0) {
     return {

@@ -198,7 +198,7 @@ async function registerOAuthClient(
             "Content-Type": "application/json",
         },
         body: JSON.stringify({
-            client_name: "Mike",
+            client_name: "JessicaOS",
             redirect_uris: [redirectUri],
             grant_types: ["authorization_code", "refresh_token"],
             response_types: ["code"],
@@ -397,7 +397,7 @@ export class DbMcpOAuthProvider implements OAuthClientProvider {
     get clientMetadata(): OAuthClientMetadata {
         const env = oauthClientEnvFor(this.connector.server_url);
         return {
-            client_name: "Mike",
+            client_name: "JessicaOS",
             redirect_uris: [this.redirectUri],
             grant_types: ["authorization_code", "refresh_token"],
             response_types: ["code"],
