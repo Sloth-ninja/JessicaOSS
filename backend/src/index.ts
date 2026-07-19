@@ -11,6 +11,7 @@ import { tabularRouter } from "./routes/tabular";
 import { workflowsRouter } from "./routes/workflows";
 import { userRouter } from "./routes/user";
 import { downloadsRouter } from "./routes/downloads";
+import { citationsRouter } from "./routes/citations";
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
@@ -77,6 +78,15 @@ const exportLimiter = makeLimiter({
   message: "Too many export requests. Please try again later.",
 });
 
+// Citation checks fan out into sequential live legislation.gov.uk lookups
+// (up to 50 per request at ~1 req/s), so the per-user budget is deliberately
+// small.
+const citationsLimiter = makeLimiter({
+  windowMs: minutes(envInt("RATE_LIMIT_CITATIONS_WINDOW_MINUTES", 15)),
+  max: envInt("RATE_LIMIT_CITATIONS_MAX", 20),
+  message: "Too many citation checks. Please try again later.",
+});
+
 const dataDeleteLimiter = makeLimiter({
   windowMs: hours(envInt("RATE_LIMIT_DATA_DELETE_WINDOW_HOURS", 1)),
   max: envInt("RATE_LIMIT_DATA_DELETE_MAX", 20),
@@ -139,6 +149,7 @@ app.delete("/user/account", dataDeleteLimiter);
 app.delete("/user/chats", dataDeleteLimiter);
 app.delete("/user/projects", dataDeleteLimiter);
 app.delete("/user/tabular-reviews", dataDeleteLimiter);
+app.post("/citations/check", citationsLimiter);
 
 app.use((req, res, next) =>
   express.json({ limit: jsonLimitForPath(req.path) })(req, res, next),
@@ -153,6 +164,7 @@ app.use("/workflows", workflowsRouter);
 app.use("/user", userRouter);
 app.use("/users", userRouter);
 app.use("/download", downloadsRouter);
+app.use("/citations", citationsRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 

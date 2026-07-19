@@ -7,6 +7,54 @@
 
 ---
 
+## 2026-07-19 — WS7 PR 4: Citation Checker (branch `ws7-citation-checker`)
+
+**Scope:** paste-in Citation Checker per the approved WS7 mock-up — new
+`POST /citations/check` backend route (extract statutory citations from up to
+100k characters of pasted text, verify each live against legislation.gov.uk)
+and a new `/citation-checker` page in a "Research" sidebar group.
+
+**Key changes:**
+
+- `backend/src/lib/citationExtraction.ts` — extraction regexes ported from
+  `evals/src/citations.ts` (provenance headers both ends; regexes kept
+  byte-in-sync, including the bare-Act-vs-section de-dup and the known quirk
+  that a sentence-initial capitalised run is swallowed into the Act title —
+  tested, not "fixed", to preserve sync). The evals resolver was NOT ported:
+  verification uses `verifyCitation` in `lib/legislation.ts` (the stronger
+  resolver the chat tools use, with its ~1 req/s politeness bucket — hence
+  strictly sequential verification, ≤50 citations per request).
+- `backend/src/routes/citations.ts` — `requireAuth`, whole-handler try/catch
+  with a fixed generic 500 detail (DURABLE_LESSONS 2026-07-19), 413 above
+  100k chars, neutral-case citations always `unverifiable` with the fixed
+  Find-Case-Law/BAILII copy. Own limiter `RATE_LIMIT_CITATIONS_MAX`
+  (default 20 / 15 min; documented in `.env.example` + CLAUDE.md registry).
+- Frontend: `citation-checker/page.tsx` (textarea → single POST, skeleton
+  checking state with "may take up to a minute" note, results table with
+  green Verified rows linking to the canonical legislation.gov.uk URL, red
+  Not found + reason, amber case-law rows, summary count line, footer
+  disclaimer that verification confirms existence, not that the provision
+  supports the proposition); `checkCitations` in `mikeApi.ts`; "Research"
+  group + Citation Checker (ClipboardCheck) in `AppSidebar.tsx` (nav-item
+  render refactored to a shared `renderNavItem`; a small merge conflict with
+  `ws7-company-search`'s Research group is expected and fine).
+
+**Verification:** backend `tsc --noEmit` clean; backend vitest 122/122 (25 new:
+`citationExtraction.test.ts` fixtures incl. section-first/act-first/bare-act
+de-dup/SI/neutral forms, and `routes/citations.test.ts` with mocked
+`verifyCitation` covering status mapping, 50-citation cap, 100k cap/413,
+neutral-case fixed copy, generic-500 no-leak). Frontend `tsc --noEmit` clean;
+`npm run lint` 34 errors/78 warnings — byte-count identical to the main
+baseline (no new issues; the one AppSidebar error is the pre-existing
+upstream `setShouldAnimate`-in-effect finding at a shifted line).
+`npm run evals:smoke` 4/4 from the main checkout (3/4 + clean CH-key skip
+from the worktree); `git diff evals/` is exactly the one pointer comment.
+Live smoke of the route logic: `s.994 Companies Act 2006` → verified
+(`https://www.legislation.gov.uk/ukpga/2006/46/section/994`); dud
+`s.9999 Companies Act 2006` → unverified (HTTP 404 reason).
+
+---
+
 ## 2026-07-19 — WS7 PR 1: user-facing rename "Projects" → "Matters" (branch `ws7-matters-rename`)
 
 **Scope:** string-only rename of the workspace concept from "Project" to "Matter"
