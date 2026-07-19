@@ -23,6 +23,7 @@
 - 2026-07-12 — Zombie agents: verify liveness and message-vs-diff before pushing
 - 2026-07-19 — Imported lessons from the sister project (agl-founders-network)
 - 2026-07-19 — OpenNext build: upstream bun.lock hijacks packager detection
+- 2026-07-19 — Correction: bun.lock also hijacked deploy (wrangler autoconfig) — deleted
 
 ## Lessons
 
@@ -124,3 +125,17 @@ lockfile — minimal diff). Debugging signature: any tool erroring with
 dependency — check for a competing `bun.lock` before installing anything. Related
 rule: never pipe a build through `tail`/`grep` when its exit code matters — the pipe
 masked this failure as exit 0 on the first run.
+
+### 2026-07-19 — Correction: bun.lock also hijacked deploy; lockfile deleted
+
+The `buildCommand` override above proved insufficient: wrangler ≥4.9x "autoconfig"
+detects an OpenNext project and silently delegates `wrangler deploy` to
+`opennextjs-cloudflare deploy`, whose own packager detection again chose bun for the
+wrangler invocation (`/bin/sh: bun: command not found`, even under plain
+`npx wrangler deploy`). Fix: `frontend/bun.lock` deleted from the repo — two lockfiles
+mean every packager auto-detection is a coin toss, and npm's `package-lock.json` is
+this fork's canonical lockfile. Deviation from minimal-diff rule 8 recorded and
+justified: the upstream file actively broke builds and deploys at two independent
+layers; on upstream rebase, drop their copy again. Debugging signature: the wrangler
+log line "OpenNext project detected, calling `opennextjs-cloudflare deploy`" means
+your wrangler flags/env are NOT reaching wrangler — the wrapper re-invokes it.
