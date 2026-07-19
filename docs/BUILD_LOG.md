@@ -7,6 +7,26 @@
 
 ---
 
+## 2026-07-19 — Switch live site URLs to jessicaoss.com (branch `jessicaoss-urls`)
+
+**Scope:** the three hardcoded `mikeoss.com` URLs that became switchable once
+`jessicaoss.com` went live (flagged in PR #15's rebrand follow-up): `layout.tsx`
+`metadataBase` + OpenGraph `url` → `https://jessicaoss.com`; `site-logo.tsx`
+production landing href → `https://jessicaoss.com`.
+
+**Deliberately NOT changed — owner + solicitor item:** the signup page's terms and
+privacy links (`signup/page.tsx:271,280`) still point at `mikeoss.com/terms|privacy`.
+No terms/privacy pages exist in this app, so retargeting them to jessicaoss.com would
+404 — and the pilot needs its own Aria Grace Law terms and privacy policy drafted or
+approved by the supervising solicitor before those links can point anywhere honest.
+Mitigation: public sign-up is disabled in production Supabase (invite-only pilot), so
+the signup page is not reachable as a working flow. Added to the owner review list.
+
+**Verification:** frontend `tsc --noEmit` clean; `grep -rn "mikeoss.com" src/` →
+only the two signup legal links remain (documented above); CI green on the PR.
+
+---
+
 ## 2026-07-19 — Pilot deployment executed: platform live (branch `status-pilot-live`)
 
 **Scope:** docs-only record of the deployment session (#13, #15, #17–#19 below carry
