@@ -11,6 +11,7 @@ import {
     Building2,
     ChevronsUpDown,
     ChevronDown,
+    ClipboardCheck,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUserProfile } from "@/contexts/UserProfileContext";
@@ -34,6 +35,11 @@ const NAV_ITEMS = [
 // any not-configured state.
 const RESEARCH_NAV_ITEMS = [
     { href: "/company-search", label: "Company Search", icon: Building2 },
+    {
+        href: "/citation-checker",
+        label: "Citation Checker",
+        icon: ClipboardCheck,
+    },
 ];
 
 interface AppSidebarProps {
@@ -62,7 +68,6 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const [projectsCollapsed, setProjectsCollapsed] = useState(false);
     const [historyCollapsed, setHistoryCollapsed] = useState(false);
-    const [researchCollapsed, setResearchCollapsed] = useState(false);
     const [projectNames, setProjectNames] = useState<Record<string, string>>(
         {},
     );
@@ -128,6 +133,53 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
 
     if (!user) return null;
 
+    const renderNavItem = ({
+        href,
+        label,
+        icon: Icon,
+    }: {
+        href: string;
+        label: string;
+        icon: typeof MessageSquare;
+    }) => {
+        const isActive =
+            href === "/assistant"
+                ? pathname === href
+                : href === "/projects"
+                  ? pathname === href
+                  : pathname === href || pathname.startsWith(href + "/");
+        return (
+            <div key={href} className="py-0.5 px-2.5">
+                <button
+                    onClick={() => router.push(href)}
+                    title={!isOpen ? label : ""}
+                    className={cn(
+                        "w-full h-9 flex items-center gap-3 px-2.5 py-2 rounded-md transition-colors text-left",
+                        isActive
+                            ? "bg-gray-200/60 text-gray-900"
+                            : "text-gray-700 hover:bg-gray-100",
+                        !isOpen ? "hidden md:flex" : "flex",
+                    )}
+                >
+                    <Icon
+                        className={`h-4 w-4 flex-shrink-0 ${
+                            isActive ? "text-gray-900" : "text-black"
+                        }`}
+                    />
+                    {isOpen && (
+                        <span
+                            className={`text-sm font-medium ${
+                                shouldAnimate ? "sidebar-fade-in-2" : ""
+                            }`}
+                        >
+                            {label}
+                        </span>
+                    )}
+                </button>
+            </div>
+        );
+    };
+
     return (
         <div
             className={cn(
@@ -174,101 +226,19 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
             </div>
 
             {/* Nav items */}
-            {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
-                const isActive =
-                    href === "/assistant"
-                        ? pathname === href
-                        : href === "/projects"
-                          ? pathname === href
-                          : pathname === href ||
-                            pathname.startsWith(href + "/");
-                return (
-                    <div key={href} className="py-0.5 px-2.5">
-                        <button
-                            onClick={() => router.push(href)}
-                            title={!isOpen ? label : ""}
-                            className={cn(
-                                "w-full h-9 flex items-center gap-3 px-2.5 py-2 rounded-md transition-colors text-left",
-                                isActive
-                                    ? "bg-gray-200/60 text-gray-900"
-                                    : "text-gray-700 hover:bg-gray-100",
-                                !isOpen ? "hidden md:flex" : "flex",
-                            )}
-                        >
-                            <Icon
-                                className={`h-4 w-4 flex-shrink-0 ${
-                                    isActive ? "text-gray-900" : "text-black"
-                                }`}
-                            />
-                            {isOpen && (
-                                <span
-                                    className={`text-sm font-medium ${
-                                        shouldAnimate ? "sidebar-fade-in-2" : ""
-                                    }`}
-                                >
-                                    {label}
-                                </span>
-                            )}
-                        </button>
-                    </div>
-                );
-            })}
+            {NAV_ITEMS.map(renderNavItem)}
 
-            {/* Research group */}
+            {/* Research */}
             {isOpen && (
-                <button
-                    onClick={() => setResearchCollapsed((v) => !v)}
-                    className={`mt-3 mb-1 flex w-full items-center justify-between px-5 text-xs font-semibold text-gray-500 transition-colors hover:text-gray-700 ${
+                <div
+                    className={`mt-2.5 mb-1 px-5 text-xs font-semibold text-gray-500 ${
                         shouldAnimate ? "sidebar-fade-in" : ""
                     }`}
                 >
-                    <span>Research</span>
-                    <ChevronDown
-                        className={`h-3.5 w-3.5 transition-transform ${
-                            researchCollapsed ? "-rotate-90" : ""
-                        }`}
-                    />
-                </button>
+                    Research
+                </div>
             )}
-            {(!isOpen || !researchCollapsed) &&
-                RESEARCH_NAV_ITEMS.map(({ href, label, icon: Icon }) => {
-                    const isActive =
-                        pathname === href || pathname.startsWith(href + "/");
-                    return (
-                        <div key={href} className="py-0.5 px-2.5">
-                            <button
-                                onClick={() => router.push(href)}
-                                title={!isOpen ? label : ""}
-                                className={cn(
-                                    "w-full h-9 flex items-center gap-3 px-2.5 py-2 rounded-md transition-colors text-left",
-                                    isActive
-                                        ? "bg-gray-200/60 text-gray-900"
-                                        : "text-gray-700 hover:bg-gray-100",
-                                    !isOpen ? "hidden md:flex" : "flex",
-                                )}
-                            >
-                                <Icon
-                                    className={`h-4 w-4 flex-shrink-0 ${
-                                        isActive
-                                            ? "text-gray-900"
-                                            : "text-black"
-                                    }`}
-                                />
-                                {isOpen && (
-                                    <span
-                                        className={`text-sm font-medium ${
-                                            shouldAnimate
-                                                ? "sidebar-fade-in-2"
-                                                : ""
-                                        }`}
-                                    >
-                                        {label}
-                                    </span>
-                                )}
-                            </button>
-                        </div>
-                    );
-                })}
+            {RESEARCH_NAV_ITEMS.map(renderNavItem)}
 
             {isOpen && (
                 <div className="mt-4 flex-1 min-h-0 flex flex-col gap-4">

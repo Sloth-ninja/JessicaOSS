@@ -52,16 +52,87 @@ Filing history tabs, neutral key-not-configured card, DD/MM/YYYY dates,
   "Continue in Assistant" writes "Using Companies House, review {name}
   (company no. {number}): " and routes to `/assistant`.
 
-**Verification:** backend `tsc --noEmit` clean; backend vitest 107/107 (97
-baseline + 10 new: 4 `getCompanyBundle`, 6 `companiesHouseErrorResponse`
-mapping); frontend `tsc --noEmit` clean; frontend `npm run lint` 112 problems
+**Review fixes (independent review, Approve-with-fixes, all Minor):**
+company numbers rejected with a fixed 400 unless strictly alphanumeric after
+normalisation (`validateCompanyNumber`, exported + tested — path/query
+metacharacters can never reach the outgoing Companies House URL); `typeof
+"object"` guard on the page's profile narrowing; key-precedence docs
+corrected to env-first reality (above).
+
+**Verification (after merging origin/main incl. PR #24):** backend
+`tsc --noEmit` clean; backend vitest 133/133 (11 new in this PR: 4
+`getCompanyBundle`, 6 `companiesHouseErrorResponse` mapping, 1
+`validateCompanyNumber`); frontend `tsc --noEmit` clean; frontend `npm run
+lint` 112 problems
 (34 errors/78 warnings) — byte-count identical to the main baseline, zero
 issues in changed files (five new react-compiler errors during development
 were fixed by restructuring, not suppression); `npm run evals:smoke` 4/4
 passed, run from the main checkout detached at the branch commit per
 DURABLE_LESSONS. Known integration note: trivial merge conflict expected with
 PR #24 (ws7-citation-checker) in `AppSidebar.tsx` (both add the Research
-group), `index.ts` and `mikeApi.ts`.
+group), `index.ts` and `mikeApi.ts` — resolved on this branch by merging
+`origin/main` after #24 landed (Research nav group unified to hold both
+entries; both limiters/mounts and both mikeApi sections kept).
+
+---
+
+## 2026-07-19 — WS7 PR 4: Citation Checker (branch `ws7-citation-checker`)
+
+**Scope:** paste-in Citation Checker per the approved WS7 mock-up — new
+`POST /citations/check` backend route (extract statutory citations from up to
+20k characters of pasted text, verify each live against legislation.gov.uk)
+and a new `/citation-checker` page in a "Research" sidebar group.
+
+**Key changes:**
+
+- `backend/src/lib/citationExtraction.ts` — extraction regexes ported from
+  `evals/src/citations.ts` (provenance headers both ends; regexes kept
+  byte-in-sync, including the bare-Act-vs-section de-dup and the known quirk
+  that a sentence-initial capitalised run is swallowed into the Act title —
+  tested, not "fixed", to preserve sync). The evals resolver was NOT ported:
+  verification uses `verifyCitation` in `lib/legislation.ts` (the stronger
+  resolver the chat tools use, with its ~1 req/s politeness bucket — hence
+  strictly sequential verification, ≤50 citations per request).
+- `backend/src/routes/citations.ts` — `requireAuth`, whole-handler try/catch
+  with a fixed generic 500 detail (DURABLE_LESSONS 2026-07-19), 413 above
+  20k chars, neutral-case citations always `unverifiable` with the fixed
+  Find-Case-Law/BAILII copy. Own limiter `RATE_LIMIT_CITATIONS_MAX`
+  (default 20 / 15 min; documented in `.env.example` + CLAUDE.md registry).
+  The 20k text cap (reduced from the originally-shipped 100k after
+  independent review) is the **ReDoS mitigation** for the O(n²) ported
+  ACT_TITLE regex: extraction runs synchronously before the first await, and
+  a pathological 100k paste blocked the Node event loop ~6.7s
+  (reviewer-benchmarked), stalling all requests including SSE chat; at 20k
+  the worst case stays well under ~0.5s. The regex itself stays byte-identical
+  to evals per the sync mandate — a future synced regex fix in both suites
+  remains recommended. Same review: verification consciously shares the
+  global legislation.gov.uk politeness bucket with the chat tools (one
+  50-citation check can queue chat legislation lookups for tens of seconds —
+  by design; politeness to the upstream host requires a single bucket),
+  now documented in the route.
+- Frontend: `citation-checker/page.tsx` (textarea → single POST, skeleton
+  checking state with "may take up to a minute" note, results table with
+  green Verified rows linking to the canonical legislation.gov.uk URL, red
+  Not found + reason, amber case-law rows, summary count line, footer
+  disclaimer that verification confirms existence, not that the provision
+  supports the proposition); `checkCitations` in `mikeApi.ts`; "Research"
+  group + Citation Checker (ClipboardCheck) in `AppSidebar.tsx` (nav-item
+  render refactored to a shared `renderNavItem`; a small merge conflict with
+  `ws7-company-search`'s Research group is expected and fine).
+
+**Verification:** backend `tsc --noEmit` clean; backend vitest 122/122 (25 new:
+`citationExtraction.test.ts` fixtures incl. section-first/act-first/bare-act
+de-dup/SI/neutral forms, and `routes/citations.test.ts` with mocked
+`verifyCitation` covering status mapping, 50-citation cap, 20k cap/413,
+neutral-case fixed copy, generic-500 no-leak). Frontend `tsc --noEmit` clean;
+`npm run lint` 34 errors/78 warnings — byte-count identical to the main
+baseline (no new issues; the one AppSidebar error is the pre-existing
+upstream `setShouldAnimate`-in-effect finding at a shifted line).
+`npm run evals:smoke` 4/4 from the main checkout (3/4 + clean CH-key skip
+from the worktree); `git diff evals/` is exactly the one pointer comment.
+Live smoke of the route logic: `s.994 Companies Act 2006` → verified
+(`https://www.legislation.gov.uk/ukpga/2006/46/section/994`); dud
+`s.9999 Companies Act 2006` → unverified (HTTP 404 reason).
 
 ---
 

@@ -30,6 +30,7 @@ export interface ResolutionFailure {
 
 const ACT_TITLE = "([A-Z][A-Za-z()'\\u2019]*(?:\\s+[A-Za-z()'\\u2019]+)*?\\s+Act\\s+(\\d{4}))";
 
+// NOTE: extraction logic ported to backend/src/lib/citationExtraction.ts (WS7) — keep regexes in sync; extraction fixtures duplicated in both suites.
 export function extractCitations(text: string): Citation[] {
   const found = new Map<string, Citation>();
   const add = (c: Citation) => {

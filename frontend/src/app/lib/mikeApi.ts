@@ -1252,3 +1252,25 @@ export async function chGetFilingHistory(
         `/companies/${encodeURIComponent(companyNumber)}/filing-history?page=${page}`,
     );
 }
+
+// ---------------------------------------------------------------------------
+// Research — Citation Checker (WS7)
+// ---------------------------------------------------------------------------
+
+export type CitationCheckResult = {
+    raw: string;
+    kind: "statute-section" | "act" | "si" | "neutral-case";
+    status: "verified" | "unverified" | "unverifiable";
+    url?: string;
+    reason?: string;
+};
+
+export async function checkCitations(
+    text: string,
+): Promise<{ results: CitationCheckResult[] }> {
+    return apiRequest<{ results: CitationCheckResult[] }>("/citations/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+    });
+}
