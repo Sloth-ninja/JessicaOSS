@@ -7,6 +7,34 @@
 
 ---
 
+## 2026-07-19 — Pilot stability: API-keys crash fix + honest save errors (branch `fix-apikeys-stability`)
+
+**Scope:** first live-user bug, found during owner QA. Symptoms: "Failed to save"
+alerts for Claude, OpenAI and Companies House keys. Root causes (two distinct):
+
+1. **Backend crash (the real outage):** `GET /user/api-keys` had no try/catch;
+   Express 4 doesn't catch async-handler rejections and Node 22 kills the process
+   on unhandled rejections — one transient Supabase error took the whole backend
+   down mid-QA (Fly logs 19:21 UTC, machine restart). Fixed with a handler
+   try/catch (500 + fixed generic detail) and process-level guards in `index.ts`:
+   `unhandledRejection` logs and continues; `uncaughtException` logs and exits
+   for a clean Fly restart (post-throw state may be corrupt — reviewer catch).
+   Review also caught that the PUT handler's 500 previously echoed
+   `errorMessage(err)` as `detail` — now a fixed message, raw error server-side
+   only. Lesson + debugging signature appended to `docs/DURABLE_LESSONS.md`.
+2. **Mute error UX:** Claude/Companies House saves were correctly rejected 409
+   ("configured by the server environment" — those keys are Fly secrets, served
+   to all pilot users), but the frontend swallowed the server's `detail` and
+   showed a generic alert. `updateApiKey` now rethrows non-MFA errors and the
+   api-keys page surfaces `MikeApiError` messages ("Could not save X: …").
+
+**Verification:** backend `tsc` clean, 97/97 vitest; frontend `tsc` clean;
+hook-enforced typecheck on every edit; CI green on the PR. Post-deploy check:
+API-keys page renders Claude + Companies House as server-configured; OpenAI key
+save succeeds (owner re-test).
+
+---
+
 ## 2026-07-19 — Switch live site URLs to jessicaoss.com (branch `jessicaoss-urls`)
 
 **Scope:** the three hardcoded `mikeoss.com` URLs that became switchable once

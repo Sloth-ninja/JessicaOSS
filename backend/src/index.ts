@@ -156,6 +156,20 @@ app.use("/download", downloadsRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
+// Node 22 terminates the process on unhandled rejections by default; a single
+// transient failure in any handler without try/catch would take the whole
+// pilot server down (observed live 19/07/2026 — see DURABLE_LESSONS). Log
+// loudly and keep serving instead.
+process.on("unhandledRejection", (reason) => {
+  console.error("[unhandledRejection]", reason);
+});
+// Uncaught synchronous exceptions may leave the process in a corrupt state —
+// log, then exit and let Fly restart a clean machine (health check covers it).
+process.on("uncaughtException", (err) => {
+  console.error("[uncaughtException]", err);
+  process.exit(1);
+});
+
 app.listen(PORT, () => {
   console.log(`JessicaOS backend running on port ${PORT}`);
 });

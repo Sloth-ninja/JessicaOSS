@@ -24,6 +24,7 @@
 - 2026-07-19 — Imported lessons from the sister project (agl-founders-network)
 - 2026-07-19 — OpenNext build: upstream bun.lock hijacks packager detection
 - 2026-07-19 — Correction: bun.lock also hijacked deploy (wrangler autoconfig) — deleted
+- 2026-07-19 — Express 4 async handlers + Node 22: one unwrapped rejection kills the server
 
 ## Lessons
 
@@ -139,3 +140,25 @@ justified: the upstream file actively broke builds and deploys at two independen
 layers; on upstream rebase, drop their copy again. Debugging signature: the wrangler
 log line "OpenNext project detected, calling `opennextjs-cloudflare deploy`" means
 your wrangler flags/env are NOT reaching wrangler — the wrapper re-invokes it.
+
+### 2026-07-19 — Express 4 async handlers + Node 22: one unwrapped rejection kills the server
+
+Trigger: first pilot user opened Account → API Keys and the whole production
+backend died (`ERR_UNHANDLED_REJECTION`, Fly restarted it). Express 4 does NOT
+catch rejections from `async` route handlers, and Node ≥15 terminates the process
+on unhandled rejections by default — so any handler without its own try/catch
+turns one transient DB hiccup into a full outage. `GET /user/api-keys` was such a
+handler (upstream code). Fixes: try/catch in the handler AND process-level guards
+in `index.ts` — `unhandledRejection` logs and continues (request-scoped), while
+`uncaughtException` logs then exits for a clean Fly restart (post-throw state may
+be corrupt; reviewer catch). Companion rule from the same review: a handler's
+catch returns a FIXED generic `detail`; `errorMessage(err)` goes to
+`console.error` only — the moment any frontend surfaces `detail` verbatim, raw DB
+text reaches users. Rule: in this codebase every new async route handler wraps its
+body in try/catch (or the route registers an error-forwarding wrapper); audit any
+upstream route touched for the first time. Debugging signature: Fly logs showing
+`UnhandledPromiseRejection ... reason "#<Object>"` followed by a machine restart
+means an unwrapped async handler — the `#<Object>` is usually a Supabase error.
+Secondary effect worth remembering: while the backend restarts, the frontend's
+profile/status fetches fail silently and pages render their "nothing configured"
+fallback — misleading UI during the outage window.
