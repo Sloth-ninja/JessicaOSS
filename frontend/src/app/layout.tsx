@@ -15,7 +15,7 @@ const ebGaramond = EB_Garamond({
 });
 
 export const metadata: Metadata = {
-    metadataBase: new URL("https://app.mikeoss.com"),
+    metadataBase: new URL("https://jessicaoss.com"),
     title: "JessicaOS - AI Legal Platform",
     description:
         "AI-powered legal document analysis and contract review platform.",
@@ -28,7 +28,7 @@ export const metadata: Metadata = {
     },
     openGraph: {
         type: "website",
-        url: "https://app.mikeoss.com",
+        url: "https://jessicaoss.com",
         siteName: "JessicaOS",
         title: "JessicaOS - AI Legal Platform",
         description:
