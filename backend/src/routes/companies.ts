@@ -1,7 +1,8 @@
 // Companies House research routes (WS7) — powers the Company Search page.
 // Read-only passthroughs over the shared Companies House client/bundle used
-// by the chat tools, with per-request key resolution (user BYO key first,
-// server env fallback — resolved by getUserApiKeys).
+// by the chat tools, with per-request key resolution via getUserApiKeys
+// (server env key takes precedence when set; per-user BYO key otherwise —
+// see the CLAUDE.md env registry).
 //
 // Every handler body is wrapped in try/catch: Express 4 does not catch
 // rejections from async handlers and Node 22 kills the process on unhandled
@@ -16,6 +17,7 @@ import { getUserApiKeys } from "../lib/userApiKeys";
 import {
   CompaniesHouseError,
   getFilingHistory,
+  normalizeCompanyNumber,
   searchCompanies,
 } from "../lib/companiesHouse";
 import { getCompanyBundle } from "../lib/legalSourcesTools/companiesHouseTools";
@@ -70,6 +72,18 @@ export function companiesHouseErrorResponse(err: unknown): {
   };
 }
 
+/**
+ * Normalises a company number and rejects anything that isn't strictly
+ * alphanumeric after normalisation (returns null). Defensive: the value is
+ * interpolated into a Companies House URL path, so crafted input containing
+ * path/query metacharacters ("..", "?", "/") must never reach the client.
+ * Exported for unit tests.
+ */
+export function validateCompanyNumber(raw: string): string | null {
+  const normalized = normalizeCompanyNumber(raw);
+  return /^[A-Z0-9]+$/.test(normalized) ? normalized : null;
+}
+
 async function resolveCompaniesHouseKey(userId: string): Promise<string | null> {
   const apiKeys = await getUserApiKeys(userId, createServerSupabase());
   const key = apiKeys.companies_house;
@@ -116,6 +130,10 @@ companiesRouter.get(
   async (req, res) => {
     try {
       const userId = res.locals.userId as string;
+      const companyNumber = validateCompanyNumber(req.params.companyNumber);
+      if (!companyNumber) {
+        return void res.status(400).json({ detail: "Invalid company number." });
+      }
       const pageRaw = Number.parseInt(String(req.query.page ?? "1"), 10);
       const page =
         Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
@@ -126,11 +144,10 @@ companiesRouter.get(
           .status(KEY_MISSING_RESPONSE.status)
           .json(KEY_MISSING_RESPONSE.body);
       }
-      const result = await getFilingHistory(
-        apiKey,
-        req.params.companyNumber,
-        { itemsPerPage, startIndex: (page - 1) * itemsPerPage },
-      );
+      const result = await getFilingHistory(apiKey, companyNumber, {
+        itemsPerPage,
+        startIndex: (page - 1) * itemsPerPage,
+      });
       res.json(result);
     } catch (err) {
       logAndRespond("filing-history", err, res);
@@ -143,13 +160,17 @@ companiesRouter.get(
 companiesRouter.get("/:companyNumber", requireAuth, async (req, res) => {
   try {
     const userId = res.locals.userId as string;
+    const companyNumber = validateCompanyNumber(req.params.companyNumber);
+    if (!companyNumber) {
+      return void res.status(400).json({ detail: "Invalid company number." });
+    }
     const apiKey = await resolveCompaniesHouseKey(userId);
     if (!apiKey) {
       return void res
         .status(KEY_MISSING_RESPONSE.status)
         .json(KEY_MISSING_RESPONSE.body);
     }
-    const bundle = await getCompanyBundle(apiKey, req.params.companyNumber);
+    const bundle = await getCompanyBundle(apiKey, companyNumber);
     res.json(bundle);
   } catch (err) {
     logAndRespond("get-company", err, res);

@@ -177,7 +177,9 @@ export default function CompanySearchPage() {
         const companyNumber = selected?.company_number;
         if (!companyNumber) return;
         const profileData =
-            company?.profile && !("error" in company.profile)
+            company?.profile &&
+            typeof company.profile === "object" &&
+            !("error" in company.profile)
                 ? company.profile
                 : undefined;
         const name =
@@ -189,7 +191,9 @@ export default function CompanySearchPage() {
     }
 
     const selectedProfile =
-        company?.profile && !("error" in company.profile)
+        company?.profile &&
+        typeof company.profile === "object" &&
+        !("error" in company.profile)
             ? company.profile
             : undefined;
     const detailName =

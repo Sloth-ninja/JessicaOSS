@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { CompaniesHouseError } from "../lib/companiesHouse";
-import { companiesHouseErrorResponse } from "./companies";
+import {
+  companiesHouseErrorResponse,
+  validateCompanyNumber,
+} from "./companies";
 
 describe("companiesHouseErrorResponse", () => {
   it("maps a 401 (invalid/missing key) to 409 with the key-missing code", () => {
@@ -66,5 +69,20 @@ describe("companiesHouseErrorResponse", () => {
       ),
     );
     expect(status).toBe(502);
+  });
+});
+
+describe("validateCompanyNumber", () => {
+  it("accepts and normalises legitimate company numbers, but rejects path/query metacharacters", () => {
+    expect(validateCompanyNumber("13927967")).toBe("13927967");
+    expect(validateCompanyNumber("123")).toBe("00000123");
+    expect(validateCompanyNumber("sc12345")).toBe("SC012345");
+    // Values that could redirect the outgoing Companies House request onto
+    // an unintended path or add query parameters must never pass through.
+    expect(validateCompanyNumber("../search")).toBeNull();
+    expect(validateCompanyNumber("13927967?foo=bar")).toBeNull();
+    expect(validateCompanyNumber("13927967/officers")).toBeNull();
+    expect(validateCompanyNumber("")).toBeNull();
+    expect(validateCompanyNumber("  ")).toBeNull();
   });
 });

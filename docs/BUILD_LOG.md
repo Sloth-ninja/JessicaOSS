@@ -24,7 +24,9 @@ Filing history tabs, neutral key-not-configured card, DD/MM/YYYY dates,
   try/catch per DURABLE_LESSONS 2026-07-19): `GET /companies/search?q=`,
   `GET /companies/:companyNumber` (bundle), `GET
   /companies/:companyNumber/filing-history?page=` (25/page). Per-request key
-  resolution via `getUserApiKeys` (BYO first, env fallback); missing key →
+  resolution via `getUserApiKeys` (env key takes precedence when set, per-user
+  BYO key otherwise — precedence flip is an open owner decision, PR #25
+  review); missing key →
   409 `{code: "companies_house_key_missing"}`; `CompaniesHouseError` mapping
   401→409 (same code), 404→404, 429→429, else fixed generic 502 — raw errors
   logged server-side only (`safeErrorLog`), never surfaced. New
