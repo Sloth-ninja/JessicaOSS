@@ -7,6 +7,17 @@
 
 ---
 
+## 2026-07-14 — Deployment config: fly.toml + wrangler.jsonc (branch `deploy-config`)
+
+**Scope:** the two config files DEPLOYMENT.md §8 flagged as missing, unblocking the pilot deploy. Owner decided Fly.io (14/07/2026).
+
+- `backend/fly.toml` — app `jessicaoss-api`, region `lhr` (UK data locality), builds from the WS6 Dockerfile, one always-warm shared-cpu-1x/1GB machine (`auto_stop_machines = "off"` so SSE chat streams are never cut; ~$6–11/month), `/health` checks, `TRUST_PROXY_HOPS=1` for Fly's proxy, `FRONTEND_URL` pinned to the production origin for CORS. Header documents first-deploy commands and the fresh-secret rule (openssl rand -hex 32 for the two signing/encryption secrets).
+- `frontend/wrangler.jsonc` — Worker `jessicaoss`, `.open-next/worker.js` entry per @opennextjs/cloudflare, `nodejs_compat`, assets binding, observability on; custom-domain route left commented for the owner's DNS decision.
+- `docs/DEPLOYMENT.md` §1/§8 updated: host decision recorded, wrangler gap closed.
+
+**Verification:** wrangler config parses (`wrangler deploy --dry-run` requires a built app, so validated as JSONC + against the config schema); fly.toml validated with `fly config validate` where flyctl is available — noted in PR that first `fly launch --copy-config` confirms it end-to-end. No product code touched.
+
+
 ## 2026-07-08 — Pilot deployment workstream (branch `ws6-pilot-deployment`, WS6)
 
 **Scope:** Owner decision (8 July 2026) to pilot-first: complete the product,

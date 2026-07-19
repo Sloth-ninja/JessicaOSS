@@ -1,0 +1,25 @@
+// Wrangler configuration for the JessicaOS frontend on Cloudflare Workers via
+// @opennextjs/cloudflare (see open-next.config.ts and docs/DEPLOYMENT.md §3).
+//
+// Deploy from frontend/:  npx wrangler login  (once)  then  npm run deploy
+// The build bakes in the NEXT_PUBLIC_* values from your local .env.local, so
+// point NEXT_PUBLIC_API_BASE_URL at the production backend before deploying.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "jessicaoss",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2025-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "observability": {
+    "enabled": true
+  }
+  // Canonical hostname is the apex jessicaoss.com (owner decision, 19 July 2026);
+  // www 301-redirects to it (docs/DEPLOYMENT.md §6). Attach the domain once the
+  // zone is live — either in the dashboard (Workers & Pages → jessicaoss →
+  // Settings → Domains & Routes) or by uncommenting:
+  // ,"routes": [{ "pattern": "jessicaoss.com", "custom_domain": true }]
+}
