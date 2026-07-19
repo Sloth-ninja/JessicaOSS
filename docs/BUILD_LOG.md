@@ -7,6 +7,75 @@
 
 ---
 
+## 2026-07-19 — WS7 PR 2: Company Search panel (Companies House) (branch `ws7-company-search`)
+
+**Scope:** first Research surface — a dedicated Research › Company Search page
+backed by new authenticated `/companies` backend routes, per the approved WS7
+mock-up (320px master list / flex-1 detail split, Overview / Officers / PSCs /
+Filing history tabs, neutral key-not-configured card, DD/MM/YYYY dates,
+"Continue in Assistant" primary action).
+
+**Key changes:**
+
+- Backend: `getCompanyBundle(apiKey, companyNumber)` extracted from the
+  `companies_house_get_company` chat tool (same graceful officer/PSC
+  degradation) so the chat tool and the new route share one implementation.
+  New `src/routes/companies.ts` (all `requireAuth`, every handler body in
+  try/catch per DURABLE_LESSONS 2026-07-19): `GET /companies/search?q=`,
+  `GET /companies/:companyNumber` (bundle), `GET
+  /companies/:companyNumber/filing-history?page=` (25/page). Per-request key
+  resolution via `getUserApiKeys` (env key takes precedence when set, per-user
+  BYO key otherwise — precedence flip is an open owner decision, PR #25
+  review); missing key →
+  409 `{code: "companies_house_key_missing"}`; `CompaniesHouseError` mapping
+  401→409 (same code), 404→404, 429→429, else fixed generic 502 — raw errors
+  logged server-side only (`safeErrorLog`), never surfaced. New
+  `researchLimiter` in `index.ts` (`RATE_LIMIT_RESEARCH_WINDOW_MINUTES`
+  default 15 / `RATE_LIMIT_RESEARCH_MAX` default 120), applied to
+  `/companies` and reusable for `/legislation`; both vars documented in
+  `.env.example` and the CLAUDE.md env registry; module map updated.
+- Frontend: new `(pages)/company-search/page.tsx` (single client page,
+  master–detail state, no dynamic route) reusing PageHeader breadcrumbs,
+  TableToolbar tabs, TablePrimitive skeletons, ui Button/Badge, and the
+  existing CompanyPanel via a new additive optional `section` prop
+  ("profile" | "officers" | "pscs") — default behaviour in the assistant side
+  panel unchanged. New `components/research/FilingHistoryList.tsx`
+  (lazy-fetched on tab open, paginated 25/page, DD/MM/YYYY, humanised filing
+  descriptions, "View on Companies House" register link). States: empty,
+  loading skeletons, key-not-configured card linking `/account/api-keys`
+  (with the free-registration note), rate-limited/not-found/generic messages.
+  Sidebar: collapsible "Research" group (Building2 icon), always visible.
+  `mikeApi.ts`: `chSearchCompanies` / `chGetCompany` / `chGetFilingHistory`.
+  Assistant prefill handoff: `lib/assistantPrefill.ts` (sessionStorage key
+  `jessica.assistantPrefill`), InitialView peeks at first render + clears on
+  mount, ChatInput takes an optional `initialValue` applied exactly once;
+  "Continue in Assistant" writes "Using Companies House, review {name}
+  (company no. {number}): " and routes to `/assistant`.
+
+**Review fixes (independent review, Approve-with-fixes, all Minor):**
+company numbers rejected with a fixed 400 unless strictly alphanumeric after
+normalisation (`validateCompanyNumber`, exported + tested — path/query
+metacharacters can never reach the outgoing Companies House URL); `typeof
+"object"` guard on the page's profile narrowing; key-precedence docs
+corrected to env-first reality (above).
+
+**Verification (after merging origin/main incl. PR #24):** backend
+`tsc --noEmit` clean; backend vitest 133/133 (11 new in this PR: 4
+`getCompanyBundle`, 6 `companiesHouseErrorResponse` mapping, 1
+`validateCompanyNumber`); frontend `tsc --noEmit` clean; frontend `npm run
+lint` 112 problems
+(34 errors/78 warnings) — byte-count identical to the main baseline, zero
+issues in changed files (five new react-compiler errors during development
+were fixed by restructuring, not suppression); `npm run evals:smoke` 4/4
+passed, run from the main checkout detached at the branch commit per
+DURABLE_LESSONS. Known integration note: trivial merge conflict expected with
+PR #24 (ws7-citation-checker) in `AppSidebar.tsx` (both add the Research
+group), `index.ts` and `mikeApi.ts` — resolved on this branch by merging
+`origin/main` after #24 landed (Research nav group unified to hold both
+entries; both limiters/mounts and both mikeApi sections kept).
+
+---
+
 ## 2026-07-19 — WS7 PR 4: Citation Checker (branch `ws7-citation-checker`)
 
 **Scope:** paste-in Citation Checker per the approved WS7 mock-up — new

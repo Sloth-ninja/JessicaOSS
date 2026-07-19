@@ -8,6 +8,7 @@ import {
     Table2,
     Library,
     User,
+    Building2,
     ChevronsUpDown,
     ChevronDown,
     ClipboardCheck,
@@ -30,7 +31,10 @@ const NAV_ITEMS = [
     { href: "/workflows", label: "Workflows", icon: Library },
 ];
 
+// UK research sources (WS7). Always visible — the pages themselves handle
+// any not-configured state.
 const RESEARCH_NAV_ITEMS = [
+    { href: "/company-search", label: "Company Search", icon: Building2 },
     {
         href: "/citation-checker",
         label: "Citation Checker",

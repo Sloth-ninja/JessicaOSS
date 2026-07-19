@@ -136,6 +136,48 @@ async function executeSearchCompanies(
   };
 }
 
+export type CompanyBundle = {
+  company_number: string;
+  retrieved_at: string;
+  profile: unknown;
+  officers: unknown;
+  psc: unknown;
+};
+
+/**
+ * Fetches a company's profile, officers, and PSCs in one aggregated bundle.
+ * Shared by the chat tool (companies_house_get_company) and the /companies
+ * route so both surfaces return the same shape. Officer/PSC failures degrade
+ * gracefully — the profile is the core signal, so a rate-limit or transient
+ * failure on the supplementary calls shouldn't blank out an otherwise-
+ * successful lookup. A profile failure still rejects the whole call.
+ */
+export async function getCompanyBundle(
+  apiKey: string,
+  companyNumberRaw: string,
+): Promise<CompanyBundle> {
+  const companyNumber = normalizeCompanyNumber(companyNumberRaw);
+
+  const profile = await getCompanyProfile(apiKey, companyNumber);
+
+  const [officers, psc] = await Promise.all([
+    getCompanyOfficers(apiKey, companyNumber).catch((err) => ({
+      error: errorMessageOf(err),
+    })),
+    getCompanyPSCs(apiKey, companyNumber).catch((err) => ({
+      error: errorMessageOf(err),
+    })),
+  ]);
+
+  return {
+    company_number: companyNumber,
+    retrieved_at: new Date().toISOString(),
+    profile,
+    officers,
+    psc,
+  };
+}
+
 async function executeGetCompany(
   args: Record<string, unknown>,
   apiKey: string,
@@ -146,31 +188,10 @@ async function executeGetCompany(
   if (!companyNumberRaw.trim()) {
     return errorResult(toolName, "A company_number is required.");
   }
-  const companyNumber = normalizeCompanyNumber(companyNumberRaw);
 
-  const profile = await getCompanyProfile(apiKey, companyNumber);
-
-  // Officer/PSC failures degrade gracefully — the profile is the core
-  // signal, so a rate-limit or transient failure on the supplementary
-  // calls shouldn't blank out an otherwise-successful lookup.
-  const [officers, psc] = await Promise.all([
-    getCompanyOfficers(apiKey, companyNumber).catch((err) => ({
-      error: errorMessageOf(err),
-    })),
-    getCompanyPSCs(apiKey, companyNumber).catch((err) => ({
-      error: errorMessageOf(err),
-    })),
-  ]);
-
-  const companyName = (profile as Record<string, unknown> | undefined)
+  const payload = await getCompanyBundle(apiKey, companyNumberRaw);
+  const companyName = (payload.profile as Record<string, unknown> | undefined)
     ?.company_name as string | undefined;
-  const payload = {
-    company_number: companyNumber,
-    retrieved_at: new Date().toISOString(),
-    profile,
-    officers,
-    psc,
-  };
 
   return {
     content: JSON.stringify(payload),
@@ -178,7 +199,7 @@ async function executeGetCompany(
       type: "companies_house_tool_call",
       tool_name: toolName,
       status: "ok",
-      company_number: companyNumber,
+      company_number: payload.company_number,
       company_name: companyName,
       company: payload,
     },

@@ -11,6 +11,7 @@ import { tabularRouter } from "./routes/tabular";
 import { workflowsRouter } from "./routes/workflows";
 import { userRouter } from "./routes/user";
 import { downloadsRouter } from "./routes/downloads";
+import { companiesRouter } from "./routes/companies";
 import { citationsRouter } from "./routes/citations";
 
 const app = express();
@@ -93,6 +94,13 @@ const dataDeleteLimiter = makeLimiter({
   message: "Too many data deletion requests. Please try again later.",
 });
 
+// Shared limiter for UK research routes (/companies now; /legislation later).
+const researchLimiter = makeLimiter({
+  windowMs: minutes(envInt("RATE_LIMIT_RESEARCH_WINDOW_MINUTES", 15)),
+  max: envInt("RATE_LIMIT_RESEARCH_MAX", 120),
+  message: "Too many research requests. Please try again later.",
+});
+
 function jsonLimitForPath(path: string): string {
   return "50mb";
 }
@@ -149,6 +157,7 @@ app.delete("/user/account", dataDeleteLimiter);
 app.delete("/user/chats", dataDeleteLimiter);
 app.delete("/user/projects", dataDeleteLimiter);
 app.delete("/user/tabular-reviews", dataDeleteLimiter);
+app.use("/companies", researchLimiter);
 app.post("/citations/check", citationsLimiter);
 
 app.use((req, res, next) =>
@@ -164,6 +173,7 @@ app.use("/workflows", workflowsRouter);
 app.use("/user", userRouter);
 app.use("/users", userRouter);
 app.use("/download", downloadsRouter);
+app.use("/companies", companiesRouter);
 app.use("/citations", citationsRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));

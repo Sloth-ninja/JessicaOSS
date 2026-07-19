@@ -30,6 +30,7 @@ import {
   COMPANIES_HOUSE_SYSTEM_PROMPT,
   COMPANIES_HOUSE_TOOLS,
   executeCompaniesHouseToolCall,
+  getCompanyBundle,
 } from "./companiesHouseTools";
 import { CompaniesHouseError } from "../companiesHouse";
 
@@ -266,5 +267,85 @@ describe("executeCompaniesHouseToolCall", () => {
     );
     expect(event.status).toBe("error");
     expect(JSON.parse(content).error).toMatch(/unknown/i);
+  });
+});
+
+describe("getCompanyBundle", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("aggregates profile + officers + PSCs into one bundle", async () => {
+    getCompanyProfileMock.mockResolvedValue({
+      company_name: "ARIA GRACE LAW CIC",
+      company_number: "13927967",
+    });
+    getCompanyOfficersMock.mockResolvedValue({
+      items: [{ name: "HEALY, Lindsay Paul", officer_role: "director" }],
+    });
+    getCompanyPSCsMock.mockResolvedValue({
+      items: [{ name: "Mr Lindsay Paul Healy" }],
+    });
+
+    const bundle = await getCompanyBundle("test-key", "13927967");
+
+    expect(getCompanyProfileMock).toHaveBeenCalledWith("test-key", "13927967");
+    expect(getCompanyOfficersMock).toHaveBeenCalledWith("test-key", "13927967");
+    expect(getCompanyPSCsMock).toHaveBeenCalledWith("test-key", "13927967");
+    expect(bundle.company_number).toBe("13927967");
+    expect(typeof bundle.retrieved_at).toBe("string");
+    expect(
+      Number.isNaN(new Date(bundle.retrieved_at).getTime()),
+    ).toBe(false);
+    expect(bundle.profile).toMatchObject({
+      company_name: "ARIA GRACE LAW CIC",
+    });
+    expect(bundle.officers).toMatchObject({
+      items: [{ name: "HEALY, Lindsay Paul" }],
+    });
+    expect(bundle.psc).toMatchObject({
+      items: [{ name: "Mr Lindsay Paul Healy" }],
+    });
+  });
+
+  it("normalises the company number before calling the client", async () => {
+    getCompanyProfileMock.mockResolvedValue({ company_number: "00000123" });
+    getCompanyOfficersMock.mockResolvedValue({ items: [] });
+    getCompanyPSCsMock.mockResolvedValue({ items: [] });
+
+    const bundle = await getCompanyBundle("test-key", "123");
+
+    expect(getCompanyProfileMock).toHaveBeenCalledWith("test-key", "00000123");
+    expect(bundle.company_number).toBe("00000123");
+  });
+
+  it("degrades gracefully when officers/PSC calls fail", async () => {
+    getCompanyProfileMock.mockResolvedValue({
+      company_name: "ARIA GRACE LAW CIC",
+    });
+    getCompanyOfficersMock.mockRejectedValue(
+      new CompaniesHouseError("Companies House rate limit exceeded", 429),
+    );
+    getCompanyPSCsMock.mockRejectedValue(new Error("boom"));
+
+    const bundle = await getCompanyBundle("test-key", "13927967");
+
+    expect(bundle.profile).toMatchObject({
+      company_name: "ARIA GRACE LAW CIC",
+    });
+    expect(bundle.officers).toMatchObject({
+      error: expect.stringMatching(/rate limit/i),
+    });
+    expect(bundle.psc).toMatchObject({ error: "boom" });
+  });
+
+  it("rejects when the profile call fails", async () => {
+    getCompanyProfileMock.mockRejectedValue(
+      new CompaniesHouseError("No company found with number 99999999", 404),
+    );
+
+    await expect(getCompanyBundle("test-key", "99999999")).rejects.toThrow(
+      /no company found/i,
+    );
   });
 });
