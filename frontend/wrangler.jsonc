@@ -16,10 +16,10 @@
   },
   "observability": {
     "enabled": true
-  }
+  },
   // Canonical hostname is the apex jessicaoss.com (owner decision, 19 July 2026);
-  // www 301-redirects to it (docs/DEPLOYMENT.md §6). Attach the domain once the
-  // zone is live — either in the dashboard (Workers & Pages → jessicaoss →
-  // Settings → Domains & Routes) or by uncommenting:
-  // ,"routes": [{ "pattern": "jessicaoss.com", "custom_domain": true }]
+  // www 301-redirects to it (docs/DEPLOYMENT.md §6). The zone went live in the
+  // Cloudflare account on 19 July, so the custom domain is attached at deploy
+  // time; no workers.dev subdomain is registered or needed.
+  "routes": [{ "pattern": "jessicaoss.com", "custom_domain": true }]
 }

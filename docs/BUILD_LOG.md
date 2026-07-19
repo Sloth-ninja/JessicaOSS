@@ -7,6 +7,22 @@
 
 ---
 
+## 2026-07-19 — Enable Worker custom-domain route (branch `enable-worker-route`)
+
+**Scope:** one-line config activation. First Worker publish failed at the final step:
+the Cloudflare account has no `workers.dev` subdomain registered and `wrangler.jsonc`
+had its route commented out (deliberately, pending the DNS decision — see the
+deploy-config entry). The `jessicaoss.com` zone is now live in the account (API DNS
+records added, Fly cert issued 19 July), so the commented route is activated:
+`"routes": [{ "pattern": "jessicaoss.com", "custom_domain": true }]` — wrangler
+attaches the apex custom domain at deploy time; no `workers.dev` subdomain needed.
+
+**Verification:** JSONC validity parse-checked (comments stripped → valid JSON).
+Live proof deferred to the post-merge `npm run deploy` (publish + domain attach +
+`https://jessicaoss.com` check) — recorded in CLAUDE.md Current status once run.
+
+---
+
 ## 2026-07-19 — Remove upstream bun.lock (breaks packager detection twice) (branch `remove-bun-lockfile`)
 
 **Scope:** deletes `frontend/bun.lock` (upstream artefact; this fork is npm-canonical
