@@ -11,7 +11,7 @@
 
 **Scope:** paste-in Citation Checker per the approved WS7 mock-up — new
 `POST /citations/check` backend route (extract statutory citations from up to
-100k characters of pasted text, verify each live against legislation.gov.uk)
+20k characters of pasted text, verify each live against legislation.gov.uk)
 and a new `/citation-checker` page in a "Research" sidebar group.
 
 **Key changes:**
@@ -26,9 +26,21 @@ and a new `/citation-checker` page in a "Research" sidebar group.
   strictly sequential verification, ≤50 citations per request).
 - `backend/src/routes/citations.ts` — `requireAuth`, whole-handler try/catch
   with a fixed generic 500 detail (DURABLE_LESSONS 2026-07-19), 413 above
-  100k chars, neutral-case citations always `unverifiable` with the fixed
+  20k chars, neutral-case citations always `unverifiable` with the fixed
   Find-Case-Law/BAILII copy. Own limiter `RATE_LIMIT_CITATIONS_MAX`
   (default 20 / 15 min; documented in `.env.example` + CLAUDE.md registry).
+  The 20k text cap (reduced from the originally-shipped 100k after
+  independent review) is the **ReDoS mitigation** for the O(n²) ported
+  ACT_TITLE regex: extraction runs synchronously before the first await, and
+  a pathological 100k paste blocked the Node event loop ~6.7s
+  (reviewer-benchmarked), stalling all requests including SSE chat; at 20k
+  the worst case stays well under ~0.5s. The regex itself stays byte-identical
+  to evals per the sync mandate — a future synced regex fix in both suites
+  remains recommended. Same review: verification consciously shares the
+  global legislation.gov.uk politeness bucket with the chat tools (one
+  50-citation check can queue chat legislation lookups for tens of seconds —
+  by design; politeness to the upstream host requires a single bucket),
+  now documented in the route.
 - Frontend: `citation-checker/page.tsx` (textarea → single POST, skeleton
   checking state with "may take up to a minute" note, results table with
   green Verified rows linking to the canonical legislation.gov.uk URL, red
@@ -42,7 +54,7 @@ and a new `/citation-checker` page in a "Research" sidebar group.
 **Verification:** backend `tsc --noEmit` clean; backend vitest 122/122 (25 new:
 `citationExtraction.test.ts` fixtures incl. section-first/act-first/bare-act
 de-dup/SI/neutral forms, and `routes/citations.test.ts` with mocked
-`verifyCitation` covering status mapping, 50-citation cap, 100k cap/413,
+`verifyCitation` covering status mapping, 50-citation cap, 20k cap/413,
 neutral-case fixed copy, generic-500 no-leak). Frontend `tsc --noEmit` clean;
 `npm run lint` 34 errors/78 warnings — byte-count identical to the main
 baseline (no new issues; the one AppSidebar error is the pre-existing

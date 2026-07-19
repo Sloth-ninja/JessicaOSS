@@ -12,7 +12,14 @@ export const citationsRouter = Router();
 // Request/response caps: a paste-in draft, not a bulk API. Text above the cap
 // is rejected outright (413); citations beyond the cap are silently dropped
 // (50 sequential lookups already take ~1 minute at the politeness rate).
-const MAX_TEXT_LENGTH = 100_000;
+//
+// The 20k text cap is a ReDoS mitigation, not just a UX bound: the ported
+// ACT_TITLE regex (kept byte-identical to evals/src/citations.ts per the sync
+// mandate) is O(n²), and extraction runs synchronously before the first await
+// — a pathological 100k paste blocked the event loop ~6.7s (stalling every
+// request, including SSE chat). At 20k the worst case stays well under ~0.5s.
+// A future synced regex fix in both suites remains the proper cure.
+const MAX_TEXT_LENGTH = 20_000;
 const MAX_CITATIONS_PER_REQUEST = 50;
 
 // Fixed copy required by the WS7 plan — do not reword without owner sign-off.
@@ -43,7 +50,7 @@ citationsRouter.post("/check", requireAuth, async (req, res) => {
     if (text.length > MAX_TEXT_LENGTH) {
       return res.status(413).json({
         detail:
-          "That text is too long to check in one go (100,000 character limit). Split the draft and check it in parts.",
+          "That text is too long to check in one go (20,000 character limit). Split the draft and check it in parts.",
       });
     }
 
@@ -57,6 +64,11 @@ citationsRouter.post("/check", requireAuth, async (req, res) => {
     // politeness token bucket (~1 req/s) — parallelising here would just
     // queue on the bucket while holding more memory, and keeps ordering
     // stable for the UI.
+    //
+    // Conscious trade-off: that bucket is GLOBAL to the legislation.gov.uk
+    // client, shared with the chat tools' legislation lookups — one
+    // 50-citation check can queue chat lookups for tens of seconds. This is
+    // by design: politeness to the upstream host requires a single bucket.
     for (const citation of citations) {
       if (citation.kind === "neutral-case") {
         results.push({

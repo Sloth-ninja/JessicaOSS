@@ -162,15 +162,15 @@ describe("POST /citations/check", () => {
     expect(verifyCitation).toHaveBeenCalledTimes(50);
   });
 
-  it("returns 413 when the text exceeds 100,000 characters", async () => {
-    const { status, body } = await check({ text: "a".repeat(100_001) });
+  it("returns 413 when the text exceeds 20,000 characters", async () => {
+    const { status, body } = await check({ text: "a".repeat(20_001) });
     expect(status).toBe(413);
     expect(typeof body.detail).toBe("string");
     expect(verifyCitation).not.toHaveBeenCalled();
   });
 
-  it("accepts text at exactly the 100,000-character cap", async () => {
-    const { status, body } = await check({ text: "a".repeat(100_000) });
+  it("accepts text at exactly the 20,000-character cap", async () => {
+    const { status, body } = await check({ text: "a".repeat(20_000) });
     expect(status).toBe(200);
     expect(body.results).toEqual([]);
   });
