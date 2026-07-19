@@ -7,6 +7,24 @@
 
 ---
 
+## 2026-07-19 — Handover pack: research briefs + HANDOVER.md (branch `handover-docs`)
+
+**Scope:** docs-only, written at session end (Fable → Opus model handover). Adds
+`docs/research/2026-07-19-competitor-scan.md` (Legora/Harvey condensed findings,
+ranked gaps, do-not-copy list), `docs/research/2026-07-19-integrations.md`
+(Quill/Unity API brief — no document API, per-user OAuth, time-recording headline,
+v1.1 spike plan; HMLR Business Gateway brief — authorised-channel requirement,
+fees, v1 open-data path), and `docs/HANDOVER.md` (infrastructure map, in-flight
+WS7 workflow to verify, owner-set next-actions queue, owner-pending items,
+operating rituals). CLAUDE.md: router rows for HANDOVER/research + Current status
+refreshed to the WS7-in-flight state.
+
+**Verification:** docs-only; paths referenced verified to exist on this branch.
+Review waived under the model-handover time-box (noted honestly; docs carry no
+code risk); expect keep-both BUILD_LOG conflicts with in-flight WS7 PRs.
+
+---
+
 ## 2026-07-19 — WS7 PR 2: Company Search panel (Companies House) (branch `ws7-company-search`)
 
 **Scope:** first Research surface — a dedicated Research › Company Search page
