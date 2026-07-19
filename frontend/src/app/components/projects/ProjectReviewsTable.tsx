@@ -104,7 +104,7 @@ export function ProjectReviewsTable({
                         Tabular Reviews
                     </p>
                     <p className="mt-1 text-xs text-gray-400 max-w-xs">
-                        Extract data from project documents into tables using AI.
+                        Extract data from matter documents into tables using AI.
                     </p>
                     <button
                         onClick={onCreateReview}

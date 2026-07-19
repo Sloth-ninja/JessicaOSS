@@ -782,7 +782,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                 shrink
                 breadcrumbs={[
                     {
-                        label: "Projects",
+                        label: "Matters",
                         onClick: () => router.push("/projects"),
                     },
                     project
@@ -790,14 +790,14 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                               label: project.name,
                               onClick: () =>
                                   router.push(`/projects/${projectId}/assistant`),
-                              title: "Back to project",
+                              title: "Back to matter",
                           }
                         : {
                               loading: true,
                               skeletonClassName: "w-32",
                               onClick: () =>
                                   router.push(`/projects/${projectId}/assistant`),
-                              title: "Back to project",
+                              title: "Back to matter",
                           },
                     chatLoaded
                         ? {
@@ -1124,7 +1124,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                                     </p>
                                     <p className="font-serif text-base text-gray-500">
                                         Pro tip: Drag a document from the
-                                        Project Explorer to the Assistant to
+                                        Matter Explorer to the Assistant to
                                         direct it to read or edit.
                                     </p>
                                 </div>
@@ -1144,7 +1144,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                 >
                     <div className="h-10 flex items-center px-4 border-b border-gray-200 shrink-0">
                         <span className="text-xs text-gray-700">
-                            Project Assistant
+                            Matter Assistant
                         </span>
                     </div>
 

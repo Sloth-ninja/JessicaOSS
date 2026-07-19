@@ -387,7 +387,7 @@ export function ProjectPageHeader({
     const requestRename = () => {
         if (!project) return;
         if (!isOwner) {
-            onOwnerOnly("rename this project");
+            onOwnerOnly("rename this matter");
             return;
         }
         onOpenDetails();
@@ -407,9 +407,9 @@ export function ProjectPageHeader({
         <PageHeader
             breadcrumbs={[
                 {
-                    label: "Projects",
+                    label: "Matters",
                     onClick: onBackToProjects,
-                    title: "Back to Projects",
+                    title: "Back to Matters",
                 },
                 {
                     ...(project
@@ -448,7 +448,7 @@ export function ProjectPageHeader({
                                         onSelect: requestRename,
                                     },
                                     {
-                                        label: "Project Details",
+                                        label: "Matter Details",
                                         icon: Info,
                                         onSelect: onOpenDetails,
                                     },

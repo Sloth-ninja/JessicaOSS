@@ -1884,7 +1884,7 @@ export function ProjectDocumentsView({ projectId }: Props) {
     if (!loading && !project) {
         return (
             <div className="flex h-full items-center justify-center">
-                <p className="text-gray-400">Project not found</p>
+                <p className="text-gray-400">Matter not found</p>
             </div>
         );
     }
@@ -2888,7 +2888,7 @@ export function ProjectDocumentsView({ projectId }: Props) {
                     onClose={() => setAddDocsOpen(false)}
                     onSelect={handleDocsSelected}
                     breadcrumb={[
-                        "Projects",
+                        "Matters",
                         project.name +
                             (project.cm_number
                                 ? ` (${project.cm_number})`

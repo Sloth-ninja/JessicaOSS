@@ -107,7 +107,7 @@ export function ProjectDetailsModal({
             await onSave({ name: trimmedName, cmNumber: trimmedCm });
             setSaved(true);
         } catch {
-            setError("Could not update project details.");
+            setError("Could not update matter details.");
         } finally {
             setSaving(false);
         }
@@ -117,9 +117,9 @@ export function ProjectDetailsModal({
         <Modal
             open={open}
             onClose={onClose}
-            breadcrumbs={["Projects", project.name, "Details"]}
+            breadcrumbs={["Matters", project.name, "Details"]}
             secondaryAction={{
-                label: "Share Project",
+                label: "Share Matter",
                 icon: <Users className="h-4 w-4" />,
                 onClick: onShareProject,
             }}
@@ -147,7 +147,7 @@ export function ProjectDetailsModal({
                         htmlFor="project-details-name"
                         className="text-xs font-medium text-gray-700"
                     >
-                        Project Name
+                        Matter Name
                     </label>
                     <input
                         id="project-details-name"

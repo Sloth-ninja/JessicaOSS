@@ -35,8 +35,8 @@ export function OwnerOnlyModal({
     const body =
         message ??
         (action
-            ? `Only the project owner can ${action}.`
-            : "Only the project owner can perform this action.");
+            ? `Only the matter owner can ${action}.`
+            : "Only the matter owner can perform this action.");
 
     return (
         <WarningPopup

@@ -55,7 +55,7 @@ projectChatRouter.post("/", requireAuth, async (req, res) => {
         db,
     );
     if (!projectAccess.ok)
-        return void res.status(404).json({ detail: "Project not found" });
+        return void res.status(404).json({ detail: "Matter not found" });
 
     let chatId = chat_id ?? null;
     let chatTitle: string | null = null;

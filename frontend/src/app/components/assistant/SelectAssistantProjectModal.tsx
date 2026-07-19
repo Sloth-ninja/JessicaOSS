@@ -43,7 +43,7 @@ export function SelectAssistantProjectModal({ open, onClose }: Props) {
         <Modal
             open={open}
             onClose={onClose}
-            breadcrumbs={["Assistant", "Start Chat in a Project"]}
+            breadcrumbs={["Assistant", "Start Chat in a Matter"]}
             primaryAction={{
                 label: creating ? "Creating…" : "Continue",
                 onClick: handleContinue,

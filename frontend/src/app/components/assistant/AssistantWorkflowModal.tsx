@@ -22,7 +22,7 @@ export function AssistantWorkflowModal({
 }: Props) {
     const breadcrumbs = projectName
         ? [
-              "Projects",
+              "Matters",
               `${projectName}${projectCmNumber ? ` (#${projectCmNumber})` : ""}`,
               "Assistant",
               "Add workflow",

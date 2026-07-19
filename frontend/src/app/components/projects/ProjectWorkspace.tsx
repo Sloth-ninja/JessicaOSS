@@ -307,7 +307,7 @@ export function ProjectWorkspaceProvider({
         cmNumber: string;
     }) {
         if (project && project.is_owner === false) {
-            setOwnerOnlyAction("edit project details");
+            setOwnerOnlyAction("edit matter details");
             return;
         }
         const name = values.name.trim();
@@ -330,7 +330,7 @@ export function ProjectWorkspaceProvider({
 
     function requestProjectDelete() {
         if (project && project.is_owner === false) {
-            setOwnerOnlyAction("delete this project");
+            setOwnerOnlyAction("delete this matter");
             return;
         }
         setDeleteProjectStatus("idle");
@@ -462,8 +462,8 @@ export function ProjectWorkspaceProvider({
 
                 <ConfirmPopup
                     open={deleteProjectConfirmOpen}
-                    title="Delete project?"
-                    message="This will permanently delete the project and its related documents, chats, and tabular reviews."
+                    title="Delete matter?"
+                    message="This will permanently delete the matter and its related documents, chats, and tabular reviews."
                     confirmLabel="Delete"
                     confirmStatus={
                         deleteProjectStatus === "deleting"
@@ -489,7 +489,7 @@ export function ProjectWorkspaceProvider({
                         fetchPeople={getProjectPeople}
                         currentUserEmail={user?.email ?? null}
                         breadcrumb={[
-                            "Projects",
+                            "Matters",
                             project.name +
                                 (project.cm_number
                                     ? ` (${project.cm_number})`
