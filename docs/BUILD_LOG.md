@@ -7,6 +7,23 @@
 
 ---
 
+## 2026-07-19 — Remove upstream bun.lock (breaks packager detection twice) (branch `remove-bun-lockfile`)
+
+**Scope:** deletes `frontend/bun.lock` (upstream artefact; this fork is npm-canonical
+via `package-lock.json`). Follow-up to the `fix-opennext-packager` entry below: the
+`buildCommand` override fixed the build phase, but wrangler ≥4.9x autoconfig delegates
+`wrangler deploy` to `opennextjs-cloudflare deploy`, whose packager detection again
+picked bun for the wrangler invocation — so the first Cloudflare deploy still failed
+with `bun: command not found`. Deliberate, recorded deviation from minimal-diff rule 8:
+the file actively broke two independent tool layers. Correction entry appended to
+`docs/DURABLE_LESSONS.md`.
+
+**Verification:** with the lockfile gone, `npx wrangler deploy` (delegating to
+`opennextjs-cloudflare deploy`) invokes wrangler via npm and completes — verified live
+against the `jessicaoss` Worker. CI green on the PR.
+
+---
+
 ## 2026-07-19 — Fix OpenNext packager detection for Cloudflare deploy (branch `fix-opennext-packager`)
 
 **Scope:** one-line config fix found during the first real frontend deploy. Upstream

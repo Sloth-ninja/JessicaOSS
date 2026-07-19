@@ -4,6 +4,7 @@ dist
 out
 build
 .open-next
+.wrangler
 
 .env
 .env.*
