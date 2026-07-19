@@ -47,6 +47,13 @@ passed / 0 failed / 1 skipped (Companies House key not in worktree env); final
 `grep -rn "Mike" frontend/src backend/src` audited — all 30 remaining hits are
 internal identifiers or code comments.
 
+**Addendum 2026-07-19 (same PR, owner note):** persona vs product split — where the
+*assistant* names itself it is **"Jessica"** (system prompts in `chatTools.ts` /
+`tabular.ts`, DOCX tracked-changes author, the two "what Jessica should extract"
+prompt placeholders); the *product* remains **"JessicaOS"** everywhere else (titles,
+wordmark, MFA device names, OAuth client name, filenames). Owner's rationale:
+"Siri doesn't call herself SiriOS." Both `tsc` runs re-verified clean.
+
 ---
 
 ## 2026-07-19 — Process/docs adoption (branch `process-docs-adoption`)
