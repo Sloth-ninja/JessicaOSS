@@ -45,6 +45,20 @@ branch; no code, prompts, or user-facing strings touched.
 
 ---
 
+## 2026-07-14 — Deployment config: fly.toml + wrangler.jsonc (branch `deploy-config`)
+
+**Scope:** the two config files DEPLOYMENT.md §8 flagged as missing, unblocking the pilot deploy. Owner decided Fly.io (14/07/2026).
+
+- `backend/fly.toml` — app `jessicaoss-api`, region `lhr` (UK data locality), builds from the WS6 Dockerfile, one always-warm shared-cpu-1x/1GB machine (`auto_stop_machines = "off"` so SSE chat streams are never cut; ~$6–11/month), `/health` checks, `TRUST_PROXY_HOPS=1` for Fly's proxy, `FRONTEND_URL` pinned to the production origin for CORS. Header documents first-deploy commands and the fresh-secret rule (openssl rand -hex 32 for the two signing/encryption secrets).
+- `frontend/wrangler.jsonc` — Worker `jessicaoss`, `.open-next/worker.js` entry per @opennextjs/cloudflare, `nodejs_compat`, assets binding, observability on; custom-domain route left commented for the owner's DNS decision.
+- `docs/DEPLOYMENT.md` §1/§8 updated: host decision recorded, wrangler gap closed.
+
+**Verification:** wrangler config parses (`wrangler deploy --dry-run` requires a built app, so validated as JSONC + against the config schema); fly.toml validated with `fly config validate` where flyctl is available — noted in PR that first `fly launch --copy-config` confirms it end-to-end. No product code touched.
+
+**Addendum 2026-07-19 (same PR, pre-merge):** canonical-origin decision taken by the owner — apex `jessicaoss.com` is the app origin, `www.jessicaoss.com` 301-redirects to it (never serves the app: CORS is single-origin), `api.jessicaoss.com` for the backend. `fly.toml` `FRONTEND_URL`, the wrangler route comment, and DEPLOYMENT.md §6 updated accordingly (commit `e96c104`). Merged as PR #13, merge `9c8ec49`.
+
+---
+
 ## 2026-07-14 — Eval baseline committed (PR #12, merge `8112fe1`) *(retrospective entry, added 2026-07-19)*
 
 - `evals/baseline.json` committed as the regression gate reference:
