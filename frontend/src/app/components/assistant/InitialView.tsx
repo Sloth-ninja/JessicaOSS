@@ -6,6 +6,10 @@ import { useUserProfile } from "@/contexts/UserProfileContext";
 import { MikeIcon } from "@/components/chat/mike-icon";
 import { ChatInput } from "./ChatInput";
 import { SelectAssistantProjectModal } from "./SelectAssistantProjectModal";
+import {
+    clearAssistantPrefill,
+    peekAssistantPrefill,
+} from "@/app/lib/assistantPrefill";
 import type { Message } from "../shared/types";
 
 interface InitialViewProps {
@@ -22,7 +26,16 @@ export function InitialView({ onSubmit }: InitialViewProps) {
     const [projectModalOpen, setProjectModalOpen] = useState(false);
     const [iconOffset, setIconOffset] = useState(0);
     const [textOffset, setTextOffset] = useState(0);
+    // Pending research-page handoff: read (idempotently) at first render so
+    // ChatInput can take it as its initial value, then clear it once mounted.
+    const [prefill] = useState<string | null>(() =>
+        typeof window === "undefined" ? null : peekAssistantPrefill(),
+    );
     const textRef = useRef<HTMLHeadingElement>(null);
+
+    useEffect(() => {
+        clearAssistantPrefill();
+    }, []);
 
     const username =
         profile?.displayName?.trim() || user?.email?.split("@")[0] || "there";
@@ -80,6 +93,7 @@ export function InitialView({ onSubmit }: InitialViewProps) {
                         onCancel={() => {}}
                         isLoading={false}
                         onProjectsClick={() => setProjectModalOpen(true)}
+                        initialValue={prefill ?? undefined}
                     />
 
                     <div className="text-center">

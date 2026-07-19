@@ -1193,3 +1193,62 @@ export async function deleteWorkflowShare(
         method: "DELETE",
     });
 }
+
+// ---------------------------------------------------------------------------
+// Companies House research (WS7) — read-only passthroughs over /companies.
+// Shapes mirror the public Companies House API and are deliberately
+// permissive; every field is read defensively by the UI.
+// ---------------------------------------------------------------------------
+
+export interface ChCompanySearchItem {
+    title?: string;
+    company_number?: string;
+    company_status?: string;
+    company_type?: string;
+    address_snippet?: string;
+    date_of_creation?: string;
+}
+
+export interface ChCompanySearchResult {
+    items?: ChCompanySearchItem[];
+    total_results?: number;
+}
+
+export interface ChFilingHistoryItem {
+    date?: string;
+    description?: string;
+    description_values?: { made_up_date?: string; [key: string]: unknown };
+    type?: string;
+    category?: string;
+}
+
+export interface ChFilingHistoryResult {
+    items?: ChFilingHistoryItem[];
+    total_count?: number;
+    items_per_page?: number;
+    start_index?: number;
+}
+
+export async function chSearchCompanies(
+    q: string,
+): Promise<ChCompanySearchResult> {
+    return apiRequest<ChCompanySearchResult>(
+        `/companies/search?q=${encodeURIComponent(q)}`,
+    );
+}
+
+/** Profile + officers + PSCs bundle — the shape CompanyPanel consumes. */
+export async function chGetCompany(companyNumber: string): Promise<unknown> {
+    return apiRequest<unknown>(
+        `/companies/${encodeURIComponent(companyNumber)}`,
+    );
+}
+
+export async function chGetFilingHistory(
+    companyNumber: string,
+    page = 1,
+): Promise<ChFilingHistoryResult> {
+    return apiRequest<ChFilingHistoryResult>(
+        `/companies/${encodeURIComponent(companyNumber)}/filing-history?page=${page}`,
+    );
+}

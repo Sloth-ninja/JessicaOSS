@@ -62,11 +62,19 @@ export interface CompanyPanelData {
     psc?: { items?: Psc[] } | { error: string };
 }
 
+export type CompanyPanelSection = "profile" | "officers" | "pscs";
+
 interface Props {
     companyNumber: string;
     companyName?: string;
     /** The full structured payload from the companies_house_get_company tool call. */
     company: unknown;
+    /**
+     * When set, renders only that section's card (no panel header or
+     * attribution) — used by the Company Search page, which supplies its own
+     * header, tabs, and attribution footer. Omitted = the full side panel.
+     */
+    section?: CompanyPanelSection;
 }
 
 function isErrorResult(value: unknown): value is { error: string } {
@@ -145,7 +153,12 @@ function Field({
  * to the public Companies House register for the full filing history and
  * source documents.
  */
-export function CompanyPanel({ companyNumber, companyName, company }: Props) {
+export function CompanyPanel({
+    companyNumber,
+    companyName,
+    company,
+    section,
+}: Props) {
     const data = (company ?? {}) as CompanyPanelData;
     const profile = !isErrorResult(data.profile) ? data.profile : undefined;
     const profileError = isErrorResult(data.profile)
@@ -182,6 +195,7 @@ export function CompanyPanel({ companyNumber, companyName, company }: Props) {
 
     return (
         <div className="flex h-full flex-col">
+            {!section && (
             <div className="flex items-start gap-3 px-3 pt-4 pb-3">
                 <div className="min-w-0 flex-1">
                     <h2
@@ -205,8 +219,10 @@ export function CompanyPanel({ companyNumber, companyName, company }: Props) {
                     <ExternalLink className="h-3 w-3" />
                 </a>
             </div>
+            )}
 
             <div className="flex flex-1 min-h-0 flex-col gap-5 overflow-y-auto px-3 pb-6">
+                {(!section || section === "profile") && (
                 <section className="flex flex-col gap-3 rounded-xl border border-gray-100 bg-white/60 p-3">
                     <SectionLabel>Profile</SectionLabel>
                     {profileError ? (
@@ -250,7 +266,9 @@ export function CompanyPanel({ companyNumber, companyName, company }: Props) {
                         </div>
                     )}
                 </section>
+                )}
 
+                {(!section || section === "officers") && (
                 <section className="flex flex-col gap-3 rounded-xl border border-gray-100 bg-white/60 p-3">
                     <SectionLabel>Officers</SectionLabel>
                     {officersError ? (
@@ -296,7 +314,9 @@ export function CompanyPanel({ companyNumber, companyName, company }: Props) {
                         </ul>
                     )}
                 </section>
+                )}
 
+                {(!section || section === "pscs") && (
                 <section className="flex flex-col gap-3 rounded-xl border border-gray-100 bg-white/60 p-3">
                     <SectionLabel>Persons with significant control</SectionLabel>
                     {pscError ? (
@@ -336,11 +356,14 @@ export function CompanyPanel({ companyNumber, companyName, company }: Props) {
                         </ul>
                     )}
                 </section>
+                )}
 
+                {!section && (
                 <p className="text-xs text-gray-400">
                     Data from the public Companies House register (Crown
                     copyright, Open Government Licence). Not legal advice.
                 </p>
+                )}
             </div>
         </div>
     );

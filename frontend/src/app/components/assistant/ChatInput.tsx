@@ -46,6 +46,9 @@ interface Props {
     onProjectsClick?: () => void;
     projectName?: string;
     projectCmNumber?: string | null;
+    /** Prefills the input once (e.g. a research-page handoff); never
+     *  overwrites text the user has already typed. */
+    initialValue?: string;
 }
 
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
@@ -58,10 +61,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
         onProjectsClick,
         projectName,
         projectCmNumber,
+        initialValue,
     }: Props,
     ref,
 ) {
-    const [value, setValue] = useState("");
+    // initialValue is applied exactly once, as the initial state — later
+    // prop changes never overwrite what the user has typed.
+    const [value, setValue] = useState(initialValue ?? "");
     const [attachedDocs, setAttachedDocs] = useState<Document[]>([]);
     const [selectedWorkflow, setSelectedWorkflow] = useState<{
         id: string;

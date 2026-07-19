@@ -8,6 +8,7 @@ import {
     Table2,
     Library,
     User,
+    Building2,
     ChevronsUpDown,
     ChevronDown,
 } from "lucide-react";
@@ -27,6 +28,12 @@ const NAV_ITEMS = [
     { href: "/projects", label: "Matters", icon: FolderOpen },
     { href: "/tabular-reviews", label: "Tabular Review", icon: Table2 },
     { href: "/workflows", label: "Workflows", icon: Library },
+];
+
+// UK research sources (WS7). Always visible — the pages themselves handle
+// any not-configured state.
+const RESEARCH_NAV_ITEMS = [
+    { href: "/company-search", label: "Company Search", icon: Building2 },
 ];
 
 interface AppSidebarProps {
@@ -55,6 +62,7 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const [projectsCollapsed, setProjectsCollapsed] = useState(false);
     const [historyCollapsed, setHistoryCollapsed] = useState(false);
+    const [researchCollapsed, setResearchCollapsed] = useState(false);
     const [projectNames, setProjectNames] = useState<Record<string, string>>(
         {},
     );
@@ -205,6 +213,62 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                     </div>
                 );
             })}
+
+            {/* Research group */}
+            {isOpen && (
+                <button
+                    onClick={() => setResearchCollapsed((v) => !v)}
+                    className={`mt-3 mb-1 flex w-full items-center justify-between px-5 text-xs font-semibold text-gray-500 transition-colors hover:text-gray-700 ${
+                        shouldAnimate ? "sidebar-fade-in" : ""
+                    }`}
+                >
+                    <span>Research</span>
+                    <ChevronDown
+                        className={`h-3.5 w-3.5 transition-transform ${
+                            researchCollapsed ? "-rotate-90" : ""
+                        }`}
+                    />
+                </button>
+            )}
+            {(!isOpen || !researchCollapsed) &&
+                RESEARCH_NAV_ITEMS.map(({ href, label, icon: Icon }) => {
+                    const isActive =
+                        pathname === href || pathname.startsWith(href + "/");
+                    return (
+                        <div key={href} className="py-0.5 px-2.5">
+                            <button
+                                onClick={() => router.push(href)}
+                                title={!isOpen ? label : ""}
+                                className={cn(
+                                    "w-full h-9 flex items-center gap-3 px-2.5 py-2 rounded-md transition-colors text-left",
+                                    isActive
+                                        ? "bg-gray-200/60 text-gray-900"
+                                        : "text-gray-700 hover:bg-gray-100",
+                                    !isOpen ? "hidden md:flex" : "flex",
+                                )}
+                            >
+                                <Icon
+                                    className={`h-4 w-4 flex-shrink-0 ${
+                                        isActive
+                                            ? "text-gray-900"
+                                            : "text-black"
+                                    }`}
+                                />
+                                {isOpen && (
+                                    <span
+                                        className={`text-sm font-medium ${
+                                            shouldAnimate
+                                                ? "sidebar-fade-in-2"
+                                                : ""
+                                        }`}
+                                    >
+                                        {label}
+                                    </span>
+                                )}
+                            </button>
+                        </div>
+                    );
+                })}
 
             {isOpen && (
                 <div className="mt-4 flex-1 min-h-0 flex flex-col gap-4">

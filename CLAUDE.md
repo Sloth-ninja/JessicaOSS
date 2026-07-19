@@ -40,7 +40,7 @@ Two independent npm projects, no shared workspace. Frontend calls backend over H
 
 | Area | Files |
 |---|---|
-| Routes | `src/routes/`: `chat.ts` (main SSE chat), `projectChat.ts`, `projects.ts`, `documents.ts`, `tabular.ts`, `workflows.ts`, `user.ts` (profile, API keys, MCP connectors, export/delete), `downloads.ts` |
+| Routes | `src/routes/`: `chat.ts` (main SSE chat), `projectChat.ts`, `projects.ts`, `documents.ts`, `tabular.ts`, `workflows.ts`, `user.ts` (profile, API keys, MCP connectors, export/delete), `downloads.ts`, `companies.ts` (Companies House research: search / profile+officers+PSCs bundle / filing history — WS7) |
 | Chat engine | `src/lib/chatTools.ts` (~3.7k lines: system prompts, doc context, tool execution loop `runLLMStream`, citation annotation extraction, research-tools seam) |
 | Legal sources | `src/lib/legalSourcesTools/` (CourtListener excised 07/07/2026; UK sources — Companies House WS1, legislation.gov.uk WS2 — land here per `docs/MIGRATION_SPEC.md`) |
 | Documents | `storage.ts`, `documentVersions.ts`, `docxTrackedChanges.ts`, `convert.ts`, `upload.ts`, `downloadTokens.ts` |
@@ -77,7 +77,7 @@ Backend (`backend/.env.example` documents the core set):
 | `PORT` (3001), `FRONTEND_URL` (CORS), `NODE_ENV`, `TRUST_PROXY_HOPS` | optional | runtime |
 | `API_PUBLIC_URL` / `BACKEND_URL` | optional | MCP OAuth callback base |
 | `MCP_OAUTH_CLIENT_ID/_SECRET`, `MCP_OAUTH_DEFAULT_SCOPE`, `MCP_CONNECTORS_ENCRYPTION_SECRET` | optional | MCP connectors |
-| `RATE_LIMIT_*` (11 vars, `src/index.ts:54-83`) | optional | rate-limit tuning |
+| `RATE_LIMIT_*` (14 vars, `src/index.ts`) | optional | rate-limit tuning; includes `RATE_LIMIT_RESEARCH_WINDOW_MINUTES` (default 15) / `RATE_LIMIT_RESEARCH_MAX` (default 120) for the UK research routes (`/companies`; `/legislation` later) |
 | `LOG_RAW_LLM_STREAM`, `RAW_LLM_STREAM_LOG_DIR` | optional | dev-only stream logging |
 | `RESEND_API_KEY` | optional | in `.env.example`; SDK installed, currently unused in `src/` |
 | `COMPANIES_HOUSE_API_KEY` | optional | Companies House env-fallback key; per-user BYO key takes precedence (WS1) |
