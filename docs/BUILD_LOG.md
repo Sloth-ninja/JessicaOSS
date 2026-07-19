@@ -7,6 +7,21 @@
 
 ---
 
+## 2026-07-19 — Fix OpenNext packager detection for Cloudflare deploy (branch `fix-opennext-packager`)
+
+**Scope:** one-line config fix found during the first real frontend deploy. Upstream
+ships `frontend/bun.lock`; OpenNext's packager auto-detection therefore ran
+`bun run build` (bun is not installed — exit 127). Added an explicit
+`buildCommand: "npx next build"` to `frontend/open-next.config.ts`; the upstream
+lockfile stays (minimal diff, hard rule 8). Lesson + debugging signature appended to
+`docs/DURABLE_LESSONS.md`.
+
+**Verification:** `npx opennextjs-cloudflare build` completes and `.open-next/worker.js`
+exists with the production API origin baked in; frontend `tsc --noEmit` clean; CI green
+on the PR.
+
+---
+
 ## 2026-07-19 — Merge governance: standing authorisation for agent merges (branch `merge-rule-update`)
 
 **Scope:** CLAUDE.md only. Owner decision (19 July 2026, in-session): hard rule 6's

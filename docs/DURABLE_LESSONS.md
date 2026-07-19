@@ -22,6 +22,7 @@
 - 2026-07-12 — Judged eval cases skip on a missing key but FAIL on an invalid one
 - 2026-07-12 — Zombie agents: verify liveness and message-vs-diff before pushing
 - 2026-07-19 — Imported lessons from the sister project (agl-founders-network)
+- 2026-07-19 — OpenNext build: upstream bun.lock hijacks packager detection
 
 ## Lessons
 
@@ -110,3 +111,16 @@ Provenance: `agl-founders-network/docs/durable-lessons.md`.
   frontend framework conventions, check `node_modules/next/dist/docs/` first.
 - **A column existing in the schema is not a reason to surface it in UI.** Render only
   fields whose behaviour is actually built.
+
+### 2026-07-19 — OpenNext build: upstream bun.lock hijacks packager detection
+
+Trigger: first production frontend deploy — `npx opennextjs-cloudflare build` failed
+with `/bin/sh: bun: command not found` (execSync status 127). Upstream Mike ships
+`frontend/bun.lock` alongside our canonical `package-lock.json`, and OpenNext's
+package-manager auto-detection prefers the bun lockfile. Fix: explicit
+`buildCommand: "npx next build"` in `frontend/open-next.config.ts` (kept the upstream
+lockfile — minimal diff). Debugging signature: any tool erroring with
+`bun: command not found` in this repo is lockfile auto-detection, not a missing
+dependency — check for a competing `bun.lock` before installing anything. Related
+rule: never pipe a build through `tail`/`grep` when its exit code matters — the pipe
+masked this failure as exit 0 on the first run.
