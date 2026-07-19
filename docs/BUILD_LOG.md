@@ -7,6 +7,27 @@
 
 ---
 
+## 2026-07-19 — Pilot deployment executed: platform live (branch `status-pilot-live`)
+
+**Scope:** docs-only record of the deployment session (#13, #15, #17–#19 below carry
+the deploy config/code; #14/#16 are docs/governance). Executed today, in order: Fly.io app `jessicaoss-api` created
+(`lhr`) and deployed from the WS6 Dockerfile (secrets set by the owner, fresh
+signing/encryption values); scaled to one always-warm machine per the pilot plan
+after Fly auto-added an HA second; redeployed post-rebrand so production prompts use
+the Jessica persona; TLS cert for `api.jessicaoss.com` issued (Let's Encrypt) once
+the owner added grey-cloud A/AAAA records; frontend Worker `jessicaoss` deployed via
+OpenNext with the apex custom domain attached at deploy time.
+
+**Verification:** all checks below run live on 19 July: `https://api.jessicaoss.com/health` →
+`{"ok":true}` over valid TLS; `https://jessicaoss.com` → HTTP 200 with title
+"JessicaOS - AI Legal Platform"; `/login` → 200; CORS preflight from the apex origin
+→ `access-control-allow-origin: https://jessicaoss.com`. Not yet verified (owner):
+www→apex redirect (needs a proxied `www` DNS record + redirect rule) and the
+in-browser §7 smoke items (sign-in, upload/download, Companies House lookup,
+legislation lookup, workflow DOCX→PDF proving in-container LibreOffice).
+
+---
+
 ## 2026-07-19 — Enable Worker custom-domain route (branch `enable-worker-route`)
 
 **Scope:** one-line config activation. First Worker publish failed at the final step:
