@@ -7,6 +7,23 @@
 
 ---
 
+## 2026-07-19 — Merge governance: standing authorisation for agent merges (branch `merge-rule-update`)
+
+**Scope:** CLAUDE.md only. Owner decision (19 July 2026, in-session): hard rule 6's
+"Human merges" replaced with a standing authorisation — the agent merges a PR itself
+once (1) all three CI checks are green, (2) an independent review has passed, and
+(3) the BUILD_LOG entry is in place; anything short of all three still waits for the
+owner. Rationale (owner's words): approvals had become rubber stamps ("I just do it
+when you tell me they are ready"), and everything is PR-tracked and revertible.
+Also refreshed CLAUDE.md `## Current status` with the deployment state: backend live
+on Fly.io (`jessicaoss-api`, lhr, health verified), production Supabase + R2
+configured, domain plan recorded, rebrand #15 noted.
+
+**Verification:** docs-only diff; the three-condition gate matches the CI checks
+that actually exist (`.github/workflows/ci.yml`) and this log's entry format.
+
+---
+
 ## 2026-07-19 — Rebrand user-facing strings: Mike → JessicaOS (branch `rebrand-user-facing`)
 
 **Scope:** Tier-1 rebrand sweep (owner decision 19/07/2026): every user-facing and
