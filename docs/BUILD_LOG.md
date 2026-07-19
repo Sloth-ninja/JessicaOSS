@@ -16,9 +16,12 @@ alerts for Claude, OpenAI and Companies House keys. Root causes (two distinct):
    Express 4 doesn't catch async-handler rejections and Node 22 kills the process
    on unhandled rejections — one transient Supabase error took the whole backend
    down mid-QA (Fly logs 19:21 UTC, machine restart). Fixed with a handler
-   try/catch (500 + generic detail) and process-level
-   `unhandledRejection`/`uncaughtException` log-don't-die guards in `index.ts`.
-   Lesson + debugging signature appended to `docs/DURABLE_LESSONS.md`.
+   try/catch (500 + fixed generic detail) and process-level guards in `index.ts`:
+   `unhandledRejection` logs and continues; `uncaughtException` logs and exits
+   for a clean Fly restart (post-throw state may be corrupt — reviewer catch).
+   Review also caught that the PUT handler's 500 previously echoed
+   `errorMessage(err)` as `detail` — now a fixed message, raw error server-side
+   only. Lesson + debugging signature appended to `docs/DURABLE_LESSONS.md`.
 2. **Mute error UX:** Claude/Companies House saves were correctly rejected 409
    ("configured by the server environment" — those keys are Fly secrets, served
    to all pilot users), but the frontend swallowed the server's `detail` and

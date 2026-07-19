@@ -595,12 +595,12 @@ userRouter.put(
             const status = await getUserApiKeyStatus(userId, db);
             res.json(withLocalStatus(status));
         } catch (err) {
-            const detail = errorMessage(err);
             console.error("[user/api-keys] save failed", {
                 provider,
-                error: detail,
+                error: errorMessage(err),
             });
-            res.status(500).json({ detail });
+            // Fixed message only — raw provider/DB errors never reach the client.
+            res.status(500).json({ detail: "Could not update API key." });
         }
     },
 );

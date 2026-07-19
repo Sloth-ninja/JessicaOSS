@@ -163,8 +163,11 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
 process.on("unhandledRejection", (reason) => {
   console.error("[unhandledRejection]", reason);
 });
+// Uncaught synchronous exceptions may leave the process in a corrupt state —
+// log, then exit and let Fly restart a clean machine (health check covers it).
 process.on("uncaughtException", (err) => {
   console.error("[uncaughtException]", err);
+  process.exit(1);
 });
 
 app.listen(PORT, () => {
