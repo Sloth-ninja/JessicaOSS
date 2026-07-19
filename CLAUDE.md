@@ -10,6 +10,22 @@ Mission: the first *substantive* UK version — real UK data integrations, UK le
 
 **Naming rationale:** Mike worked for Harvey. They both worked for Jessica.
 
+## Where to read next
+
+| Need | Read |
+|---|---|
+| Current status + what happened last | `## Current status` below, then the top entry of `docs/BUILD_LOG.md` |
+| Engineering lessons/gotchas (mandatory before evals, legal-sources, hooks, or merge-train work) | `docs/DURABLE_LESSONS.md` |
+| Sprint plan and workstream scopes (historical; superseded by BUILD_LOG for status) | `docs/BUILD_PLAN.md` |
+| US→UK migration design, touchpoint inventory, owner decisions | `docs/MIGRATION_SPEC.md` |
+| Deploying the pilot (Fly.io / Cloudflare / production Supabase) | `docs/DEPLOYMENT.md` |
+| Running the pilot programme | `docs/PILOT.md` |
+| Local/on-premises model mode | `docs/local-models.md` |
+| Eval harness: cases, gates, judge, baseline | `evals/README.md` |
+| Legal terms of art awaiting solicitor sign-off | `docs/LEGAL_LANGUAGE_REVIEW.md` |
+
+Where docs conflict on status or scope, `docs/BUILD_LOG.md` (newest entry) wins over `docs/BUILD_PLAN.md`, which is kept as the historical plan of record.
+
 ## Architecture (verified against code, Phase 0)
 
 Two independent npm projects, no shared workspace. Frontend calls backend over HTTP; browser never touches the DB directly (all client grants revoked in `backend/schema.sql:792-823`).
@@ -122,6 +138,7 @@ All user-facing copy, prompts, and workflow templates use UK English and UK lega
 - PR description: what/why/how-tested, screenshots for UI
 - CLAUDE.md and `/docs` updated if behaviour or env vars changed
 - Entry appended to `docs/BUILD_LOG.md` (scope, key changes, verification evidence, decisions)
+- Any gotcha discovered en route captured in `docs/DURABLE_LESSONS.md` (append-only; trigger + rule + debugging signature)
 
 ## Commands
 
@@ -150,6 +167,8 @@ npm run evals:smoke      # ≤5 smoke cases — used by the Stop hook
 
 **No unit-test framework exists yet** (upstream ships none). Adding one (vitest) is part of the sprint; until then "unit tests passing" in the definition of done applies only where tests exist. Hooks in `.claude/settings.json` enforce typecheck/lint/format on edits, protect migrations/`.env*`/LICENSE, and run `evals:smoke` on Stop.
 
-## Current sprint
+## Current status
 
-See `docs/BUILD_PLAN.md`. Deadline pressure is real (free Fable window ends 7 July); bias to shipping the five v1 workstreams over any refactor not on the critical path.
+Updated 2026-07-19. The v1 sprint is **complete**: Phase 0, CourtListener excision, and all six workstreams (WS1 Companies House #7, WS2 legislation.gov.uk #8, WS3 local models #6, WS4 UK templates/terminology #5, WS5 README/landing #4, WS6 pilot-deployment artefacts #9) are merged, plus judged eval fixtures (#10), the CI merge gate (#11, `.github/workflows/ci.yml`), and the eval baseline (#12, `evals/baseline.json`). Judged evals run fully live — 35/35 passing.
+
+Open / next: PR #13 (`deploy-config`: backend `fly.toml` + frontend `wrangler.jsonc`, CI green, awaiting owner merge); then the actual pilot deploy to `jessicaoss.com` per `docs/DEPLOYMENT.md` (owner accounts: Fly.io, Cloudflare, production Supabase). Outstanding pre-pilot items: model-comparison run to populate the README eval table, live Ollama smoke test of the local-model path, solicitor review of `docs/LEGAL_LANGUAGE_REVIEW.md` and the provisional judged fixtures, upstream dependency-vulnerability triage. Keep this section current when status changes materially; per-PR detail lives in `docs/BUILD_LOG.md`.

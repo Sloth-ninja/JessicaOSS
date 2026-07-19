@@ -7,6 +7,44 @@
 
 ---
 
+## 2026-07-19 — Process/docs adoption (branch `process-docs-adoption`)
+
+**Scope:** Docs-only. Adopted the highest-value documentation/operating practices from
+a structured review of the agl-founders-network sister project (three parallel review
+agents: docs structure, architecture lessons, operating flow), and brought this log
+back in sync with `main` — it had fallen three merged PRs behind its own
+definition-of-done rule.
+
+**Added / changed**
+- `docs/DURABLE_LESSONS.md` — new append-only lessons file (index + dated entries,
+  each: trigger → rule → debugging signature), seeded with seven lessons this project
+  already paid for (Responses-API/local-models split, prettier-on-upstream, eval env
+  loading, legislation.gov.uk gotchas, gh fork-target incident, judged-eval key
+  semantics, zombie-agent protocol) plus five imported sister-project lessons marked
+  with provenance (composed-range review, no raw errors to users, state-machine-in-
+  UPDATE-predicate, framework-version warning, don't-surface-unbuilt-columns).
+- `CLAUDE.md` — new "Where to read next" router table (per-need doc pointers + an
+  explicit authority rule: newest BUILD_LOG entry beats BUILD_PLAN on status); the
+  stale "Current sprint" section (7 July deadline framing) replaced with a dated
+  "Current status" section reflecting the completed sprint and open items; definition
+  of done gains a durable-lessons capture bullet.
+- `.gitignore` — `.superpowers/` (ephemeral multi-agent session ledger; durable
+  outcomes get promoted into this log / DURABLE_LESSONS.md, the scratch state stays
+  untracked — sister-project pattern).
+- Retrospective entries below for PRs #10–#12, reconstructed from merge commits and
+  the session ledger.
+
+**Practices reviewed and NOT adopted** (recorded so the decision isn't relitigated):
+trunk-based direct-commit-to-main (our PR + human-merge gate stays — hard rule 6);
+hand-maintained DB types and manual SQL-editor migrations (we keep `schema.sql` +
+protected dated migrations); no-CI/no-tests posture (we keep vitest + the eval merge
+gate); the 8k-line narrative build log (entries here stay factual and bounded).
+
+**Verification:** docs-only diff; markdown links checked against files present on this
+branch; no code, prompts, or user-facing strings touched.
+
+---
+
 ## 2026-07-14 — Deployment config: fly.toml + wrangler.jsonc (branch `deploy-config`)
 
 **Scope:** the two config files DEPLOYMENT.md §8 flagged as missing, unblocking the pilot deploy. Owner decided Fly.io (14/07/2026).
@@ -17,6 +55,45 @@
 
 **Verification:** wrangler config parses (`wrangler deploy --dry-run` requires a built app, so validated as JSONC + against the config schema); fly.toml validated with `fly config validate` where flyctl is available — noted in PR that first `fly launch --copy-config` confirms it end-to-end. No product code touched.
 
+**Addendum 2026-07-19 (same PR, pre-merge):** canonical-origin decision taken by the owner — apex `jessicaoss.com` is the app origin, `www.jessicaoss.com` 301-redirects to it (never serves the app: CORS is single-origin), `api.jessicaoss.com` for the backend. `fly.toml` `FRONTEND_URL`, the wrangler route comment, and DEPLOYMENT.md §6 updated accordingly (commit `e96c104`). Merged as PR #13, merge `9c8ec49`.
+
+---
+
+## 2026-07-14 — Eval baseline committed (PR #12, merge `8112fe1`) *(retrospective entry, added 2026-07-19)*
+
+- `evals/baseline.json` committed as the regression gate reference:
+  `meanJudgedScore: 4.5` (measured mean on the first fully-live run was 4.83; the gap
+  is deliberate headroom for judge variance).
+- With #11's workflow this completes the CI merge gate: deterministic + citation cases
+  hard-fail, judged mean must not regress below baseline.
+
+---
+
+## 2026-07-12 — CI merge gate (PR #11, merge `425b91b`) *(retrospective entry, added 2026-07-19)*
+
+- `.github/workflows/ci.yml` (93 lines): three required checks — Backend
+  (tsc + vitest), Frontend (tsc + lint), Evals (full golden set incl. citation hard
+  gate) — using repo secrets `ANTHROPIC_API_KEY` / `COMPANIES_HOUSE_API_KEY` and the
+  three `NEXT_PUBLIC_*` vars.
+- A GitHub account billing lock initially prevented Actions jobs from starting; owner
+  resolved it (all three checks verified green on PR #13, 2026-07-14).
+
+---
+
+## 2026-07-12 — Judged eval fixtures live (PR #10, merge `20ed269`) *(retrospective entry, added 2026-07-19)*
+
+- Populated the four remaining judged golden-set cases with synthetic fixture
+  documents (`evals/fixtures/`: SPA review, commercial lease LTA 1954, employment
+  contract vs statutory minima, disclosure review — per `docs/safe-local-testing.md`,
+  synthetic only) and wired them into `evals/cases/jud-*.yaml` (+1,360 lines).
+- Owner added a real `ANTHROPIC_API_KEY` the same day (verified via `/v1/models`),
+  unblocking the Opus judge. **First fully-live eval run: 35 passed / 0 failed /
+  0 skipped / 0 pending**; judged scores 4,5,5,5,5,5 (due-diligence 4/5 with minor
+  filing-date quibbles, above gate).
+- All six judged fixtures remain flagged provisional pending the solicitor pass
+  recorded in `docs/LEGAL_LANGUAGE_REVIEW.md`.
+
+---
 
 ## 2026-07-08 — Pilot deployment workstream (branch `ws6-pilot-deployment`, WS6)
 

@@ -10,6 +10,10 @@ build
 !.env.example
 !.env.local.example
 
+# Ephemeral multi-agent session ledger — durable outcomes are promoted into
+# docs/BUILD_LOG.md / docs/DURABLE_LESSONS.md; the scratch state stays untracked
+.superpowers/
+
 *.log
 *.raw-llm-stream.json
 *.tsbuildinfo
