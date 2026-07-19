@@ -17,8 +17,9 @@
   "observability": {
     "enabled": true
   }
-  // Attach the production hostname once DNS is decided — either in the dashboard
-  // (Workers & Pages → jessicaoss → Settings → Domains & Routes) or by
-  // uncommenting:
-  // ,"routes": [{ "pattern": "app.jessicaoss.com", "custom_domain": true }]
+  // Canonical hostname is the apex jessicaoss.com (owner decision, 19 July 2026);
+  // www 301-redirects to it (docs/DEPLOYMENT.md §6). Attach the domain once the
+  // zone is live — either in the dashboard (Workers & Pages → jessicaoss →
+  // Settings → Domains & Routes) or by uncommenting:
+  // ,"routes": [{ "pattern": "jessicaoss.com", "custom_domain": true }]
 }

@@ -21,7 +21,9 @@ primary_region = "lhr" # London — keep pilot data processing in the UK
   # Fly's edge proxy adds one X-Forwarded-For hop; needed for accurate rate limiting.
   TRUST_PROXY_HOPS = "1"
   # CORS allow-origin — must match the deployed frontend origin exactly.
-  FRONTEND_URL = "https://app.jessicaoss.com"
+  # Canonical frontend is the apex (owner decision, 19 July 2026);
+  # www.jessicaoss.com 301-redirects to it via a Cloudflare redirect rule.
+  FRONTEND_URL = "https://jessicaoss.com"
 
 [http_service]
   internal_port = 3001

@@ -193,6 +193,12 @@ of which are safe to expose to the browser (per `docs/safe-local-testing.md`).
 
 - **`jessicaoss.com` (apex)** → Cloudflare Workers route for the Next.js app.
   Cloudflare-proxied by definition (Workers routes run on Cloudflare's edge).
+  This apex is the **canonical origin** (owner decision, 19 July 2026) — it is
+  the exact value of the backend's `FRONTEND_URL` (CORS allows a single
+  origin, `backend/src/index.ts:113-118`).
+- **`www.jessicaoss.com`** → 301 redirect to the apex (Cloudflare **Rules →
+  Redirect Rules**, or a Bulk Redirect). Do **not** serve the app on www:
+  a second origin would fail CORS against the single-value `FRONTEND_URL`.
 - **`api.jessicaoss.com`** → CNAME/A record to the chosen backend host
   (Fly.io/Railway/Render/VM — see §2). Proxy through Cloudflare (orange
   cloud) where the host supports it, for TLS termination and DDoS protection
