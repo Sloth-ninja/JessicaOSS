@@ -7,6 +7,38 @@
 
 ---
 
+## 2026-07-19 — WS7 PR 1: user-facing rename "Projects" → "Matters" (branch `ws7-matters-rename`)
+
+**Scope:** string-only rename of the workspace concept from "Project" to "Matter"
+across all user-facing copy — sidebar nav (FolderOpen icon kept), page headings,
+breadcrumbs, modals, empty states, filter/column labels, aria-labels, toasts, the
+privacy-data delete dialogs, and backend user-facing error `detail` strings
+("Matter not found", "You cannot share a matter with yourself.", "Target matter
+not found"). 99 strings across 27 files (23 frontend, 4 backend routes).
+
+**Method:** `grep -ri "project" frontend/src backend/src/routes` (1,383 hits),
+every hit classified copy vs identifier via a word-boundary filter plus manual
+review; edits applied line-targeted with per-line assertions, then a post-edit
+re-grep audit. Deliberately unchanged: code identifiers/types/props, route paths
+(`/projects` URL stays — accepted owner trade-off per hard rule 8), DB
+table/column names, log tags (`[projects]`, console.error text), code comments,
+LLM-internal prompt text (`projectChat.ts` system prompt, `tabular.ts`
+title-generation context), and "Project Finance" (practice area, a term of art).
+Grammar reworked where substitution read oddly: "No {activeFilter} projects" →
+"No matters shared with you" (branch only reachable on the shared-with-me
+filter). Terminology decision logged as R10 in `docs/LEGAL_LANGUAGE_REVIEW.md`
+for solicitor sign-off.
+
+**Verification:** frontend `tsc --noEmit` clean; frontend `npm run lint` → 112
+problems (34 errors/78 warnings), rule-level output byte-identical to main in the
+same environment (no new issues; the documented 77-warning baseline had already
+drifted to 78 on main); backend `tsc --noEmit` clean; backend vitest 97/97;
+final re-grep audit confirms every remaining `project` hit is an
+identifier/route/DB-name/log-tag/comment/prompt-internal (classification summary
+in the PR body).
+
+---
+
 ## 2026-07-19 — Pilot stability: API-keys crash fix + honest save errors (branch `fix-apikeys-stability`)
 
 **Scope:** first live-user bug, found during owner QA. Symptoms: "Failed to save"

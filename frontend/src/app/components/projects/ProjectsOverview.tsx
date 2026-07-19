@@ -90,7 +90,7 @@ export function ProjectsOverview() {
                 console.error("[projects] failed to load projects", err);
                 if (!cancelled) {
                     setProjects([]);
-                    setLoadError("Could not load projects.");
+                    setLoadError("Could not load matters.");
                 }
             })
             .finally(() => {
@@ -195,7 +195,7 @@ export function ProjectsOverview() {
         setProjects((prev) => prev.filter((p) => !owned.includes(p.id)));
         if (blocked > 0) {
             setOwnerOnlyAction(
-                `delete ${blocked} of the selected projects — only the project owner can delete a project`,
+                `delete ${blocked} of the selected matters — only the matter owner can delete a matter`,
             );
         }
     }
@@ -236,17 +236,17 @@ export function ProjectsOverview() {
                         type: "search",
                         value: search,
                         onChange: setSearch,
-                        placeholder: "Search projects…",
+                        placeholder: "Search matters…",
                     },
                     {
                         type: "new",
                         onClick: () => setModalOpen(true),
-                        title: "New project",
+                        title: "New matter",
                     },
                 ]}
             >
                 <h1 className="text-2xl font-medium font-serif text-gray-900">
-                    Projects
+                    Matters
                 </h1>
             </PageHeader>
 
@@ -328,7 +328,7 @@ export function ProjectsOverview() {
                     <TableEmptyState>
                         <FolderOpen className="h-8 w-8 text-gray-300 mb-4" />
                         <p className="text-2xl font-medium font-serif text-gray-900">
-                            Projects
+                            Matters
                         </p>
                         <p className="mt-1 text-xs text-red-500 max-w-xs">
                             {loadError}
@@ -340,10 +340,10 @@ export function ProjectsOverview() {
                             <>
                                 <FolderOpen className="h-8 w-8 text-gray-300 mb-4" />
                                 <p className="text-2xl font-medium font-serif text-gray-900">
-                                    Projects
+                                    Matters
                                 </p>
                                 <p className="mt-1 text-xs text-gray-400 max-w-xs">
-                                    Upload documents into projects and to
+                                    Upload documents into matters and to
                                     commence chats and tabular reviews with
                                     them.
                                 </p>
@@ -356,7 +356,7 @@ export function ProjectsOverview() {
                             </>
                         ) : (
                             <p className="text-sm text-gray-400">
-                                No {activeFilter} projects
+                                No matters shared with you
                             </p>
                         )}
                     </TableEmptyState>

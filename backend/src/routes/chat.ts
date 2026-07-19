@@ -114,7 +114,7 @@ async function validateAccessibleProjectId(
     if (!projectId) return { ok: true };
     const access = await checkProjectAccess(projectId, userId, userEmail, db);
     if (!access.ok)
-        return { ok: false, status: 404, detail: "Project not found" };
+        return { ok: false, status: 404, detail: "Matter not found" };
     return { ok: true };
 }
 

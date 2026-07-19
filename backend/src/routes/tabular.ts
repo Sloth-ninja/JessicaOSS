@@ -122,7 +122,7 @@ tabularRouter.post("/", requireAuth, async (req, res) => {
             db,
         );
         if (!access.ok)
-            return void res.status(404).json({ detail: "Project not found" });
+            return void res.status(404).json({ detail: "Matter not found" });
     }
     const allowedDocumentIds = Array.isArray(document_ids)
         ? await filterAccessibleDocumentIds(
@@ -455,7 +455,7 @@ tabularRouter.patch("/:reviewId", requireAuth, async (req, res) => {
             if (!projectAccess.ok) {
                 return void res
                     .status(404)
-                    .json({ detail: "Target project not found" });
+                    .json({ detail: "Target matter not found" });
             }
         }
         updates.project_id = projectIdUpdate;

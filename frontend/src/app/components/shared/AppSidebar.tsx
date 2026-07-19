@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
     { href: "/assistant", label: "Assistant", icon: MessageSquare },
-    { href: "/projects", label: "Projects", icon: FolderOpen },
+    { href: "/projects", label: "Matters", icon: FolderOpen },
     { href: "/tabular-reviews", label: "Tabular Review", icon: Table2 },
     { href: "/workflows", label: "Workflows", icon: Library },
 ];
@@ -216,7 +216,7 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                                 shouldAnimate ? "sidebar-fade-in" : ""
                             }`}
                         >
-                            <span>Recent Projects</span>
+                            <span>Recent Matters</span>
                             <ChevronDown
                                 className={`h-3.5 w-3.5 transition-transform ${
                                     projectsCollapsed ? "-rotate-90" : ""
@@ -247,7 +247,7 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                                                 : ""
                                         }`}
                                     >
-                                        No projects yet
+                                        No matters yet
                                     </div>
                                 ) : (
                                     <div

@@ -44,7 +44,7 @@ type ReviewScope = "all" | "in-project" | "standalone";
 
 const REVIEW_SCOPES: { id: ReviewScope; label: string }[] = [
     { id: "all", label: "All" },
-    { id: "in-project", label: "In Project" },
+    { id: "in-project", label: "In Matter" },
     { id: "standalone", label: "Standalone" },
 ];
 
@@ -197,9 +197,9 @@ export default function TabularReviewsPage() {
 
     const projectFilterButton = (
         <HeaderFilterDropdown
-            label="Filter by project"
+            label="Filter by matter"
             value={projectFilter}
-            allLabel="All Projects"
+            allLabel="All Matters"
             options={projects.map((project) => ({
                 value: project.id,
                 label: project.name,
@@ -288,7 +288,7 @@ export default function TabularReviewsPage() {
                     <TableHeaderCell className="w-24">Documents</TableHeaderCell>
                     <TableHeaderCell className="w-40">
                         <div className="flex items-center gap-1">
-                            <span>Project</span>
+                            <span>Matter</span>
                             {projectFilterButton}
                         </div>
                     </TableHeaderCell>

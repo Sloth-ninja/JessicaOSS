@@ -51,9 +51,9 @@ const DELETE_DATA_COPY: Record<
             "This will permanently delete all tabular reviews you own, including their cells and review chats. This action cannot be undone.",
     },
     projects: {
-        title: "Delete all projects?",
+        title: "Delete all matters?",
         message:
-            "This will permanently delete all projects you own, including their documents, chats, and tabular reviews. This action cannot be undone.",
+            "This will permanently delete all matters you own, including their documents, chats, and tabular reviews. This action cannot be undone.",
     },
 };
 
@@ -278,7 +278,7 @@ export default function PrivacyDataPage() {
                                 Export account JSON
                             </p>
                             <p className="text-sm text-gray-500">
-                                Download account metadata, projects, document
+                                Download account metadata, matters, document
                                 metadata, workflows, and review data as JSON.
                             </p>
                         </div>
@@ -351,10 +351,10 @@ export default function PrivacyDataPage() {
                     <div className="flex flex-col gap-3 px-4 py-5 sm:flex-row sm:items-center sm:justify-between">
                         <div className="space-y-1">
                             <p className="text-sm font-medium text-gray-900">
-                                Delete all projects
+                                Delete all matters
                             </p>
                             <p className="text-sm text-gray-500">
-                                Permanently delete all projects you own,
+                                Permanently delete all matters you own,
                                 including documents, chats, and tabular reviews.
                             </p>
                         </div>

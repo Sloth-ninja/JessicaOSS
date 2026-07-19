@@ -105,7 +105,7 @@ export function ProjectAssistantTable({
                     </p>
                     <p className="mt-1 text-xs text-gray-400 max-w-xs">
                         Ask questions and get answers grounded in the documents
-                        in this project.
+                        in this matter.
                     </p>
                     <button
                         onClick={onCreateChat}

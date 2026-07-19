@@ -173,7 +173,7 @@ projectsRouter.post("/", requireAuth, async (req, res) => {
       if (normalizedUserEmail && e === normalizedUserEmail) {
         return void res
           .status(400)
-          .json({ detail: "You cannot share a project with yourself." });
+          .json({ detail: "You cannot share a matter with yourself." });
       }
       seenSharedEmails.add(e);
       cleanedSharedWith.push(e);
@@ -208,7 +208,7 @@ projectsRouter.get("/:projectId", requireAuth, async (req, res) => {
     .eq("id", projectId)
     .single();
   if (error || !project)
-    return void res.status(404).json({ detail: "Project not found" });
+    return void res.status(404).json({ detail: "Matter not found" });
 
   const canAccess =
     project.user_id === userId ||
@@ -216,7 +216,7 @@ projectsRouter.get("/:projectId", requireAuth, async (req, res) => {
       Array.isArray(project.shared_with) &&
       project.shared_with.includes(userEmail));
   if (!canAccess)
-    return void res.status(404).json({ detail: "Project not found" });
+    return void res.status(404).json({ detail: "Matter not found" });
 
   const [{ data: docs }, { data: folderData }] = await Promise.all([
     db.from("documents").select("*").eq("project_id", projectId).order("created_at", { ascending: true }),
@@ -254,7 +254,7 @@ projectsRouter.get("/:projectId/people", requireAuth, async (req, res) => {
     .eq("id", projectId)
     .single();
   if (!project)
-    return void res.status(404).json({ detail: "Project not found" });
+    return void res.status(404).json({ detail: "Matter not found" });
 
   const isOwner = project.user_id === userId;
   const sharedWith = (Array.isArray(project.shared_with)
@@ -264,7 +264,7 @@ projectsRouter.get("/:projectId/people", requireAuth, async (req, res) => {
   const isShared =
     !!userEmail && sharedWith.includes(userEmail.toLowerCase());
   if (!isOwner && !isShared)
-    return void res.status(404).json({ detail: "Project not found" });
+    return void res.status(404).json({ detail: "Matter not found" });
 
   // Pull every auth user (matching the lookup endpoint's pattern). For
   // larger deployments this should page or be replaced with a bulk-by-id
@@ -346,7 +346,7 @@ projectsRouter.patch("/:projectId", requireAuth, async (req, res) => {
       if (normalizedUserEmail && e === normalizedUserEmail) {
         return void res
           .status(400)
-          .json({ detail: "You cannot share a project with yourself." });
+          .json({ detail: "You cannot share a matter with yourself." });
       }
       seen.add(e);
       cleaned.push(e);
@@ -363,7 +363,7 @@ projectsRouter.patch("/:projectId", requireAuth, async (req, res) => {
     .select("*")
     .single();
   if (error || !data)
-    return void res.status(404).json({ detail: "Project not found" });
+    return void res.status(404).json({ detail: "Matter not found" });
 
   const [{ data: docs }, { data: folderData }] = await Promise.all([
     db.from("documents").select("*").eq("project_id", projectId).order("created_at", { ascending: true }),
@@ -387,7 +387,7 @@ projectsRouter.delete("/:projectId", requireAuth, async (req, res) => {
   try {
     const deletedCount = await deleteUserProjects(db, userId, [projectId]);
     if (deletedCount === 0)
-      return void res.status(404).json({ detail: "Project not found" });
+      return void res.status(404).json({ detail: "Matter not found" });
     res.status(204).send();
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
@@ -404,7 +404,7 @@ projectsRouter.get("/:projectId/documents", requireAuth, async (req, res) => {
 
   const access = await checkProjectAccess(projectId, userId, userEmail, db);
   if (!access.ok)
-    return void res.status(404).json({ detail: "Project not found" });
+    return void res.status(404).json({ detail: "Matter not found" });
 
   const { data: docs } = await db
     .from("documents")
@@ -431,7 +431,7 @@ projectsRouter.post(
 
     const access = await checkProjectAccess(projectId, userId, userEmail, db);
     if (!access.ok)
-      return void res.status(404).json({ detail: "Project not found" });
+      return void res.status(404).json({ detail: "Matter not found" });
 
     // Adding-by-id pulls a doc into the project — only the doc's owner
     // is allowed to do that, so other people's standalone docs can't be
@@ -609,7 +609,7 @@ projectsRouter.patch("/:projectId/documents/:documentId", requireAuth, async (re
 
   const access = await checkProjectAccess(projectId, userId, userEmail, db);
   if (!access.ok)
-    return void res.status(404).json({ detail: "Project not found" });
+    return void res.status(404).json({ detail: "Matter not found" });
 
   const { data: doc } = await db
     .from("documents")
@@ -674,7 +674,7 @@ projectsRouter.post(
 
     const access = await checkProjectAccess(projectId, userId, userEmail, db);
     if (!access.ok)
-      return void res.status(404).json({ detail: "Project not found" });
+      return void res.status(404).json({ detail: "Matter not found" });
 
     await handleDocumentUpload(req, res, userId, projectId, db);
   },
@@ -693,7 +693,7 @@ projectsRouter.get("/:projectId/chats", requireAuth, async (req, res) => {
 
   const access = await checkProjectAccess(projectId, userId, userEmail, db);
   if (!access.ok)
-    return void res.status(404).json({ detail: "Project not found" });
+    return void res.status(404).json({ detail: "Matter not found" });
 
   const { data, error } = await db
     .from("chats")
@@ -718,7 +718,7 @@ projectsRouter.post("/:projectId/folders", requireAuth, async (req, res) => {
 
   const db = createServerSupabase();
   const access = await checkProjectAccess(projectId, userId, userEmail, db);
-  if (!access.ok) return void res.status(404).json({ detail: "Project not found" });
+  if (!access.ok) return void res.status(404).json({ detail: "Matter not found" });
 
   // Verify parent folder belongs to this project
   if (parent_folder_id) {
@@ -745,7 +745,7 @@ projectsRouter.patch("/:projectId/folders/:folderId", requireAuth, async (req, r
 
   const db = createServerSupabase();
   const access = await checkProjectAccess(projectId, userId, userEmail, db);
-  if (!access.ok) return void res.status(404).json({ detail: "Project not found" });
+  if (!access.ok) return void res.status(404).json({ detail: "Matter not found" });
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (body.name != null) updates.name = body.name.trim();
@@ -782,7 +782,7 @@ projectsRouter.delete("/:projectId/folders/:folderId", requireAuth, async (req, 
   const db = createServerSupabase();
 
   const access = await checkProjectAccess(projectId, userId, userEmail, db);
-  if (!access.ok) return void res.status(404).json({ detail: "Project not found" });
+  if (!access.ok) return void res.status(404).json({ detail: "Matter not found" });
 
   const { data: allFolders, error: foldersError } = await db
     .from("project_subfolders")
@@ -842,7 +842,7 @@ projectsRouter.patch("/:projectId/documents/:documentId/folder", requireAuth, as
 
   const db = createServerSupabase();
   const access = await checkProjectAccess(projectId, userId, userEmail, db);
-  if (!access.ok) return void res.status(404).json({ detail: "Project not found" });
+  if (!access.ok) return void res.status(404).json({ detail: "Matter not found" });
 
   if (folder_id) {
     const folder = await loadProjectFolder(db, projectId, folder_id);

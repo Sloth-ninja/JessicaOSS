@@ -66,7 +66,7 @@ export function NewProjectModal({ open, onClose, onCreated }: Props) {
             resetForm();
             onClose();
         } catch (err: unknown) {
-            setError((err as Error).message || "Failed to create project");
+            setError((err as Error).message || "Failed to create matter");
         } finally {
             setLoading(false);
         }
@@ -91,14 +91,14 @@ export function NewProjectModal({ open, onClose, onCreated }: Props) {
         <Modal
             open={open}
             onClose={handleClose}
-            breadcrumbs={["Projects", "New project"]}
+            breadcrumbs={["Matters", "New matter"]}
             secondaryAction={{
                 label: `Upload files${pendingFiles.length > 0 ? ` (${pendingFiles.length})` : ""}`,
                 icon: <Upload className="h-3.5 w-3.5" />,
                 onClick: () => fileInputRef.current?.click(),
             }}
             primaryAction={{
-                label: loading ? "Creating…" : "Create project",
+                label: loading ? "Creating…" : "Create matter",
                 type: "submit",
                 form: formId,
                 disabled: !name.trim() || loading,
@@ -120,7 +120,7 @@ export function NewProjectModal({ open, onClose, onCreated }: Props) {
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="Project name"
+                    placeholder="Matter name"
                     className="w-full text-2xl font-serif text-gray-800 placeholder-gray-300 focus:outline-none bg-transparent"
                     autoFocus
                 />
@@ -151,7 +151,7 @@ export function NewProjectModal({ open, onClose, onCreated }: Props) {
                             onChange={setSharedEmails}
                             validate={async (email) =>
                                 ownEmail && email === ownEmail
-                                    ? "You cannot share a project with yourself."
+                                    ? "You cannot share a matter with yourself."
                                     : null
                             }
                             placeholder="Add colleagues by email…"

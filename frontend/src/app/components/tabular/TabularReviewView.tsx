@@ -656,7 +656,7 @@ export function TRView({ reviewId, projectId }: Props) {
                         ...(projectId
                             ? [
                                   {
-                                      label: "Projects",
+                                      label: "Matters",
                                       onClick: () => router.push("/projects"),
                                   },
                                   loading
@@ -667,7 +667,7 @@ export function TRView({ reviewId, projectId }: Props) {
                                                 router.push(
                                                     `/projects/${projectId}/tabular-reviews`,
                                                 ),
-                                            title: "Back to project",
+                                            title: "Back to matter",
                                         }
                                       : {
                                             label: project?.name ?? "",
@@ -675,7 +675,7 @@ export function TRView({ reviewId, projectId }: Props) {
                                                 router.push(
                                                     `/projects/${projectId}/tabular-reviews`,
                                                 ),
-                                            title: "Back to project",
+                                            title: "Back to matter",
                                         },
                               ]
                             : [
@@ -1020,7 +1020,7 @@ export function TRView({ reviewId, projectId }: Props) {
                         handleAddDocuments(docs)
                     }
                     breadcrumb={[
-                        "Projects",
+                        "Matters",
                         project.name +
                             (project.cm_number
                                 ? ` (#${project.cm_number})`
@@ -1090,7 +1090,7 @@ export function TRView({ reviewId, projectId }: Props) {
                 breadcrumbs={[
                     ...(project
                         ? [
-                              "Projects",
+                              "Matters",
                               project.name +
                                   (project.cm_number
                                       ? ` (#${project.cm_number})`
