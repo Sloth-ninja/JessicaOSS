@@ -1,6 +1,8 @@
 # Competitor scan: Legora and Harvey — 19 July 2026
 
-> Condensed from two parallel research agents (web sources cited inline). Purpose:
+> Condensed from two parallel research agents; sources given as per-section
+> "Sources:" lists. Pricing/valuation figures are publicly reported third-party
+> estimates (July 2026), not vendor-confirmed. Purpose:
 > identify high-value, easy-to-build features for JessicaOS and record what NOT to
 > copy. Owner decisions taken the same evening are marked ✅/❌.
 

@@ -7,6 +7,22 @@
 
 ---
 
+## 2026-07-20 — Research-doc sourcing fixes (branch `research-doc-sourcing`)
+
+**Scope:** docs-only follow-up prescribed by the retroactive review of PR #26 (which
+merged review-waived under the model-handover time-box; the retroactive review
+returned "Sound, with fixes"). `docs/research/2026-07-19-integrations.md`: the
+Quill "complete documentation" claim is now attributed (owner-relayed, 19/07) and
+both sections carry `Sources:` lists (Quill wiki pages, Clio docs, HMLR tech
+docs/conditions-of-use/fees/open-data). `docs/research/2026-07-19-competitor-scan.md`:
+header no longer claims inline citations and marks pricing/valuation figures as
+publicly reported third-party estimates.
+
+**Verification:** docs-only diff; every added URL was fetched during the 19/07
+research session; CI green on the PR.
+
+---
+
 ## 2026-07-19 — Handover pack: research briefs + HANDOVER.md (branch `handover-docs`)
 
 **Scope:** docs-only, written at session end (Fable → Opus model handover). Adds
