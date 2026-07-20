@@ -201,6 +201,12 @@ function ApiKeyField({
                 {description && (
                     <p className="text-sm text-gray-500 mb-3">{description}</p>
                 )}
+                {isServerConfigured && (
+                    <p className="text-sm text-gray-500 mb-3">
+                        A server default is available. Add your own key to use
+                        it instead — your key always takes priority.
+                    </p>
+                )}
                 <div className="space-y-2">
                     <div className="relative flex-1">
                         <Input
@@ -209,7 +215,7 @@ function ApiKeyField({
                             onChange={(e) => setValue(e.target.value)}
                             placeholder={
                                 isServerConfigured
-                                    ? "Server .env key configured"
+                                    ? "Enter your own key to override the server default"
                                     : hasSavedKey
                                       ? "Saved key hidden"
                                       : placeholder
@@ -217,13 +223,11 @@ function ApiKeyField({
                             className={`pr-10 ${accountGlassInputClassName}`}
                             autoComplete="off"
                             spellCheck={false}
-                            disabled={isServerConfigured}
                         />
                         {dirty && (
                             <button
                                 type="button"
                                 onClick={() => setReveal((r) => !r)}
-                                disabled={isServerConfigured}
                                 className={`absolute inset-y-1 right-1.5 flex items-center ${accountGlassIconButtonClassName}`}
                                 aria-label={reveal ? "Hide key" : "Show key"}
                             >
@@ -239,12 +243,7 @@ function ApiKeyField({
                         <button
                             type="button"
                             onClick={handleSave}
-                            disabled={
-                                isServerConfigured ||
-                                isSaving ||
-                                !dirty ||
-                                saved
-                            }
+                            disabled={isSaving || !dirty || saved}
                             className="text-xs font-medium text-gray-700 transition-colors hover:text-gray-950 disabled:cursor-not-allowed disabled:text-gray-400"
                         >
                             {isSaving ? (
