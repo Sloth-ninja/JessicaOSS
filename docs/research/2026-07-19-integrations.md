@@ -4,9 +4,9 @@
 
 ## Quill / Unity "Interactive API" (practice management — Aria Grace Law migrates to Unity)
 
-**Docs:** https://github.com/quillpinpoint/interactive-api/wiki — 6 pages only, and
-**Quill's team has confirmed this is the complete documentation**, so absences are
-real. "Not strictly RESTful" (pre-REST design), JSON over HTTPS, two sub-APIs:
+**Docs:** https://github.com/quillpinpoint/interactive-api/wiki — 6 pages only.
+**Per the owner (19 July 2026, relayed from Quill's team): this is the complete
+documentation**, so absences are treated as real until Quill says otherwise. "Not strictly RESTful" (pre-REST design), JSON over HTTPS, two sub-APIs:
 CRM (`api.{quill-domain}/quillapi5/`, tenant via a header confusingly named
 `ClientId`) and Money (`i3.{quill-domain}/api/{tenantUri}/`).
 
@@ -39,6 +39,8 @@ documented REST v4 (~282 endpoints), OAuth, **full Documents API** (the capabili
 Unity lacks), EU data residency. Better for the wider market; Unity matters because
 the pilot firm runs it.
 
+Sources: wiki pages [Home/Authentication/CRM-API/Money-API/Register-your-App/Useful-links](https://github.com/quillpinpoint/interactive-api/wiki) (fetched 19/07/2026); Clio: [developer docs](https://docs.developers.clio.com/) and [API reference](https://docs.developers.clio.com/clio-manage/api-reference/).
+
 ## HM Land Registry (Business Gateway)
 
 **The per-user model the owner wants is exactly how Business Gateway works** — each
@@ -64,3 +66,5 @@ with its no-resale licence) + deep links into the portal with the title pre-reso
 solicitor uploads the purchased PDF into JessicaOS's existing document pipeline.
 **v2** — Business Gateway proper once the channel-partner paperwork completes.
 A "Land Registry — Connect account (coming soon)" nav stub ships with WS7.
+
+Sources (fetched 19/07/2026): [Business Gateway tech docs](https://landregistry.github.io/bgtechdoc/) incl. [REST developer guide](https://landregistry.github.io/bgtechdoc/rest/get_started/developer_guide/) and [FAQ](https://landregistry.github.io/bgtechdoc/support/FAQ/); [conditions of use (incl. clause 4.2)](https://www.gov.uk/government/publications/conditions-of-use-hm-land-registry-business-e-services/conditions-of-use-portal-and-business-gateway); [direct integration guidance + channel-partner contact](https://www.gov.uk/guidance/direct-integration-with-business-gateway); fees: [Dec 2024 changes](https://www.gov.uk/government/news/changes-to-fees-for-hm-land-registrys-information-services-from-december) and [current fee schedule](https://www.gov.uk/guidance/hm-land-registry-information-services-fees); open data: [Use land and property data API](https://use-land-property-data.service.gov.uk/api-documentation).
