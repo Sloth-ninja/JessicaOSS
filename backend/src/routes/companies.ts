@@ -1,8 +1,9 @@
 // Companies House research routes (WS7) — powers the Company Search page.
 // Read-only passthroughs over the shared Companies House client/bundle used
 // by the chat tools, with per-request key resolution via getUserApiKeys
-// (server env key takes precedence when set; per-user BYO key otherwise —
-// see the CLAUDE.md env registry).
+// (the per-user BYO key always takes precedence; the server env key is the
+// shared fallback used only when a user has none — see the CLAUDE.md env
+// registry).
 //
 // Every handler body is wrapped in try/catch: Express 4 does not catch
 // rejections from async handlers and Node 22 kills the process on unhandled

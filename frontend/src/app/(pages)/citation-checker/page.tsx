@@ -69,13 +69,15 @@ export default function CitationCheckerPage() {
 
     return (
         <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
-            <PageHeader>
-                <h1 className="text-2xl font-medium font-serif text-gray-900">
-                    Citation Checker
-                </h1>
-            </PageHeader>
+            <PageHeader
+                shrink
+                breadcrumbs={[
+                    { label: "Research" },
+                    { label: "Citation Checker" },
+                ]}
+            />
 
-            <div className="flex-1 overflow-y-auto px-4 pb-10 md:px-10">
+            <div className="flex-1 overflow-y-auto border-t border-gray-200 px-4 pt-6 pb-10 md:px-10">
                 <div className="max-w-3xl">
                     <p className="text-sm text-gray-500">
                         Paste a draft. Statutory citations are extracted and
@@ -135,7 +137,7 @@ export default function CitationCheckerPage() {
                     )}
 
                     {error && !checking && (
-                        <p className="mt-6 text-sm text-red-600">{error}</p>
+                        <p className="mt-6 text-sm text-gray-500">{error}</p>
                     )}
 
                     {results && !checking && results.length === 0 && (
