@@ -12,6 +12,7 @@ import {
     ChevronsUpDown,
     ChevronDown,
     ClipboardCheck,
+    Landmark,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUserProfile } from "@/contexts/UserProfileContext";
@@ -35,6 +36,7 @@ const NAV_ITEMS = [
 // any not-configured state.
 const RESEARCH_NAV_ITEMS = [
     { href: "/company-search", label: "Company Search", icon: Building2 },
+    { href: "/legislation", label: "Legislation", icon: Landmark },
     {
         href: "/citation-checker",
         label: "Citation Checker",

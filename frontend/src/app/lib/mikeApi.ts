@@ -1274,3 +1274,53 @@ export async function checkCitations(
         body: JSON.stringify({ text }),
     });
 }
+
+// ---------------------------------------------------------------------------
+// Research — Legislation (WS7)
+// ---------------------------------------------------------------------------
+
+export interface LegislationSearchMatch {
+    title: string;
+    type: string;
+    year?: number;
+    number?: string;
+    url: string;
+}
+
+export interface LegislationUnappliedEffect {
+    type?: string;
+    notes?: string;
+    affectedProvisions?: string;
+    requiresApplied?: boolean;
+}
+
+// Snake_case field names mirror the chat tool's emitted payload
+// (backend legislationTools.ts) so the shared LegislationPanel props line up.
+export type LegislationLookupResponse =
+    | {
+          resolved: true;
+          title: string;
+          url: string;
+          heading: string | null;
+          text: string;
+          extent: string | null;
+          outstanding_effects: boolean;
+          unapplied_effects: LegislationUnappliedEffect[];
+      }
+    | { resolved: false; citation: string; reason: string };
+
+export async function searchLegislation(
+    title: string,
+): Promise<{ matches: LegislationSearchMatch[] }> {
+    return apiRequest<{ matches: LegislationSearchMatch[] }>(
+        `/legislation/search?title=${encodeURIComponent(title)}`,
+    );
+}
+
+export async function lookupLegislation(
+    citation: string,
+): Promise<LegislationLookupResponse> {
+    return apiRequest<LegislationLookupResponse>(
+        `/legislation/lookup?citation=${encodeURIComponent(citation)}`,
+    );
+}

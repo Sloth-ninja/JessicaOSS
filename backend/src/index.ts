@@ -13,6 +13,7 @@ import { userRouter } from "./routes/user";
 import { downloadsRouter } from "./routes/downloads";
 import { companiesRouter } from "./routes/companies";
 import { citationsRouter } from "./routes/citations";
+import { legislationRouter } from "./routes/legislation";
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
@@ -158,6 +159,7 @@ app.delete("/user/chats", dataDeleteLimiter);
 app.delete("/user/projects", dataDeleteLimiter);
 app.delete("/user/tabular-reviews", dataDeleteLimiter);
 app.use("/companies", researchLimiter);
+app.use("/legislation", researchLimiter);
 app.post("/citations/check", citationsLimiter);
 
 app.use((req, res, next) =>
@@ -175,6 +177,7 @@ app.use("/users", userRouter);
 app.use("/download", downloadsRouter);
 app.use("/companies", companiesRouter);
 app.use("/citations", citationsRouter);
+app.use("/legislation", legislationRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 

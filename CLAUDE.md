@@ -42,7 +42,7 @@ Two independent npm projects, no shared workspace. Frontend calls backend over H
 
 | Area | Files |
 |---|---|
-| Routes | `src/routes/`: `chat.ts` (main SSE chat), `projectChat.ts`, `projects.ts`, `documents.ts`, `tabular.ts`, `workflows.ts`, `user.ts` (profile, API keys, MCP connectors, export/delete), `downloads.ts`, `companies.ts` (Companies House research: search / profile+officers+PSCs bundle / filing history — WS7), `citations.ts` (WS7 Citation Checker: `POST /citations/check` — extraction via `lib/citationExtraction.ts`, live verification via `lib/legislation.ts`) |
+| Routes | `src/routes/`: `chat.ts` (main SSE chat), `projectChat.ts`, `projects.ts`, `documents.ts`, `tabular.ts`, `workflows.ts`, `user.ts` (profile, API keys, MCP connectors, export/delete), `downloads.ts`, `companies.ts` (Companies House research: search / profile+officers+PSCs bundle / filing history — WS7), `citations.ts` (WS7 Citation Checker: `POST /citations/check` — extraction via `lib/citationExtraction.ts`, live verification via `lib/legislation.ts`), `legislation.ts` (WS7 Legislation panel: `GET /legislation/search` title search + `GET /legislation/lookup` citation→provision — thin, un-keyed wrappers over `lib/legislation.ts`) |
 | Chat engine | `src/lib/chatTools.ts` (~3.7k lines: system prompts, doc context, tool execution loop `runLLMStream`, citation annotation extraction, research-tools seam) |
 | Legal sources | `src/lib/legalSourcesTools/` (CourtListener excised 07/07/2026; UK sources — Companies House WS1, legislation.gov.uk WS2 — land here per `docs/MIGRATION_SPEC.md`) |
 | Documents | `storage.ts`, `documentVersions.ts`, `docxTrackedChanges.ts`, `convert.ts`, `upload.ts`, `downloadTokens.ts` |
@@ -52,7 +52,7 @@ Two independent npm projects, no shared workspace. Frontend calls backend over H
 
 ### Module map (frontend)
 
-- `src/app/(pages)/` — routes: assistant, projects, tabular-reviews, workflows, citation-checker (WS7, "Research" sidebar group), account (models / features / api-keys / connectors / security / privacy-data); `login`, `signup`, `verify-mfa` at app root.
+- `src/app/(pages)/` — routes: assistant, projects, tabular-reviews, workflows, company-search / legislation / citation-checker (WS7, "Research" sidebar group), account (models / features / api-keys / connectors / security / privacy-data); `login`, `signup`, `verify-mfa` at app root.
 - `src/app/components/` — `assistant/` (ChatView, AssistantMessage, AssistantSidePanel), `projects/`, `tabular/`, `workflows/`, `shared/`, `modals/`.
 - `src/app/lib/mikeApi.ts` — the only backend client (~1.2k lines; base URL `NEXT_PUBLIC_API_BASE_URL`, Supabase JWT bearer auth).
 - `src/app/hooks/useAssistantChat.ts` — SSE event parser/state machine for streaming chat.
@@ -79,7 +79,7 @@ Backend (`backend/.env.example` documents the core set):
 | `PORT` (3001), `FRONTEND_URL` (CORS), `NODE_ENV`, `TRUST_PROXY_HOPS` | optional | runtime |
 | `API_PUBLIC_URL` / `BACKEND_URL` | optional | MCP OAuth callback base |
 | `MCP_OAUTH_CLIENT_ID/_SECRET`, `MCP_OAUTH_DEFAULT_SCOPE`, `MCP_CONNECTORS_ENCRYPTION_SECRET` | optional | MCP connectors |
-| `RATE_LIMIT_*` (16 vars, `src/index.ts`) | optional | rate-limit tuning; incl. `RATE_LIMIT_RESEARCH_WINDOW_MINUTES` (default 15) / `RATE_LIMIT_RESEARCH_MAX` (default 120) for the UK research routes (`/companies`; `/legislation` later) and `RATE_LIMIT_CITATIONS_MAX` / `RATE_LIMIT_CITATIONS_WINDOW_MINUTES` (default 20 per 15 min) for `POST /citations/check` |
+| `RATE_LIMIT_*` (16 vars, `src/index.ts`) | optional | rate-limit tuning; incl. `RATE_LIMIT_RESEARCH_WINDOW_MINUTES` (default 15) / `RATE_LIMIT_RESEARCH_MAX` (default 120) for the UK research routes (`/companies`, `/legislation`) and `RATE_LIMIT_CITATIONS_MAX` / `RATE_LIMIT_CITATIONS_WINDOW_MINUTES` (default 20 per 15 min) for `POST /citations/check` |
 | `LOG_RAW_LLM_STREAM`, `RAW_LLM_STREAM_LOG_DIR` | optional | dev-only stream logging |
 | `RESEND_API_KEY` | optional | in `.env.example`; SDK installed, currently unused in `src/` |
 | `COMPANIES_HOUSE_API_KEY` | optional | Companies House key: the per-user BYO key always takes precedence; this env key is the shared fallback used only when a user has none. (Owner decision 19/07/2026 flipped the env-first precedence documented in the PR #25 review; a user with their own key escapes the shared env-key rate bucket.) |

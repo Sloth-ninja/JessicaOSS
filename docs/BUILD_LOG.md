@@ -7,6 +7,72 @@
 
 ---
 
+## 2026-07-20 — WS7 PR 4: Legislation panel (legislation.gov.uk) (branch `ws7-legislation-panel`)
+
+**Scope:** third Research surface — a dedicated Research › Legislation page
+backed by new authenticated `/legislation` backend routes, per the approved WS7
+mock-up. One prominent input with two modes (look up a natural UK citation, or
+search by Act/SI title), example chips teaching the citation grammar, a
+master–detail split for title search, and a provision view reusing the existing
+`assistant/LegislationPanel` with the amber outstanding-amendments band plus a
+per-effect list beneath it (revision lag never hidden — CLAUDE.md data rule).
+
+**Key changes:**
+
+- Backend: new `src/routes/legislation.ts` (both `requireAuth`, every handler
+  body in try/catch per DURABLE_LESSONS 2026-07-19), thin wrappers over the
+  already-tested `lib/legislation.ts`: `GET /legislation/search?title=` →
+  `search(q)` → `{matches}`; `GET /legislation/lookup?citation=` →
+  `lookupCitation(raw)`. **No key gating** — legislation.gov.uk is a fully open
+  API (OGL). A failed lookup is a domain result, not an error: unparseable or
+  unresolvable citations return HTTP 200 `{resolved:false, citation, reason}`;
+  only an unexpected throw yields a fixed generic 502 (`safeErrorLog`, raw
+  errors server-side only). Success payload uses the same snake_case field
+  names the chat tool emits (`legislationTools.ts`: `title, url, heading, text,
+  extent, outstanding_effects, unapplied_effects`) so `LegislationPanel` props
+  line up. Mounted behind the existing `researchLimiter` in `index.ts`.
+- Frontend: new `(pages)/legislation/page.tsx` (single client page). Mode
+  toggle + prominent input, **submit-on-enter only — no search-as-you-type**
+  (a title search hits several feeds and can take 3–6s). States: initial
+  prompt, loading skeletons, resolved provision (LegislationPanel + effects
+  list), could-not-resolve card (shows the resolver's reason), no-matches, and
+  network-error. Search matches carry Act/SI type badges and a year/number
+  reference; selecting one opens its provision view. "Continue in Assistant"
+  reuses `lib/assistantPrefill.ts`, writing `Regarding {citation} ({canonical
+  url}): ` and routing to `/assistant`. `mikeApi.ts`: `searchLegislation(title)`
+  / `lookupLegislation(citation)` with typed responses. Sidebar: "Legislation"
+  (Landmark icon) added to the Research group between Company Search and
+  Citation Checker via `renderNavItem`.
+
+**Verification:** backend `tsc --noEmit` clean; backend vitest 140/140 (7 new
+route-mapping tests in `routes/legislation.test.ts`, `vi.mock("../lib/
+legislation")` per the `citations.test.ts`/`legislationTools.test.ts` pattern —
+covers search wrapping, snake_case lookup mapping, the resolved:false 200
+domain path, 400 on blank input, and fixed-502 error paths that never leak the
+raw error); frontend `tsc --noEmit` clean; frontend `npm run lint` 112 problems
+(34 errors/78 warnings) — identical to the main baseline, zero issues in
+changed files (the one AppSidebar finding is the pre-existing line-104
+setState-in-effect, not the nav additions); `npm run evals:smoke` 4/4 passed,
+run from the main checkout per DURABLE_LESSONS 2026-07-08.
+
+**Decisions / deferred:** no dedicated frontend test framework yet (upstream
+ships none) — route behaviour is covered by the backend tests, the page is
+pure composition of already-tested primitives. The provision view reuses
+`LegislationPanel` unmodified (minimal diff); the per-effect list is rendered
+by the page beneath the panel rather than added to the shared component.
+
+**Review fix (PR #29):** `selectMatch` looked up every chosen search result by
+its bare title. Acts parse from a bare title (`parseCitation` kind:`act`) but a
+whole SI has no title-only parse branch, so SI search results — rendered with a
+selectable "SI" badge — dead-ended on the "could not parse" card. Fixed: an
+SI-typed match now resolves by its parseable `SI {year}/{number}` citation
+(kind:`si`), Acts still resolve by title, and the title stays the human label
+for the "Continue in Assistant" prefill. Selecting any search result now opens
+its provision view as the entry above states. Backend unchanged (tsc clean,
+vitest 140/140); frontend `tsc --noEmit` clean.
+
+---
+
 ## 2026-07-20 — User API keys always take precedence over server env keys (branch `byo-key-precedence`)
 
 **Scope:** owner-decided precedence flip. **Owner decision (19/07/2026):** "the
