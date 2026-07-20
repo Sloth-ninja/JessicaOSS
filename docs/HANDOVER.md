@@ -29,6 +29,13 @@ autoconfig delegation, piped-exit-code trap, Express-async crash class).
 
 ## 3. IN-FLIGHT at session end — verify this FIRST
 
+> **RESOLVED 20 July 2026:** the workflow completed. All lanes merged (#25, #27,
+> #29, #30, #31) and deployed; live pages verified HTTP 200; composed-range
+> review ran (security/integration approved, UI-drift fixes landed as #31); the
+> Land Registry stub's README overclaim was caught by its merge gate and
+> corrected before merging. Nothing from this section remains outstanding —
+> it is kept for the record. Current truth: CLAUDE.md `## Current status`.
+
 A Workflow run (`wf_141dad74-31b`; script:
 `~/.claude/projects/-Users-ezanahaddis-JessicaOSS/7d6b925c-e616-4bdd-8ca7-8d098ecaf2b5/workflows/scripts/ws7-closeout-wf_141dad74-31b.js`)
 was finishing WS7 autonomously:
