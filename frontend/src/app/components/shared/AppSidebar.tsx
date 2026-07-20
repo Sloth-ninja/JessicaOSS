@@ -52,7 +52,7 @@ const RESEARCH_NAV_ITEMS_DISABLED = [
     {
         label: "Land Registry",
         icon: Landmark,
-        tooltip: "HM Land Registry integration in progress",
+        tooltip: "HM Land Registry integration coming soon",
     },
 ];
 
