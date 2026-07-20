@@ -61,6 +61,16 @@ pure composition of already-tested primitives. The provision view reuses
 `LegislationPanel` unmodified (minimal diff); the per-effect list is rendered
 by the page beneath the panel rather than added to the shared component.
 
+**Review fix (PR #29):** `selectMatch` looked up every chosen search result by
+its bare title. Acts parse from a bare title (`parseCitation` kind:`act`) but a
+whole SI has no title-only parse branch, so SI search results — rendered with a
+selectable "SI" badge — dead-ended on the "could not parse" card. Fixed: an
+SI-typed match now resolves by its parseable `SI {year}/{number}` citation
+(kind:`si`), Acts still resolve by title, and the title stays the human label
+for the "Continue in Assistant" prefill. Selecting any search result now opens
+its provision view as the entry above states. Backend unchanged (tsc clean,
+vitest 140/140); frontend `tsc --noEmit` clean.
+
 ---
 
 ## 2026-07-19 — WS7 PR 2: Company Search panel (Companies House) (branch `ws7-company-search`)

@@ -141,9 +141,17 @@ export default function LegislationPage() {
 
     function selectMatch(match: LegislationSearchMatch) {
         setSelectedUrl(match.url);
-        // A search match is a whole Act/SI; look it up by title to open its
-        // provision view (the lib resolves the title to its canonical text).
-        runLookup(match.title, match.title);
+        // A search match is a whole Act/SI; open its provision view by
+        // resolving a citation the backend can parse. Acts resolve by bare
+        // title, but a whole SI has no title-only parse branch, so resolve
+        // those by their "SI year/number" citation instead. The title stays
+        // the human label for the prefill.
+        const isSi = matchTypeLabel(match.type) === "SI";
+        const citation =
+            isSi && match.year && match.number
+                ? `SI ${match.year}/${match.number}`
+                : match.title;
+        runLookup(citation, match.title);
     }
 
     function continueInAssistant() {
