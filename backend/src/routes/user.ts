@@ -12,7 +12,6 @@ import {
 import {
     type ApiKeyStatus,
     getUserApiKeyStatus,
-    hasEnvApiKey,
     normalizeApiKeyProvider,
     saveUserApiKey,
 } from "../lib/userApiKeys";
@@ -586,11 +585,9 @@ userRouter.put(
             typeof req.body?.api_key === "string" ? req.body.api_key : null;
         const db = createServerSupabase();
         try {
-            if (hasEnvApiKey(provider)) {
-                return void res.status(409).json({
-                    detail: "This provider is configured by the server environment and cannot be changed from the browser.",
-                });
-            }
+            // A user may always save or remove their own key. It takes
+            // precedence over any server env key; removing it falls back to
+            // the env key (status then reports source "env").
             await saveUserApiKey(userId, provider, apiKey, db);
             const status = await getUserApiKeyStatus(userId, db);
             res.json(withLocalStatus(status));

@@ -73,6 +73,101 @@ vitest 140/140); frontend `tsc --noEmit` clean.
 
 ---
 
+## 2026-07-20 — User API keys always take precedence over server env keys (branch `byo-key-precedence`)
+
+**Scope:** owner-decided precedence flip. **Owner decision (19/07/2026):** "the
+user's key should be prioritised, same with any key — it should always be the
+user's own keys." This **reverses the env-first behaviour documented in the PR
+#25 (WS7 Company Search) review**, where a set env key took precedence over a
+user's own BYO key and the API-keys UI refused edits whenever an env key was
+present. Applies to every provider (`claude` / `gemini` / `openai` /
+`openrouter` / `companies_house`), not just Companies House.
+
+**Key changes:**
+
+- `backend/src/lib/userApiKeys.ts`:
+  - `getUserApiKeys` — a user's decrypted key now overrides the env key for
+    every provider; the env key remains the fallback when the user has none.
+    Trim/decrypt behaviour preserved: a row that fails to decrypt (or decrypts
+    empty) leaves the env fallback in place rather than nulling a live env key.
+  - `getUserApiKeyStatus` — reports source `"user"` whenever a user key exists
+    (even if an env key is also set); else `"env"`; else unconfigured
+    (`false` / `null`). The env-masking `!status[provider]` guard was removed.
+- `backend/src/routes/user.ts` — `PUT /user/api-keys/:provider` no longer
+  returns the `hasEnvApiKey` 409 block; a user may always save or remove their
+  own key. Removing a user key falls back to the env key (status returns to
+  source `"env"`). MFA gating, try/catch, and the fixed generic 500 are
+  unchanged; the now-unused `hasEnvApiKey` import was dropped.
+- Frontend `(pages)/account/api-keys/page.tsx` — `isServerConfigured` is now
+  informational, not a lock: the field stays editable, the reveal/Save controls
+  are enabled, and an explanatory note renders ("A server default is available.
+  Add your own key to use it instead — your key always takes priority."). Once a
+  user saves their own key the status source becomes `"user"`, so the existing
+  `hasSavedKey && !isServerConfigured` Remove affordance appears and reverting it
+  falls back to the server default. Minimal adaptation of the existing
+  ApiKeyField rendering.
+- Docs: CLAUDE.md env registry — the provider-fallback row and the
+  `COMPANIES_HOUSE_API_KEY` row now state that the per-user BYO key always takes
+  precedence and the env key is the shared fallback. **Practical consequence:** a
+  user with their own Companies House key now escapes the shared env-key rate
+  bucket.
+
+**Other consumers of the flipped functions (grep-audited, nothing left broken):**
+`getUserApiKeys` is re-exported by `lib/userSettings.ts` and consumed by the
+chat engine and `routes/companies.ts`; all simply receive the resolved key, so
+they now transparently prefer the user's own key — the intended effect of the
+decision, no assumptions broken. `hasEnvApiKey` had exactly one caller (the
+removed 409 block) and is now unused by any route but kept exported for tests /
+future use.
+
+**Tests:** new `backend/src/lib/userApiKeys.test.ts` (vitest, sibling-test
+style) — user key overrides env for every provider; env fallback when no user
+key; delete reverts to env; decrypt-failure keeps env fallback; status sources
+`user` / `env` / unconfigured and the revert-to-`env` transition. No prior test
+asserted the 409 env block, so none needed changing.
+
+**Verification (branch cut from `origin/main`):** backend `tsc --noEmit` clean;
+backend vitest 142/142 (9 new here); frontend `tsc --noEmit` clean; frontend
+`npm run lint` at the main baseline (34 errors / 78 warnings, all pre-existing;
+the changed api-keys page lints clean); `npm run evals:smoke` run from the main
+checkout per DURABLE_LESSONS.
+
+---
+
+## 2026-07-20 — Research-doc sourcing fixes (branch `research-doc-sourcing`)
+
+**Scope:** docs-only follow-up prescribed by the retroactive review of PR #26 (which
+merged review-waived under the model-handover time-box; the retroactive review
+returned "Sound, with fixes"). `docs/research/2026-07-19-integrations.md`: the
+Quill "complete documentation" claim is now attributed (owner-relayed, 19/07) and
+both sections carry `Sources:` lists (Quill wiki pages, Clio docs, HMLR tech
+docs/conditions-of-use/fees/open-data). `docs/research/2026-07-19-competitor-scan.md`:
+header no longer claims inline citations and marks pricing/valuation figures as
+publicly reported third-party estimates.
+
+**Verification:** docs-only diff; every added URL was fetched during the 19/07
+research session; CI green on the PR.
+
+---
+
+## 2026-07-19 — Handover pack: research briefs + HANDOVER.md (branch `handover-docs`)
+
+**Scope:** docs-only, written at session end (Fable → Opus model handover). Adds
+`docs/research/2026-07-19-competitor-scan.md` (Legora/Harvey condensed findings,
+ranked gaps, do-not-copy list), `docs/research/2026-07-19-integrations.md`
+(Quill/Unity API brief — no document API, per-user OAuth, time-recording headline,
+v1.1 spike plan; HMLR Business Gateway brief — authorised-channel requirement,
+fees, v1 open-data path), and `docs/HANDOVER.md` (infrastructure map, in-flight
+WS7 workflow to verify, owner-set next-actions queue, owner-pending items,
+operating rituals). CLAUDE.md: router rows for HANDOVER/research + Current status
+refreshed to the WS7-in-flight state.
+
+**Verification:** docs-only; paths referenced verified to exist on this branch.
+Review waived under the model-handover time-box (noted honestly; docs carry no
+code risk); expect keep-both BUILD_LOG conflicts with in-flight WS7 PRs.
+
+---
+
 ## 2026-07-19 — WS7 PR 2: Company Search panel (Companies House) (branch `ws7-company-search`)
 
 **Scope:** first Research surface — a dedicated Research › Company Search page
