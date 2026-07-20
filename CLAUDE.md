@@ -73,14 +73,14 @@ Backend (`backend/.env.example` documents the core set):
 | `DOWNLOAD_SIGNING_SECRET` | yes | HMAC for `/download/:token` |
 | `R2_ENDPOINT_URL`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | yes for uploads | R2 storage (`R2_BUCKET_NAME` optional, default `mike`) |
 | `USER_API_KEYS_ENCRYPTION_SECRET` | yes | AES-256-GCM key derivation for BYO keys |
-| `ANTHROPIC_API_KEY` (alt `CLAUDE_API_KEY`), `GEMINI_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY` | optional | provider fallbacks when user has no key |
+| `ANTHROPIC_API_KEY` (alt `CLAUDE_API_KEY`), `GEMINI_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY` | optional | provider fallbacks used only when the user has no key of their own; a per-user BYO key always takes precedence |
 | `PORT` (3001), `FRONTEND_URL` (CORS), `NODE_ENV`, `TRUST_PROXY_HOPS` | optional | runtime |
 | `API_PUBLIC_URL` / `BACKEND_URL` | optional | MCP OAuth callback base |
 | `MCP_OAUTH_CLIENT_ID/_SECRET`, `MCP_OAUTH_DEFAULT_SCOPE`, `MCP_CONNECTORS_ENCRYPTION_SECRET` | optional | MCP connectors |
 | `RATE_LIMIT_*` (16 vars, `src/index.ts`) | optional | rate-limit tuning; incl. `RATE_LIMIT_RESEARCH_WINDOW_MINUTES` (default 15) / `RATE_LIMIT_RESEARCH_MAX` (default 120) for the UK research routes (`/companies`; `/legislation` later) and `RATE_LIMIT_CITATIONS_MAX` / `RATE_LIMIT_CITATIONS_WINDOW_MINUTES` (default 20 per 15 min) for `POST /citations/check` |
 | `LOG_RAW_LLM_STREAM`, `RAW_LLM_STREAM_LOG_DIR` | optional | dev-only stream logging |
 | `RESEND_API_KEY` | optional | in `.env.example`; SDK installed, currently unused in `src/` |
-| `COMPANIES_HOUSE_API_KEY` | optional | Companies House key: env fallback key takes precedence when set (shared across users); per-user BYO key used when no env key is configured — precedence flip is an open owner decision (PR #25 review) |
+| `COMPANIES_HOUSE_API_KEY` | optional | Companies House key: the per-user BYO key always takes precedence; this env key is the shared fallback used only when a user has none. (Owner decision 19/07/2026 flipped the env-first precedence documented in the PR #25 review; a user with their own key escapes the shared env-key rate bucket.) |
 | `LOCAL_LLM_BASE_URL`, `LOCAL_LLM_MODELS`, `LOCAL_LLM_API_KEY` | optional | Local/on-premises OpenAI-compatible chat-completions provider (Ollama, LM Studio, vLLM) — data sovereignty mode, see `docs/local-models.md`. `OPENAI_BASE_URL` honoured as an alias for `LOCAL_LLM_BASE_URL` when the latter is unset; never affects the cloud OpenAI client. |
 
 Frontend (`frontend/.env.local.example`, all public): `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY`, `NEXT_PUBLIC_API_BASE_URL` (default `http://localhost:3001`). No secrets in the frontend, ever.

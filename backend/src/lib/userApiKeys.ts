@@ -125,6 +125,7 @@ export async function getUserApiKeyStatus(
         },
     };
 
+    // Env keys are the baseline/fallback.
     for (const provider of PROVIDERS) {
         if (hasEnvApiKey(provider)) {
             status[provider] = true;
@@ -138,9 +139,11 @@ export async function getUserApiKeyStatus(
         .eq("user_id", userId);
     if (error) throw error;
 
+    // A user's own key always takes precedence over the env fallback, so it
+    // reports source "user" even when an env key is also configured.
     for (const row of data ?? []) {
         const provider = normalizeApiKeyProvider(String(row.provider));
-        if (provider && !status[provider]) {
+        if (provider) {
             status[provider] = true;
             status.sources[provider] = "user";
         }
@@ -153,6 +156,7 @@ export async function getUserApiKeys(
     userId: string,
     db: Db = createServerSupabase(),
 ): Promise<UserApiKeys> {
+    // Env keys are the fallback; a user's own decrypted key overrides them below.
     const apiKeys: UserApiKeys = {
         claude: envApiKey("claude"),
         gemini: envApiKey("gemini"),
@@ -170,8 +174,11 @@ export async function getUserApiKeys(
     for (const row of (data ?? []) as EncryptedKeyRow[]) {
         const provider = normalizeApiKeyProvider(row.provider);
         if (!provider) continue;
-        if (apiKeys[provider]?.trim()) continue;
-        apiKeys[provider] = decrypt(row);
+        // The user's own key always takes precedence. Only fall back to the env
+        // key when decryption fails or yields an empty value (preserving the
+        // prior trim/decrypt-error behaviour rather than nulling a live env key).
+        const decrypted = decrypt(row);
+        if (decrypted?.trim()) apiKeys[provider] = decrypted;
     }
 
     return apiKeys;
