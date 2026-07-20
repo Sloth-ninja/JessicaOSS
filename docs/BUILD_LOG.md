@@ -7,6 +7,18 @@
 
 ---
 
+## 2026-07-20 — WS7 close-out: status refresh (branch `ws7-closeout-status`)
+
+**Scope:** docs-only. CLAUDE.md `## Current status` updated to WS7 COMPLETE with
+the merged-PR ledger (#23–#31) and 20/07 live-verification evidence;
+`docs/HANDOVER.md` §3 marked RESOLVED (workflow finished; all lanes landed).
+
+**Verification:** live checks 20/07 — `/`, `/company-search`, `/legislation`,
+`/citation-checker` all HTTP 200 on jessicaoss.com; `api.jessicaoss.com/health`
+→ `{"ok":true}`; `gh pr list` shows no open PRs; single main worktree remains.
+
+---
+
 ## 2026-07-20 — WS7: Land Registry coming-soon entry (branch `ws7-land-registry-stub`)
 
 **Scope:** tiny UI-only stub — a disabled "Land Registry" entry in the Research
