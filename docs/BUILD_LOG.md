@@ -7,6 +7,64 @@
 
 ---
 
+## 2026-07-20 — WS7 composed-range fix wave (branch `ws7-final-fixes`)
+
+**Scope:** cross-cutting cleanup from a composed-range review of the whole WS7
+train (`git diff 56896cf...origin/main` — PRs #23 Matters rename, #24 Citation
+Checker, #25 Company Search, #28 research-doc sourcing, plus the byo-key-precedence
+and legislation-panel merges). Per-PR review can't catch drift that only appears
+once the commits sit together; this wave fixes the Important findings that class
+produced. No behaviour change to any route or data path — copy, one page-header
+markup fix, and one stale code comment.
+
+**Key changes:**
+
+- Frontend `(pages)/citation-checker/page.tsx`: brought Citation Checker's page
+  header into line with the two Research pages that established the convention
+  after it shipped (#24 landed before #25). `<PageHeader>` now uses
+  `shrink` + `breadcrumbs={[{label:"Research"},{label:"Citation Checker"}]}`
+  (was a bare `<h1>` title, no breadcrumbs) so the sidebar wayfinding trail
+  reads "Research / Citation Checker" like Company Search and Legislation; the
+  content wrapper gains `border-t border-gray-200` (with `pt-6` to replace the
+  spacing the removed title provided) to match the header/body divider both
+  sibling pages carry. Same file: the top-level fetch-error message switched
+  from `text-red-600` to `text-gray-500` (finding 4) — red is now reserved for
+  per-citation "Not found" status inside the results table, matching the other
+  two Research pages' neutral house style for request-failed text.
+- Backend `src/routes/companies.ts`: corrected the file-header key-precedence
+  comment (finding 2). It still asserted "server env key takes precedence when
+  set; per-user BYO key otherwise", which the owner-decided precedence flip
+  (df11d28, `getUserApiKeys`) reversed everywhere except this file — user's
+  decrypted key now always wins, env is the shared fallback. Comment now matches
+  the code, `userApiKeys.ts`, the CLAUDE.md env registry, and the api-keys page
+  copy. Comment-only; no code change.
+
+**Verification:** backend `tsc --noEmit` clean; backend vitest 149/149 (incl.
+`userApiKeys precedence (user key overrides env)`, which pins the behaviour the
+corrected comment now describes); frontend `tsc --noEmit` clean; frontend
+`npm run lint` unchanged from the main baseline (34 errors/78 warnings, all in
+pre-existing upstream files — `eslint` on the changed `citation-checker/page.tsx`
+reports zero issues); `npm run evals:smoke` 4/4 passed, run from the main
+checkout per DURABLE_LESSONS 2026-07-08.
+
+**Decisions / deferred:** three lower-severity findings from the same review were
+left as-is by design. Finding 3 (Company Search Overview tab spells months out —
+"21 February 2024" — while the Filing history tab and footer use numeric
+DD/MM/YYYY) is a within-page style mismatch, not a date-order bug — both are
+day-first and UK-correct, and `CompanyPanel.formatUkDate`'s long form is a
+deliberate "reads unambiguously regardless of locale" choice; unifying it would
+touch a shared component's presentation for no correctness gain. Finding 5 (the
+Company Search PR's BUILD_LOG entry calls the Research sidebar group
+"collapsible" though it ships as a static label) is an inaccuracy in a historical
+log entry — not rewritten, since the log is a record of what each PR said at the
+time. Two scope notes from the review, for awareness: the `ws7-land-registry-stub`
+branch is not actually an ancestor of `origin/main` (the Research group has 3
+items, not 4), and the Legislation-panel PR's own BUILD_LOG entry was silently
+dropped during a merge-conflict resolution — a docs-only casualty; the code
+(`routes/legislation.ts`, the page, sidebar ordering) all survived intact.
+
+---
+
 ## 2026-07-20 — WS7 PR 4: Legislation panel (legislation.gov.uk) (branch `ws7-legislation-panel`)
 
 **Scope:** third Research surface — a dedicated Research › Legislation page
