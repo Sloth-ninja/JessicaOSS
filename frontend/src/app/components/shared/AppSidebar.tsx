@@ -13,6 +13,7 @@ import {
     ChevronDown,
     ClipboardCheck,
     Landmark,
+    Lock,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUserProfile } from "@/contexts/UserProfileContext";
@@ -41,6 +42,17 @@ const RESEARCH_NAV_ITEMS = [
         href: "/citation-checker",
         label: "Citation Checker",
         icon: ClipboardCheck,
+    },
+];
+
+// Deferred UK integrations shown as a muted, non-clickable placeholder in the
+// Research group (WS7 roadmap). HM Land Registry Business Gateway requires a
+// commercial channel-partner account — see CLAUDE.md data-integrations rule 4.
+const RESEARCH_NAV_ITEMS_DISABLED = [
+    {
+        label: "Land Registry",
+        icon: Landmark,
+        tooltip: "HM Land Registry integration in progress",
     },
 ];
 
@@ -182,6 +194,49 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
         );
     };
 
+    // Disabled variant of renderNavItem: not a route, not clickable, muted
+    // styling, and a small "Connect account" pill with a padlock affordance
+    // instead of an icon-only row. Kept as a one-off inline case rather than
+    // folding into renderNavItem, which assumes every item is a live route.
+    const renderDisabledNavItem = ({
+        label,
+        icon: Icon,
+        tooltip,
+    }: {
+        label: string;
+        icon: typeof MessageSquare;
+        tooltip: string;
+    }) => (
+        <div key={label} className="py-0.5 px-2.5">
+            <div
+                title={tooltip}
+                aria-disabled="true"
+                className={cn(
+                    "w-full h-9 flex items-center gap-3 px-2.5 py-2 rounded-md text-left cursor-not-allowed select-none",
+                    "text-gray-400",
+                    !isOpen ? "hidden md:flex" : "flex",
+                )}
+            >
+                <Icon className="h-4 w-4 flex-shrink-0 text-gray-400" />
+                {isOpen && (
+                    <span
+                        className={`flex-1 min-w-0 flex items-center justify-between gap-2 ${
+                            shouldAnimate ? "sidebar-fade-in-2" : ""
+                        }`}
+                    >
+                        <span className="text-sm font-medium truncate">
+                            {label}
+                        </span>
+                        <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-500">
+                            <Lock className="h-2.5 w-2.5" />
+                            Connect account
+                        </span>
+                    </span>
+                )}
+            </div>
+        </div>
+    );
+
     return (
         <div
             className={cn(
@@ -241,6 +296,7 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                 </div>
             )}
             {RESEARCH_NAV_ITEMS.map(renderNavItem)}
+            {RESEARCH_NAV_ITEMS_DISABLED.map(renderDisabledNavItem)}
 
             {isOpen && (
                 <div className="mt-4 flex-1 min-h-0 flex flex-col gap-4">

@@ -40,7 +40,7 @@ Populated by the full eval comparison run; see `evals/README.md`.
 ## Roadmap
 
 - **Find Case Law (The National Archives)** — case-law retrieval is deferred pending a computational-use licence (application in progress). Until then, the assistant is instructed to cite no case law it cannot verify.
-- **HM Land Registry Business Gateway** — deferred; requires a commercial account.
+- **HM Land Registry Business Gateway** — in progress (Business Gateway channel-partner onboarding).
 - **BAILII** — never scraped or integrated; their terms prohibit it.
 
 ## Self-hosting
