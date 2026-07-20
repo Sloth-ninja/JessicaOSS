@@ -7,6 +7,43 @@
 
 ---
 
+## 2026-07-20 — WS7: Land Registry coming-soon entry (branch `ws7-land-registry-stub`)
+
+**Scope:** tiny UI-only stub — a disabled "Land Registry" entry in the Research
+sidebar group, per the approved WS7 mock-up, so the deferred HM Land Registry
+Business Gateway integration is visible in the product without being
+clickable. No backend change; no new route.
+
+**Key changes:**
+
+- Frontend: `AppSidebar.tsx` — new `RESEARCH_NAV_ITEMS_DISABLED` array and a
+  `renderDisabledNavItem` helper alongside the existing `renderNavItem`
+  idiom (kept as a one-off inline special case rather than folding disabled
+  state into `renderNavItem`, which assumes every item is a live route).
+  Renders a muted, non-clickable row (`aria-disabled`, `cursor-not-allowed`)
+  with the existing `Landmark` icon, a small "Connect account" pill bearing a
+  padlock (`lucide-react` `Lock`) affordance, and a `title` tooltip reading
+  "HM Land Registry integration coming soon" — visible whether the sidebar is
+  open or collapsed. Mounted directly after `RESEARCH_NAV_ITEMS` in the
+  Research group.
+- README: roadmap line for HM Land Registry Business Gateway updated from
+  "deferred; requires a commercial account" to "planned; requires channel-partner
+  onboarding with HMLR (not yet started)" plus a pointer to the disabled nav
+  entry. (The first draft of this PR claimed onboarding was "in progress" — the
+  merge-gate review correctly rejected that as unsubstantiated; onboarding has
+  not begun, and the copy now matches `CLAUDE.md`'s DEFERRED status honestly.)
+  The nav tooltip likewise says "coming soon", not "in progress".
+
+**Verification:** frontend `tsc --noEmit` clean; frontend `npm run lint` 112
+problems (34 errors/78 warnings) — identical to the main baseline, zero
+issues in changed files (the one `AppSidebar.tsx` finding is the pre-existing
+setState-in-effect on the unrelated `shouldAnimate` effect, confirmed present
+on `origin/main` before this change via `git stash`).
+
+**Decisions / deferred:** genuinely non-interactive by design — no click
+handler, no route, no account-connect flow yet; that lands with the real
+HMLR Business Gateway workstream. No BUILD_PLAN/CLAUDE.md workstream table to
+update (small addition to the already-merged WS7 Research group).
 ## 2026-07-20 — WS7 composed-range fix wave (branch `ws7-final-fixes`)
 
 **Scope:** cross-cutting cleanup from a composed-range review of the whole WS7
