@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth";
+import { asyncHandler } from "../lib/asyncHandler";
 import { createServerSupabase } from "../lib/supabase";
 import {
   buildContentDisposition,
@@ -52,7 +53,7 @@ async function deleteDocumentAndVersionFiles(
 }
 
 // GET /single-documents
-documentsRouter.get("/", requireAuth, async (req, res) => {
+documentsRouter.get("/", requireAuth, asyncHandler(async (req, res) => {
   const userId = res.locals.userId as string;
   const db = createServerSupabase();
   const { data, error } = await db
@@ -69,22 +70,22 @@ documentsRouter.get("/", requireAuth, async (req, res) => {
   await attachLatestVersionNumbers(db, docs);
   await attachActiveVersionPaths(db, docs);
   res.json(docs);
-});
+}));
 
 // POST /single-documents
 documentsRouter.post(
   "/",
   requireAuth,
   singleFileUpload("file"),
-  async (req, res) => {
+  asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const db = createServerSupabase();
     await handleDocumentUpload(req, res, userId, null, db);
   },
-);
+));
 
 // DELETE /single-documents/:documentId
-documentsRouter.delete("/:documentId", requireAuth, async (req, res) => {
+documentsRouter.delete("/:documentId", requireAuth, asyncHandler(async (req, res) => {
   const userId = res.locals.userId as string;
   const { documentId } = req.params;
   const db = createServerSupabase();
@@ -100,12 +101,12 @@ documentsRouter.delete("/:documentId", requireAuth, async (req, res) => {
 
   await deleteDocumentAndVersionFiles(db, documentId);
   res.status(204).send();
-});
+}));
 
 // GET /single-documents/:documentId/display
 // Optional ?version_id= renders a historical version. Defaults to the
 // document's current_version_id.
-documentsRouter.get("/:documentId/display", requireAuth, async (req, res) => {
+documentsRouter.get("/:documentId/display", requireAuth, asyncHandler(async (req, res) => {
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string;
   const { documentId } = req.params;
@@ -166,10 +167,10 @@ documentsRouter.get("/:documentId/display", requireAuth, async (req, res) => {
     );
     res.send(Buffer.from(raw));
   }
-});
+}));
 
 // POST /single-documents/download-zip
-documentsRouter.post("/download-zip", requireAuth, async (req, res) => {
+documentsRouter.post("/download-zip", requireAuth, asyncHandler(async (req, res) => {
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { document_ids } = req.body as { document_ids?: string[] };
@@ -226,12 +227,12 @@ documentsRouter.post("/download-zip", requireAuth, async (req, res) => {
   res.setHeader("Content-Type", "application/zip");
   res.setHeader("Content-Disposition", 'attachment; filename="documents.zip"');
   res.send(content);
-});
+}));
 
 // GET /single-documents/:documentId/url
 // Optional ?version_id= selects a specific tracked-changes version.
 // Otherwise falls back to documents.current_version_id, else the original upload.
-documentsRouter.get("/:documentId/url", requireAuth, async (req, res) => {
+documentsRouter.get("/:documentId/url", requireAuth, asyncHandler(async (req, res) => {
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { documentId } = req.params;
@@ -275,14 +276,14 @@ documentsRouter.get("/:documentId/url", requireAuth, async (req, res) => {
     // (docx-preview) without a follow-up round-trip.
     has_pdf_rendition: !!active.pdf_storage_path,
   });
-});
+}));
 
 // GET /single-documents/:documentId/docx
 // Streams the raw .docx bytes for the given document, optionally at a
 // specific tracked-changes version. Unlike /url, this bypasses R2 (avoids
 // the browser CORS problem on signed URLs) so the frontend docx-preview
 // viewer can load tracked-change documents directly.
-documentsRouter.get("/:documentId/docx", requireAuth, async (req, res) => {
+documentsRouter.get("/:documentId/docx", requireAuth, asyncHandler(async (req, res) => {
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { documentId } = req.params;
@@ -324,7 +325,7 @@ documentsRouter.get("/:documentId/docx", requireAuth, async (req, res) => {
     ),
   );
   res.send(Buffer.from(raw));
-});
+}));
 
 // Produce the filename a download should present to the user. Version
 // filenames are expected to include the real extension.
@@ -344,7 +345,7 @@ function downloadFilenameForVersion(
 // GET /single-documents/:documentId/versions
 // Returns every version row for the document in document order, with
 // the human-friendly version number when present.
-documentsRouter.get("/:documentId/versions", requireAuth, async (req, res) => {
+documentsRouter.get("/:documentId/versions", requireAuth, asyncHandler(async (req, res) => {
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { documentId } = req.params;
@@ -373,7 +374,7 @@ documentsRouter.get("/:documentId/versions", requireAuth, async (req, res) => {
     current_version_id: doc.current_version_id,
     versions: rows ?? [],
   });
-});
+}));
 
 // POST /single-documents/:documentId/versions/from-document
 // Create a new version of documentId from another existing document's active
@@ -381,7 +382,7 @@ documentsRouter.get("/:documentId/versions", requireAuth, async (req, res) => {
 documentsRouter.post(
   "/:documentId/versions/from-document",
   requireAuth,
-  async (req, res) => {
+  asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { documentId } = req.params;
@@ -565,7 +566,7 @@ documentsRouter.post(
 
     res.status(201).json(versionRow);
   },
-);
+));
 
 // POST /single-documents/:documentId/versions
 // Upload a brand-new version of an existing document. The uploaded file
@@ -575,7 +576,7 @@ documentsRouter.post(
   "/:documentId/versions",
   requireAuth,
   singleFileUpload("file"),
-  async (req, res) => {
+  asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { documentId } = req.params;
@@ -727,14 +728,14 @@ documentsRouter.post(
 
     res.status(201).json(versionRow);
   },
-);
+));
 
 // PATCH /single-documents/:documentId/versions/:versionId
 // Rename a version's filename. Pass `{ "filename": "…" }`.
 documentsRouter.patch(
   "/:documentId/versions/:versionId",
   requireAuth,
-  async (req, res) => {
+  asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { documentId, versionId } = req.params;
@@ -770,7 +771,7 @@ documentsRouter.patch(
     }
     res.json(updated);
   },
-);
+));
 
 // PUT /single-documents/:documentId/versions/:versionId/file
 // Replace the file bytes and metadata for an existing version while keeping
@@ -779,7 +780,7 @@ documentsRouter.put(
   "/:documentId/versions/:versionId/file",
   requireAuth,
   singleFileUpload("file"),
-  async (req, res) => {
+  asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { documentId, versionId } = req.params;
@@ -924,7 +925,7 @@ documentsRouter.put(
 
     res.json(updated);
   },
-);
+));
 
 // DELETE /single-documents/:documentId/versions/:versionId
 // Delete one version. The last remaining version cannot be deleted; if the
@@ -932,7 +933,7 @@ documentsRouter.put(
 documentsRouter.delete(
   "/:documentId/versions/:versionId",
   requireAuth,
-  async (req, res) => {
+  asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { documentId, versionId } = req.params;
@@ -1034,7 +1035,7 @@ documentsRouter.delete(
       deleted_at: deletedAt,
     });
   },
-);
+));
 
 // GET /single-documents/:documentId/tracked-change-ids
 // Returns the ordered list of { kind, w_id } for every w:ins / w:del in
@@ -1044,7 +1045,7 @@ documentsRouter.delete(
 documentsRouter.get(
   "/:documentId/tracked-change-ids",
   requireAuth,
-  async (req, res) => {
+  asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { documentId } = req.params;
@@ -1076,7 +1077,7 @@ documentsRouter.get(
     const ids = await extractTrackedChangeIds(Buffer.from(raw));
     res.json({ ids });
   },
-);
+));
 
 // POST /single-documents/:documentId/edits/:editId/accept
 // POST /single-documents/:documentId/edits/:editId/reject
@@ -1281,13 +1282,13 @@ async function handleEditResolution(
 documentsRouter.post(
   "/:documentId/edits/:editId/accept",
   requireAuth,
-  (req, res) => void handleEditResolution(req, res, "accept"),
+  asyncHandler((req, res) => handleEditResolution(req, res, "accept")),
 );
 
 documentsRouter.post(
   "/:documentId/edits/:editId/reject",
   requireAuth,
-  (req, res) => void handleEditResolution(req, res, "reject"),
+  asyncHandler((req, res) => handleEditResolution(req, res, "reject")),
 );
 
 async function handleDocumentUpload(

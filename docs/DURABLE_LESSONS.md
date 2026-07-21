@@ -25,6 +25,7 @@
 - 2026-07-19 — OpenNext build: upstream bun.lock hijacks packager detection
 - 2026-07-19 — Correction: bun.lock also hijacked deploy (wrangler autoconfig) — deleted
 - 2026-07-19 — Express 4 async handlers + Node 22: one unwrapped rejection kills the server
+- 2026-07-21 — log-don't-die turns unwrapped handlers into hanging requests
 
 ## Lessons
 
@@ -162,3 +163,38 @@ means an unwrapped async handler — the `#<Object>` is usually a Supabase error
 Secondary effect worth remembering: while the backend restarts, the frontend's
 profile/status fetches fail silently and pages render their "nothing configured"
 fallback — misleading UI during the outage window.
+
+### 2026-07-21 — log-don't-die turns unwrapped handlers into hanging requests
+
+Trigger: production Supabase lost the `service_role` grant on `user_api_keys`.
+`GET /user/profile` (`backend/src/routes/user.ts`) awaited `getUserApiKeyStatus`
+with NO try/catch, so it threw — and after the #22 `unhandledRejection` guard
+(which logs and keeps the process alive), the throw no longer crashes the
+server; instead the request simply NEVER RESPONDS. The frontend gate
+(`MfaLoginGate`) blocks on `UserProfileContext`'s `loading` flag, which its
+`getUserProfile()` call clears only in a `finally` — a fetch that never resolves
+leaves `loading` true forever. Result: every pilot user saw an infinite login
+spinner. The `unhandledRejection` guard converted a crash-and-restart into a
+silent hang; "log, don't die" only degrades honestly if the handler still sends
+a response.
+
+Rule (now enforced by audit): EVERY async route handler wraps its body in
+try/catch, or is registered through a wrapper that guarantees a response —
+this fork uses `backend/src/lib/asyncHandler.ts` (self-responds with a fixed
+generic 500 `detail` + `console.error` via `safeErrorLog`; mirrors the local
+`asyncRoute` in `workflows.ts`). Complementary frontend rule: any loading gate
+that blocks the UI on a fetch MUST also handle the failure path — time-box the
+request (an `AbortController` timeout; 15s on the profile load) and render an
+error+retry state, never an unbounded spinner and never a silent "all clear"
+fallback that hides the outage.
+
+Debugging signature: an infinite spinner in the browser with NO matching 4xx/5xx
+in the network tab (the request is still pending), while Fly logs show
+`[unhandledRejection]` entries carrying a Postgres error object — and, crucially,
+NO machine restart (contrast the #22 signature, where `uncaughtException` exits
+and Fly restarts). Supabase grant loss on `service_role` surfaces as Postgres
+error `42501` ("permission denied for table …") with a GRANT hint; the fix is to
+re-`GRANT` the needed privileges to `service_role`. Note `schema.sql`'s revokes
+(≈792–823) only touch `anon`/`authenticated` (the browser-facing roles) — they
+never revoke from `service_role`, so a lost `service_role` grant is external
+drift, not something the schema did.

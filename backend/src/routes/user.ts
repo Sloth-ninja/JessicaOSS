@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { Router } from "express";
 import { requireAuth, requireMfaIfEnrolled } from "../middleware/auth";
+import { asyncHandler } from "../lib/asyncHandler";
 import { createServerSupabase } from "../lib/supabase";
 import {
     DEFAULT_TABULAR_MODEL,
@@ -461,16 +462,16 @@ async function loadProfile(
 }
 
 // POST /user/profile
-userRouter.post("/profile", requireAuth, async (_req, res) => {
+userRouter.post("/profile", requireAuth, asyncHandler(async (_req, res) => {
     const userId = res.locals.userId as string;
     const db = createServerSupabase();
     const error = await ensureProfileRow(db, userId);
     if (error) return void res.status(500).json({ detail: error.message });
     res.json({ ok: true });
-});
+}));
 
 // GET /user/profile
-userRouter.get("/profile", requireAuth, async (_req, res) => {
+userRouter.get("/profile", requireAuth, asyncHandler(async (_req, res) => {
     const userId = res.locals.userId as string;
     const db = createServerSupabase();
     const apiKeyStatus = await getUserApiKeyStatus(userId, db);
@@ -480,10 +481,10 @@ userRouter.get("/profile", requireAuth, async (_req, res) => {
     });
     if (error) return void res.status(500).json({ detail: error.message });
     res.json({ ...data, apiKeyStatus: withLocalStatus(apiKeyStatus) });
-});
+}));
 
 // PATCH /user/profile
-userRouter.patch("/profile", requireAuth, async (req, res) => {
+userRouter.patch("/profile", requireAuth, asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const parsed = validateProfilePayload(req.body);
     if (!parsed.ok) return void res.status(400).json({ detail: parsed.detail });
@@ -504,14 +505,14 @@ userRouter.patch("/profile", requireAuth, async (req, res) => {
     const { data, error } = await loadProfile(db, userId, { apiKeyStatus });
     if (error) return void res.status(500).json({ detail: error.message });
     res.json({ ...data, apiKeyStatus: withLocalStatus(apiKeyStatus) });
-});
+}));
 
 // PATCH /user/security/mfa-login
 userRouter.patch(
     "/security/mfa-login",
     requireAuth,
     requireMfaIfEnrolled,
-    async (req, res) => {
+    asyncHandler(async (req, res) => {
         const userId = res.locals.userId as string;
         const parsed = readBooleanBodyField(req.body, "enabled");
         if (!parsed.ok)
@@ -551,7 +552,7 @@ userRouter.patch(
         if (error) return void res.status(500).json({ detail: error.message });
         res.json({ ...data, apiKeyStatus: withLocalStatus(apiKeyStatus) });
     },
-);
+));
 
 // GET /user/api-keys
 userRouter.get("/api-keys", requireAuth, async (_req, res) => {

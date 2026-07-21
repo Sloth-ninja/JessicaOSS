@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth";
+import { asyncHandler } from "../lib/asyncHandler";
 import { createServerSupabase } from "../lib/supabase";
 import { createClient } from "@supabase/supabase-js";
 import {
@@ -137,7 +138,7 @@ async function attachChatCreatorLabels(
 }
 
 // GET /projects
-projectsRouter.get("/", requireAuth, async (req, res) => {
+projectsRouter.get("/", requireAuth, asyncHandler(async (req, res) => {
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const db = createServerSupabase();
@@ -149,10 +150,10 @@ projectsRouter.get("/", requireAuth, async (req, res) => {
   if (error) return void res.status(500).json({ detail: error.message });
 
   res.json(data ?? []);
-});
+}));
 
 // POST /projects
-projectsRouter.post("/", requireAuth, async (req, res) => {
+projectsRouter.post("/", requireAuth, asyncHandler(async (req, res) => {
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { name, cm_number, shared_with } = req.body as {
@@ -193,10 +194,10 @@ projectsRouter.post("/", requireAuth, async (req, res) => {
     .single();
   if (error) return void res.status(500).json({ detail: error.message });
   res.status(201).json({ ...data, documents: [] });
-});
+}));
 
 // GET /projects/:projectId
-projectsRouter.get("/:projectId", requireAuth, async (req, res) => {
+projectsRouter.get("/:projectId", requireAuth, asyncHandler(async (req, res) => {
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string;
   const { projectId } = req.params;
@@ -236,13 +237,13 @@ projectsRouter.get("/:projectId", requireAuth, async (req, res) => {
     documents: docsTyped,
     folders: folderData ?? [],
   });
-});
+}));
 
 // GET /projects/:projectId/people
 // Resolve the owner + every shared member to {email, display_name}. Used
 // by the People modal so the UI can show display names where available
 // and tag the current user as "You".
-projectsRouter.get("/:projectId/people", requireAuth, async (req, res) => {
+projectsRouter.get("/:projectId/people", requireAuth, asyncHandler(async (req, res) => {
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { projectId } = req.params;
@@ -324,10 +325,10 @@ projectsRouter.get("/:projectId/people", requireAuth, async (req, res) => {
   });
 
   res.json({ owner, members });
-});
+}));
 
 // PATCH /projects/:projectId
-projectsRouter.patch("/:projectId", requireAuth, async (req, res) => {
+projectsRouter.patch("/:projectId", requireAuth, asyncHandler(async (req, res) => {
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { projectId } = req.params;
@@ -377,7 +378,7 @@ projectsRouter.patch("/:projectId", requireAuth, async (req, res) => {
   await attachActiveVersionPaths(db, docsTyped);
   await attachDocumentOwnerLabels(db, docsTyped);
   res.json({ ...data, documents: docsTyped, folders: folderData ?? [] });
-});
+}));
 
 // DELETE /projects/:projectId
 projectsRouter.delete("/:projectId", requireAuth, async (req, res) => {
@@ -396,7 +397,7 @@ projectsRouter.delete("/:projectId", requireAuth, async (req, res) => {
 });
 
 // GET /projects/:projectId/documents
-projectsRouter.get("/:projectId/documents", requireAuth, async (req, res) => {
+projectsRouter.get("/:projectId/documents", requireAuth, asyncHandler(async (req, res) => {
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { projectId } = req.params;
@@ -417,13 +418,13 @@ projectsRouter.get("/:projectId/documents", requireAuth, async (req, res) => {
   }[];
   await attachActiveVersionPaths(db, docsTyped);
   res.json(docsTyped);
-});
+}));
 
 // POST /projects/:projectId/documents/:documentId — assign or copy existing doc into project
 projectsRouter.post(
   "/:projectId/documents/:documentId",
   requireAuth,
-  async (req, res) => {
+  asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { projectId, documentId } = req.params;
@@ -598,10 +599,10 @@ projectsRouter.post(
       }
     }
   },
-);
+));
 
 // PATCH /projects/:projectId/documents/:documentId — rename a project document
-projectsRouter.patch("/:projectId/documents/:documentId", requireAuth, async (req, res) => {
+projectsRouter.patch("/:projectId/documents/:documentId", requireAuth, asyncHandler(async (req, res) => {
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { projectId, documentId } = req.params;
@@ -659,14 +660,14 @@ projectsRouter.patch("/:projectId/documents/:documentId", requireAuth, async (re
     ...updated,
     filename,
   });
-});
+}));
 
 // POST /projects/:projectId/documents
 projectsRouter.post(
   "/:projectId/documents",
   requireAuth,
   singleFileUpload("file"),
-  async (req, res) => {
+  asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { projectId } = req.params;
@@ -678,14 +679,14 @@ projectsRouter.post(
 
     await handleDocumentUpload(req, res, userId, projectId, db);
   },
-);
+));
 
 // GET /projects/:projectId/chats — every assistant chat under this project
 // (any author with project access). Used by the project page's chat tab so
 // it doesn't have to filter the global GET /chat list — and so collaborators
 // see each other's chats inside the project even though those don't appear
 // in the global list.
-projectsRouter.get("/:projectId/chats", requireAuth, async (req, res) => {
+projectsRouter.get("/:projectId/chats", requireAuth, asyncHandler(async (req, res) => {
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { projectId } = req.params;
@@ -704,12 +705,12 @@ projectsRouter.get("/:projectId/chats", requireAuth, async (req, res) => {
   const chats = data ?? [];
   await attachChatCreatorLabels(db, chats);
   res.json(chats);
-});
+}));
 
 // ── Folder routes ─────────────────────────────────────────────────────────────
 
 // POST /projects/:projectId/folders
-projectsRouter.post("/:projectId/folders", requireAuth, async (req, res) => {
+projectsRouter.post("/:projectId/folders", requireAuth, asyncHandler(async (req, res) => {
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { projectId } = req.params;
@@ -734,10 +735,10 @@ projectsRouter.post("/:projectId/folders", requireAuth, async (req, res) => {
   }).select("*").single();
   if (error) return void res.status(500).json({ detail: error.message });
   res.status(201).json(data);
-});
+}));
 
 // PATCH /projects/:projectId/folders/:folderId
-projectsRouter.patch("/:projectId/folders/:folderId", requireAuth, async (req, res) => {
+projectsRouter.patch("/:projectId/folders/:folderId", requireAuth, asyncHandler(async (req, res) => {
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { projectId, folderId } = req.params;
@@ -772,10 +773,10 @@ projectsRouter.patch("/:projectId/folders/:folderId", requireAuth, async (req, r
     .select("*").single();
   if (error || !data) return void res.status(404).json({ detail: "Folder not found" });
   res.json(data);
-});
+}));
 
 // DELETE /projects/:projectId/folders/:folderId
-projectsRouter.delete("/:projectId/folders/:folderId", requireAuth, async (req, res) => {
+projectsRouter.delete("/:projectId/folders/:folderId", requireAuth, asyncHandler(async (req, res) => {
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { projectId, folderId } = req.params;
@@ -831,10 +832,10 @@ projectsRouter.delete("/:projectId/folders/:folderId", requireAuth, async (req, 
     .delete().eq("id", folderId).eq("project_id", projectId);
   if (error) return void res.status(500).json({ detail: error.message });
   res.status(204).send();
-});
+}));
 
 // PATCH /projects/:projectId/documents/:documentId/folder — move doc to a folder
-projectsRouter.patch("/:projectId/documents/:documentId/folder", requireAuth, async (req, res) => {
+projectsRouter.patch("/:projectId/documents/:documentId/folder", requireAuth, asyncHandler(async (req, res) => {
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { projectId, documentId } = req.params;
@@ -855,7 +856,7 @@ projectsRouter.patch("/:projectId/documents/:documentId/folder", requireAuth, as
     .select("*").single();
   if (error || !data) return void res.status(404).json({ detail: "Document not found" });
   res.json(data);
-});
+}));
 
 async function loadProjectFolder(
   db: ReturnType<typeof createServerSupabase>,

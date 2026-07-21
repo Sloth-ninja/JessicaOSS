@@ -15,7 +15,7 @@ export function MfaLoginGate({ children }: { children: ReactNode }) {
     const pathname = usePathname();
     const searchParams = useSearchParams();
     const { user } = useAuth();
-    const { profile, loading } = useUserProfile();
+    const { profile, loading, error, reloadProfile } = useUserProfile();
     const [gateState, setGateState] = useState<GateState>("idle");
     const isVerifyPage = pathname === "/verify-mfa";
 
@@ -85,6 +85,13 @@ export function MfaLoginGate({ children }: { children: ReactNode }) {
         user,
     ]);
 
+    // An authenticated user whose profile could not be loaded gets an honest
+    // error with a retry — not an endless spinner (login-spinner incident,
+    // 2026-07-21). Checked before the loading gate so the outage is visible.
+    if (user && error) {
+        return <ProfileLoadError onRetry={() => void reloadProfile()} />;
+    }
+
     if (user && loading) {
         return gateState === "verified" ? (
             <>{children}</>
@@ -124,6 +131,28 @@ function FullScreenGateLoader() {
     return (
         <div className="flex min-h-dvh items-center justify-center bg-gray-50/80">
             <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-200 border-t-gray-700" />
+        </div>
+    );
+}
+
+function ProfileLoadError({ onRetry }: { onRetry: () => void }) {
+    return (
+        <div className="flex min-h-dvh items-center justify-center bg-gray-50/80 px-6">
+            <div className="max-w-sm text-center">
+                <p className="text-sm font-medium text-gray-900">
+                    We could not load your account.
+                </p>
+                <p className="mt-1 text-sm text-gray-500">
+                    Please check your connection and try again.
+                </p>
+                <button
+                    type="button"
+                    onClick={onRetry}
+                    className="mt-4 inline-flex items-center justify-center rounded-full bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-700 active:scale-95"
+                >
+                    Retry
+                </button>
+            </div>
         </div>
     );
 }
