@@ -225,8 +225,13 @@ export interface UserProfile {
     apiKeyStatus: ApiKeyStatus;
 }
 
-export async function getUserProfile(): Promise<UserProfile> {
-    return apiRequest<UserProfile>("/user/profile");
+export async function getUserProfile(
+    signal?: AbortSignal,
+): Promise<UserProfile> {
+    return apiRequest<UserProfile>(
+        "/user/profile",
+        signal ? { signal } : undefined,
+    );
 }
 
 export async function updateUserProfile(payload: {

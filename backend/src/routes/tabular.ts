@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth";
+import { asyncHandler } from "../lib/asyncHandler";
 import { createServerSupabase } from "../lib/supabase";
 import { downloadFile } from "../lib/storage";
 import {
@@ -80,7 +81,7 @@ function missingModelApiKey(model: string, apiKeys: UserApiKeys) {
 }
 
 // GET /tabular-review
-tabularRouter.get("/", requireAuth, async (req, res) => {
+tabularRouter.get("/", requireAuth, asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const db = createServerSupabase();
@@ -98,10 +99,10 @@ tabularRouter.get("/", requireAuth, async (req, res) => {
     if (error) return void res.status(500).json({ detail: error.message });
 
     res.json(data ?? []);
-});
+}));
 
 // POST /tabular-review
-tabularRouter.post("/", requireAuth, async (req, res) => {
+tabularRouter.post("/", requireAuth, asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { title, document_ids, columns_config, workflow_id, project_id } =
@@ -160,7 +161,7 @@ tabularRouter.post("/", requireAuth, async (req, res) => {
     if (cells.length) await db.from("tabular_cells").insert(cells);
 
     res.status(201).json(review);
-});
+}));
 
 // POST /tabular-review/prompt (must come before /:reviewId routes)
 tabularRouter.post("/prompt", requireAuth, async (req, res) => {
@@ -234,7 +235,7 @@ tabularRouter.post("/prompt", requireAuth, async (req, res) => {
 });
 
 // GET /tabular-review/:reviewId
-tabularRouter.get("/:reviewId", requireAuth, async (req, res) => {
+tabularRouter.get("/:reviewId", requireAuth, asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { reviewId } = req.params;
@@ -282,13 +283,13 @@ tabularRouter.get("/:reviewId", requireAuth, async (req, res) => {
         })),
         documents: docs,
     });
-});
+}));
 
 // GET /tabular-review/:reviewId/people
 // Owner email + display_name plus member display_names — the analog of
 // /projects/:id/people. Used by the standalone TR detail page's People
 // modal so the roster can show display_names alongside emails.
-tabularRouter.get("/:reviewId/people", requireAuth, async (req, res) => {
+tabularRouter.get("/:reviewId/people", requireAuth, asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { reviewId } = req.params;
@@ -363,10 +364,10 @@ tabularRouter.get("/:reviewId/people", requireAuth, async (req, res) => {
             return { email, display_name };
         }),
     });
-});
+}));
 
 // PATCH /tabular-review/:reviewId
-tabularRouter.patch("/:reviewId", requireAuth, async (req, res) => {
+tabularRouter.patch("/:reviewId", requireAuth, asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { reviewId } = req.params;
@@ -582,10 +583,10 @@ tabularRouter.patch("/:reviewId", requireAuth, async (req, res) => {
         ...updatedReview,
         ...(persistedDocumentIds ? { document_ids: persistedDocumentIds } : {}),
     });
-});
+}));
 
 // DELETE /tabular-review/:reviewId
-tabularRouter.delete("/:reviewId", requireAuth, async (req, res) => {
+tabularRouter.delete("/:reviewId", requireAuth, asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const { reviewId } = req.params;
     const db = createServerSupabase();
@@ -596,12 +597,12 @@ tabularRouter.delete("/:reviewId", requireAuth, async (req, res) => {
         .eq("user_id", userId);
     if (error) return void res.status(500).json({ detail: error.message });
     res.status(204).send();
-});
+}));
 
 // POST /tabular-review/:reviewId/clear-cells
 // Reset cells to an empty/pending state for the given document_ids. Does not
 // delete the rows — it blanks `content` and sets `status` back to "pending".
-tabularRouter.post("/:reviewId/clear-cells", requireAuth, async (req, res) => {
+tabularRouter.post("/:reviewId/clear-cells", requireAuth, asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { reviewId } = req.params;
@@ -631,13 +632,13 @@ tabularRouter.post("/:reviewId/clear-cells", requireAuth, async (req, res) => {
         .in("document_id", document_ids);
     if (error) return void res.status(500).json({ detail: error.message });
     res.status(204).send();
-});
+}));
 
 // POST /tabular-review/:reviewId/regenerate-cell
 tabularRouter.post(
     "/:reviewId/regenerate-cell",
     requireAuth,
-    async (req, res) => {
+    asyncHandler(async (req, res) => {
         const userId = res.locals.userId as string;
         const userEmail = res.locals.userEmail as string | undefined;
         const { reviewId } = req.params;
@@ -758,10 +759,10 @@ tabularRouter.post(
 
         res.json(result);
     },
-);
+));
 
 // POST /tabular-review/:reviewId/generate
-tabularRouter.post("/:reviewId/generate", requireAuth, async (req, res) => {
+tabularRouter.post("/:reviewId/generate", requireAuth, asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { reviewId } = req.params;
@@ -965,10 +966,10 @@ tabularRouter.post("/:reviewId/generate", requireAuth, async (req, res) => {
     } finally {
         res.end();
     }
-});
+}));
 
 // GET /tabular-review/:reviewId/chats — list chats (metadata only, no messages)
-tabularRouter.get("/:reviewId/chats", requireAuth, async (req, res) => {
+tabularRouter.get("/:reviewId/chats", requireAuth, asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { reviewId } = req.params;
@@ -995,13 +996,13 @@ tabularRouter.get("/:reviewId/chats", requireAuth, async (req, res) => {
         .order("updated_at", { ascending: false });
 
     res.json(chats ?? []);
-});
+}));
 
 // DELETE /tabular-review/:reviewId/chats/:chatId — delete a single chat
 tabularRouter.delete(
     "/:reviewId/chats/:chatId",
     requireAuth,
-    async (req, res) => {
+    asyncHandler(async (req, res) => {
         const userId = res.locals.userId as string;
         const { chatId } = req.params;
         const db = createServerSupabase();
@@ -1015,13 +1016,13 @@ tabularRouter.delete(
         if (error) return void res.status(500).json({ detail: error.message });
         res.status(204).send();
     },
-);
+));
 
 // GET /tabular-review/:reviewId/chats/:chatId/messages — messages for a single chat
 tabularRouter.get(
     "/:reviewId/chats/:chatId/messages",
     requireAuth,
-    async (req, res) => {
+    asyncHandler(async (req, res) => {
         const userId = res.locals.userId as string;
         const userEmail = res.locals.userEmail as string | undefined;
         const { reviewId, chatId } = req.params;
@@ -1054,7 +1055,7 @@ tabularRouter.get(
 
         res.json(messages ?? []);
     },
-);
+));
 
 // ---------------------------------------------------------------------------
 // Tabular citation parsing
@@ -1156,7 +1157,7 @@ Rules:
 // ---------------------------------------------------------------------------
 
 // POST /tabular-review/:reviewId/chat
-tabularRouter.post("/:reviewId/chat", requireAuth, async (req, res) => {
+tabularRouter.post("/:reviewId/chat", requireAuth, asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { reviewId } = req.params;
@@ -1448,7 +1449,7 @@ tabularRouter.post("/:reviewId/chat", requireAuth, async (req, res) => {
         streamFinished = true;
         res.end();
     }
-});
+}));
 
 function parseCellContent(
     raw: unknown,

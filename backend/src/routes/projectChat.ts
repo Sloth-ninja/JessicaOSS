@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth";
+import { asyncHandler } from "../lib/asyncHandler";
 import { createServerSupabase } from "../lib/supabase";
 import {
     buildProjectDocContext,
@@ -32,7 +33,7 @@ When the user wants to use an existing project document as a starting point for 
 export const projectChatRouter = Router({ mergeParams: true });
 
 // POST /projects/:projectId/chat — streaming
-projectChatRouter.post("/", requireAuth, async (req, res) => {
+projectChatRouter.post("/", requireAuth, asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { projectId } = req.params;
@@ -275,4 +276,4 @@ projectChatRouter.post("/", requireAuth, async (req, res) => {
         streamFinished = true;
         res.end();
     }
-});
+}));

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth";
+import { asyncHandler } from "../lib/asyncHandler";
 import { createServerSupabase } from "../lib/supabase";
 import {
     buildDocContext,
@@ -153,7 +154,7 @@ async function getAccessibleChat(
 // own projects in the global recent-chats list). Chats in projects that
 // are merely *shared with* the user are NOT included here — those are
 // listed per-project via GET /projects/:projectId/chats.
-chatRouter.get("/", requireAuth, async (req, res) => {
+chatRouter.get("/", requireAuth, asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const db = createServerSupabase();
     const requestedLimit = Number.parseInt(String(req.query.limit ?? ""), 10);
@@ -167,10 +168,10 @@ chatRouter.get("/", requireAuth, async (req, res) => {
     });
     if (error) return void res.status(500).json({ detail: error.message });
     res.json(data ?? []);
-});
+}));
 
 // POST /chat/create
-chatRouter.post("/create", requireAuth, async (req, res) => {
+chatRouter.post("/create", requireAuth, asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const parsedProjectId = parseOptionalProjectId(req.body?.project_id);
@@ -198,10 +199,10 @@ chatRouter.post("/create", requireAuth, async (req, res) => {
 
     if (error) return void res.status(500).json({ detail: error.message });
     res.json({ id: data.id });
-});
+}));
 
 // GET /chat/:chatId
-chatRouter.get("/:chatId", requireAuth, async (req, res) => {
+chatRouter.get("/:chatId", requireAuth, asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { chatId } = req.params;
@@ -219,7 +220,7 @@ chatRouter.get("/:chatId", requireAuth, async (req, res) => {
 
     const hydrated = await hydrateEditStatuses(messages ?? [], db);
     res.json({ chat, messages: hydrated });
-});
+}));
 
 // Stored doc_edited events capture the `status` at the time the assistant
 // produced the edit (always "pending"). If the user later accepts or rejects,
@@ -340,7 +341,7 @@ async function hydrateEditStatuses(
 }
 
 // PATCH /chat/:chatId
-chatRouter.patch("/:chatId", requireAuth, async (req, res) => {
+chatRouter.patch("/:chatId", requireAuth, asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const { chatId } = req.params;
     const title = (req.body.title ?? "").trim();
@@ -359,10 +360,10 @@ chatRouter.patch("/:chatId", requireAuth, async (req, res) => {
     if (error || !data)
         return void res.status(404).json({ detail: "Chat not found" });
     res.json(data);
-});
+}));
 
 // DELETE /chat/:chatId
-chatRouter.delete("/:chatId", requireAuth, async (req, res) => {
+chatRouter.delete("/:chatId", requireAuth, asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const { chatId } = req.params;
     const db = createServerSupabase();
@@ -374,10 +375,10 @@ chatRouter.delete("/:chatId", requireAuth, async (req, res) => {
 
     if (error) return void res.status(500).json({ detail: error.message });
     res.status(204).send();
-});
+}));
 
 // POST /chat/:chatId/generate-title
-chatRouter.post("/:chatId/generate-title", requireAuth, async (req, res) => {
+chatRouter.post("/:chatId/generate-title", requireAuth, asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { chatId } = req.params;
@@ -414,10 +415,10 @@ chatRouter.post("/:chatId/generate-title", requireAuth, async (req, res) => {
         console.error("[generate-title]", safeErrorLog(err));
         res.status(500).json({ detail: "Failed to generate title" });
     }
-});
+}));
 
 // POST /chat — streaming
-chatRouter.post("/", requireAuth, async (req, res) => {
+chatRouter.post("/", requireAuth, asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const body =
         req.body && typeof req.body === "object" && !Array.isArray(req.body)
@@ -675,4 +676,4 @@ chatRouter.post("/", requireAuth, async (req, res) => {
         streamFinished = true;
         res.end();
     }
-});
+}));

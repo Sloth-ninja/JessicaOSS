@@ -7,6 +7,76 @@
 
 ---
 
+## 2026-07-21 — Harden async handlers + profile-load error state (branch `harden-async-handlers`)
+
+**Incident (21/07/2026):** production Supabase lost the `service_role` grant on
+`user_api_keys`. `GET /user/profile` (`backend/src/routes/user.ts`) awaited
+`getUserApiKeyStatus` with no try/catch, so it threw; after the #22
+`unhandledRejection` guard the process no longer crashes — instead the request
+never responds. The frontend gate (`MfaLoginGate`) blocks on
+`UserProfileContext`'s `loading`, which only clears in a `finally`, so a hanging
+fetch left every pilot user on an infinite login spinner. The DB grant is being
+re-granted separately by the owner; this PR is the code-level defence so this
+class of failure degrades honestly. See `docs/DURABLE_LESSONS.md` (2026-07-21).
+
+**Scope:** defensive hardening only — no behaviour change on the success path.
+
+**Backend — audit + wrap.** Audited every async route handler across
+`backend/src/routes/*.ts` for a missing whole-body try/catch (the DURABLE_LESSONS
+#22 rule). 56 unwrapped/partially-wrapped handlers found — well over the ~15
+threshold at which CLAUDE.md permits a wrapper util over per-handler try/catch,
+so added a tiny self-contained `backend/src/lib/asyncHandler.ts` (mirrors the
+existing local `asyncRoute` idiom in `workflows.ts`, but self-responds with a
+FIXED generic 500 `detail` + `console.error` via `safeErrorLog` rather than
+forwarding to `next`, since there is no global error middleware) and applied it
+surgically at each offending registration. Handlers already carrying a
+whole-body try/catch were left untouched (minimal-diff, hard rule 8):
+`workflows.ts` (all, already `asyncRoute`-wrapped), the WS7 routes
+(`companies.ts`, `citations.ts`, `legislation.ts`, all fully wrapped), the
+`user.ts` API-key/MCP/export/delete handlers, `projects.ts` `DELETE /:projectId`,
+and `tabular.ts` `POST /prompt`. Wrapped, by file: `downloads.ts` 1;
+`user.ts` 4 (`POST`/`GET`/`PATCH /profile`, `PATCH /security/mfa-login`);
+`chat.ts` 7; `projectChat.ts` 1; `projects.ts` 14; `tabular.ts` 13;
+`documents.ts` 16 (incl. the two `void handleEditResolution` accept/reject
+routes, changed from `void`-discarding the promise to
+`asyncHandler((req,res) => handleEditResolution(...))`). Streaming handlers keep
+their own try/catch/finally; the wrapper's `res.headersSent` guard means it only
+responds for a throw during pre-stream setup and never double-writes a live SSE
+stream.
+
+**Frontend — no more infinite spinner.** `getUserProfile()` now accepts an
+optional `AbortSignal`. `UserProfileContext.loadProfile` time-boxes the request
+with a 15s `AbortController` timeout and, on rejection/timeout, sets a new
+`error` flag and clears `profile` (replacing the previous silent "unlimited
+credits" fallback that hid the outage). `MfaLoginGate` renders a minimal centred
+error state ("We could not load your account." + a Retry button that re-runs
+`reloadProfile`) in the app's house style, checked before the loading gate.
+
+**Verification:**
+- Backend `npx tsc --noEmit` clean; `npx vitest run` → 13 files, 150 tests pass
+  (added `src/routes/user.test.ts`: mocks `getUserApiKeyStatus` to reject →
+  asserts `GET /user/profile` returns 500 with the fixed
+  `"Something went wrong. Please try again."` detail and never leaks the raw
+  `42501`/"permission denied" text).
+- Frontend `npx tsc --noEmit` clean; `npm run lint` 112 problems
+  (34 errors/78 warnings) — identical to the `origin/main` baseline, zero issues
+  in changed files (the two `MfaLoginGate.tsx` set-state-in-effect errors are on
+  the untouched pre-existing MFA effects; `git diff origin/main` confirms no
+  added line calls `setGateState`).
+- `npm run evals:smoke` from the main checkout → 4 passed, 0 failed, 0 skipped.
+- Backend `prettier --check` NOT run as `--write` on the route files: the repo
+  has no prettier config and these upstream files were already non-clean before
+  this change (DURABLE_LESSONS 2026-07-07); edits preserve the existing style.
+  New `asyncHandler.ts` is prettier-clean.
+
+**Decisions:** wrapper util chosen over 56 hand-written try/catch blocks per the
+CLAUDE.md >15 carve-out (smaller, uniform, cannot be forgotten on a pre-`try`
+await). Frontend fallback profile deliberately removed in favour of an honest
+error+retry — a legal tool must not silently render an "all clear" account state
+during a backend outage.
+
+---
+
 ## 2026-07-20 — WS7 close-out: status refresh (branch `ws7-closeout-status`)
 
 **Scope:** docs-only. CLAUDE.md `## Current status` updated to WS7 COMPLETE with

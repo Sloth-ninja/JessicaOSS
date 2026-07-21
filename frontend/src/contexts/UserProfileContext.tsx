@@ -35,9 +35,17 @@ interface UserProfile {
     localModels: string[];
 }
 
+// Cap how long the initial profile load may block the app. Without this, a
+// backend that accepts the request but never responds (e.g. an unwrapped
+// handler hanging on a lost DB grant — login-spinner incident, 2026-07-21)
+// leaves `loading` true forever and the gate shows an infinite spinner.
+const PROFILE_LOAD_TIMEOUT_MS = 15_000;
+
 interface UserProfileContextType {
     profile: UserProfile | null;
     loading: boolean;
+    /** True when the profile load failed or timed out; drives the retry gate. */
+    error: boolean;
     updateDisplayName: (name: string) => Promise<boolean>;
     updateOrganisation: (organisation: string) => Promise<boolean>;
     updateModelPreference: (
@@ -99,32 +107,29 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     const { user, isAuthenticated } = useAuth();
     const [profile, setProfile] = useState<UserProfile | null>(null);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(false);
     const userId = user?.id ?? null;
 
     const loadProfile = useCallback(async () => {
+        setLoading(true);
+        setError(false);
+        // Time-box the request so a hanging backend can't spin forever.
+        const controller = new AbortController();
+        const timeout = setTimeout(
+            () => controller.abort(),
+            PROFILE_LOAD_TIMEOUT_MS,
+        );
         try {
-            const profileData = await getUserProfile();
+            const profileData = await getUserProfile(controller.signal);
             setProfile(toProfile(profileData));
         } catch {
-            // Calculate a default future reset date for fallback
-            const futureResetDate = new Date();
-            futureResetDate.setDate(futureResetDate.getDate() + 30);
-
-            // Set fallback profile data on exception
-            setProfile({
-                displayName: null,
-                organisation: null,
-                messageCreditsUsed: 0,
-                creditsResetDate: futureResetDate.toISOString(),
-                creditsRemaining: 999999, // temporarily unlimited
-                tier: "Free",
-                titleModel: "gemini-3.1-flash-lite-preview",
-                tabularModel: "gemini-3-flash-preview",
-                mfaOnLogin: false,
-                apiKeys: emptyApiKeys(),
-                localModels: [],
-            });
+            // A rejected or timed-out profile load must surface an honest error
+            // state with a retry — never an infinite spinner, and never a
+            // misleading "all clear" fallback profile that hides the outage.
+            setProfile(null);
+            setError(true);
         } finally {
+            clearTimeout(timeout);
             setLoading(false);
         }
     }, []);
@@ -271,6 +276,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
             value={{
                 profile,
                 loading,
+                error,
                 updateDisplayName,
                 updateOrganisation,
                 updateModelPreference,
