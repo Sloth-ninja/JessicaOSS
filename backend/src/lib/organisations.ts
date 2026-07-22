@@ -237,16 +237,24 @@ export async function listOrganisationMembers(
 
     const rows = (data ?? []) as MemberProfileRow[];
 
-    // Resolve emails in one admin call. Paginated at pilot scale (perPage large
-    // enough for a single firm); a miss degrades to a null email, never a throw.
+    // Resolve emails from the auth admin API. listUsers' `perPage` is a
+    // PROJECT-wide cap (all users in the Supabase project), not per-firm, so we
+    // paginate until a short page drains the list — guarded by MAX_PAGES so a
+    // pathological project can never loop unbounded. A lookup failure degrades
+    // to null emails, never a throw.
     const emailByUserId = new Map<string, string | null>();
     try {
-        const { data: authData, error: authError } =
-            await db.auth.admin.listUsers({ page: 1, perPage: 1000 });
-        if (!authError) {
-            for (const user of authData?.users ?? []) {
+        const PER_PAGE = 200;
+        const MAX_PAGES = 20;
+        for (let page = 1; page <= MAX_PAGES; page++) {
+            const { data: authData, error: authError } =
+                await db.auth.admin.listUsers({ page, perPage: PER_PAGE });
+            if (authError) break;
+            const users = authData?.users ?? [];
+            for (const user of users) {
                 if (user?.id) emailByUserId.set(user.id, user.email ?? null);
             }
+            if (users.length < PER_PAGE) break; // last (short) page — drained.
         }
     } catch (err) {
         console.error("[organisations] member email lookup failed", {
@@ -303,16 +311,21 @@ export async function setMemberRole(
     if (!target) return { ok: false, reason: "not_found" };
 
     // Last-admin guard: never demote the only remaining admin of the firm.
+    // Roles are normalised the same way everywhere (normaliseRole) so the count
+    // can't under/over-count on any non-normalised data.
     if (role === "member" && normaliseRole(target.role) === "admin") {
         const { data: adminData, error: adminError } = await db
             .from("user_profiles")
-            .select("user_id")
-            .eq("organisation_id", organisationId)
-            .eq("role", "admin");
+            .select("user_id, role")
+            .eq("organisation_id", organisationId);
         if (adminError) throw adminError;
-        const otherAdmins = (adminData ?? []).filter(
-            (r) => (r as { user_id: string }).user_id !== targetUserId,
-        );
+        const otherAdmins = (adminData ?? []).filter((r) => {
+            const member = r as { user_id: string; role: string | null };
+            return (
+                member.user_id !== targetUserId &&
+                normaliseRole(member.role) === "admin"
+            );
+        });
         if (otherAdmins.length === 0) {
             return { ok: false, reason: "last_admin" };
         }
@@ -330,12 +343,30 @@ export async function setMemberRole(
     if (updated.length === 0) return { ok: false, reason: "not_found" };
 
     const row = updated[0];
+
+    // Populate the member's email so the success payload matches the
+    // OrganisationMember shape returned by listOrganisationMembers. A lookup
+    // failure degrades to null rather than failing the (already-committed) role
+    // change. (Smaller diff than threading email through the update select.)
+    let email: string | null = null;
+    try {
+        const { data: authUser } = await db.auth.admin.getUserById(
+            row.user_id,
+        );
+        email = authUser?.user?.email ?? null;
+    } catch (err) {
+        console.error("[organisations] member email lookup failed", {
+            organisationId,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+
     return {
         ok: true,
         member: {
             userId: row.user_id,
             displayName: row.display_name,
-            email: null,
+            email,
             role: normaliseRole(row.role),
             createdAt: row.created_at,
         },

@@ -36,6 +36,11 @@ table already exists from PR A. Orgless self-hosters are unchanged everywhere.
   immediately before a demotion and refuses (`last_admin`) when none remain. No
   RPC (no migration authorised); the residual check-then-write window is
   acceptable at pilot scale and noted for a future DB-function upgrade.
+  **Recovery** if two concurrent demotions ever raced a firm to zero admins: an
+  operator re-promotes a member directly on production Supabase with the
+  service_role (SQL editor), scoped to the firm —
+  `update public.user_profiles set role = 'admin', updated_at = now() where user_id = '<USER_ID>' and organisation_id = '<ORG_ID>';`
+  — then the firm has an admin again and can self-manage.
 - New `src/routes/admin.ts`, mounted at `/admin` in `index.ts`, all behind
   `requireAuth` + `requireAdmin` (router-level), every handler `asyncHandler`-
   wrapped with fixed generic details: `GET /admin/firm-keys`,
@@ -58,15 +63,28 @@ table already exists from PR A. Orgless self-hosters are unchanged everywhere.
 - `mikeApi.ts`: `ApiKeySource` gains `"firm"`; new `getFirmApiKeyStatus`,
   `saveFirmApiKey`, `getFirmMembers`, `updateFirmMemberRole` + types.
 
-**Tests.** Backend vitest **199 passing** (was 175): rewrote `userApiKeys.test.ts`
-to a table-aware mock covering the full user/firm/env/orgless precedence matrix;
-new `organisationApiKeys.test.ts` (encrypt→decrypt round-trip, status booleans,
+**Tests.** Backend vitest **201 passing** (was 175): rewrote `userApiKeys.test.ts`
+to a table-aware mock covering the full user/firm/env/orgless precedence matrix
+plus firm-layer read-failure degradation (skip firm, keep user/env); new
+`organisationApiKeys.test.ts` (encrypt→decrypt round-trip, status booleans,
 delete-on-empty, org scoping), `organisationMembers.test.ts` (`getUserOrganisationId`,
 member list + emails, `setMemberRole` promote/demote/last-admin/cross-firm-scoping),
 and `routes/admin.test.ts` (non-admin 403 on every route, firm-key save, member
 list, role 200/400/404/409).
 
-**Verification.** Backend `tsc --noEmit` clean; `vitest run` 199/199. Frontend
+**Review fixes (approve-with-fixes, 22/07/2026).** Firm-key resolution in
+`userApiKeys.ts` now wraps the whole firm layer in try/catch — any
+`organisation_api_keys` read error is logged with a scoped tag and the firm layer
+skipped (env fallback intact), so a transient error can never break chat key
+resolution or profile status for a whole firm. `listOrganisationMembers` now
+paginates `auth.admin.listUsers` until drained (guarded at 20 pages) — the
+per-call `perPage` is a project-wide cap, not per-firm. The last-admin count now
+filters via `normaliseRole` so it can't miscount non-normalised data.
+`setMemberRole` populates the member's email in its success payload (degrading to
+null on lookup failure). Firm-keys section gained a loading skeleton so "Not set"
+never flashes before status loads.
+
+**Verification.** Backend `tsc --noEmit` clean; `vitest run` 201/201. Frontend
 `tsc --noEmit` clean; `eslint src` 34 errors / 77 warnings — **identical to the
 main baseline** (all pre-existing; the two changed pages/components add zero).
 `evals:smoke` from the main checkout: 4/4 pass. No new env vars, no dependency

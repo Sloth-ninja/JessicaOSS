@@ -114,18 +114,28 @@ export async function getUserApiKeyStatus(
 
     // Firm layer: a firm-shared key overrides the env fallback (source "firm").
     // Orgless users (and unmigrated databases) have no firm layer — unchanged.
-    const organisationId = await getUserOrganisationId(db, userId);
-    if (organisationId) {
-        const firmStatus = await getOrganisationApiKeyStatus(
-            organisationId,
-            db,
-        );
-        for (const provider of PROVIDERS) {
-            if (firmStatus[provider]) {
-                status[provider] = true;
-                status.sources[provider] = "firm";
+    // Degrade honestly: any failure resolving the firm's keys must never break
+    // a whole firm's key status — log with a scoped tag and skip the firm layer
+    // (env fallback still applies), per the DURABLE_LESSONS discipline.
+    try {
+        const organisationId = await getUserOrganisationId(db, userId);
+        if (organisationId) {
+            const firmStatus = await getOrganisationApiKeyStatus(
+                organisationId,
+                db,
+            );
+            for (const provider of PROVIDERS) {
+                if (firmStatus[provider]) {
+                    status[provider] = true;
+                    status.sources[provider] = "firm";
+                }
             }
         }
+    } catch (err) {
+        console.error(
+            "[user-api-keys] firm key status read failed; skipping firm layer",
+            { userId, error: err instanceof Error ? err.message : String(err) },
+        );
     }
 
     const { data, error } = await db
@@ -163,13 +173,24 @@ export async function getUserApiKeys(
 
     // Firm layer: a firm-shared key overrides the env fallback but never a
     // personal key. Orgless users / unmigrated databases keep env-only.
-    const organisationId = await getUserOrganisationId(db, userId);
-    if (organisationId) {
-        const firmKeys = await getOrganisationApiKeys(organisationId, db);
-        for (const provider of PROVIDERS) {
-            const firmKey = firmKeys[provider];
-            if (firmKey?.trim()) apiKeys[provider] = firmKey;
+    // Degrade honestly: any failure resolving the firm's keys must never break
+    // chat key resolution for a whole firm — log with a scoped tag and skip the
+    // firm layer (env fallback still applies), per the DURABLE_LESSONS
+    // discipline. A personal key still overrides everything below.
+    try {
+        const organisationId = await getUserOrganisationId(db, userId);
+        if (organisationId) {
+            const firmKeys = await getOrganisationApiKeys(organisationId, db);
+            for (const provider of PROVIDERS) {
+                const firmKey = firmKeys[provider];
+                if (firmKey?.trim()) apiKeys[provider] = firmKey;
+            }
         }
+    } catch (err) {
+        console.error(
+            "[user-api-keys] firm key read failed; skipping firm layer",
+            { userId, error: err instanceof Error ? err.message : String(err) },
+        );
     }
 
     const { data, error } = await db

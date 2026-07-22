@@ -40,6 +40,7 @@ function makeDb(opts: {
   userKeys?: Row[];
   orgKeys?: OrgRow[];
   orgId?: string | null;
+  orgKeysError?: boolean;
 }) {
   const userKeys = opts.userKeys ?? [];
   const orgKeys = opts.orgKeys ?? [];
@@ -71,6 +72,15 @@ function makeDb(opts: {
           select() {
             return {
               eq(_col: string, organisationId: string) {
+                if (opts.orgKeysError) {
+                  return Promise.resolve({
+                    data: null,
+                    error: {
+                      code: "XX000",
+                      message: "organisation_api_keys read failed",
+                    },
+                  });
+                }
                 return Promise.resolve({
                   data: orgKeys.filter(
                     (r) => r.organisation_id === organisationId,
@@ -235,6 +245,18 @@ describe("userApiKeys precedence (user > firm > env)", () => {
       const keys = await getUserApiKeys(USER, db);
       expect(keys.gemini).toBeNull();
     });
+
+    it("degrades to user/env keys when the firm-keys read fails", async () => {
+      // A transient organisation_api_keys read error must never break chat key
+      // resolution for a whole firm — the firm layer is skipped, env still wins.
+      vi.stubEnv("COMPANIES_HOUSE_API_KEY", "env-ch");
+      const db = makeDb({ orgId: ORG, orgKeysError: true });
+      await saveUserApiKey(USER, "claude", "user-claude", db);
+
+      const keys = await getUserApiKeys(USER, db);
+      expect(keys.companies_house).toBe("env-ch"); // env fallback intact
+      expect(keys.claude).toBe("user-claude"); // personal key intact
+    });
   });
 
   describe("getUserApiKeyStatus — sources reflect the winning layer", () => {
@@ -282,6 +304,16 @@ describe("userApiKeys precedence (user > firm > env)", () => {
       const status = await getUserApiKeyStatus(USER, makeDb({ orgId: ORG }));
       expect(status.companies_house).toBe(false);
       expect(status.sources.companies_house).toBeNull();
+    });
+
+    it("degrades to source 'env' when the firm-keys read fails", async () => {
+      vi.stubEnv("COMPANIES_HOUSE_API_KEY", "env-ch");
+      const status = await getUserApiKeyStatus(
+        USER,
+        makeDb({ orgId: ORG, orgKeysError: true }),
+      );
+      expect(status.companies_house).toBe(true);
+      expect(status.sources.companies_house).toBe("env");
     });
 
     it("source is 'firm' with a firm key, 'env' without it (env fallback present)", async () => {

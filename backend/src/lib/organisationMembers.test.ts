@@ -89,6 +89,10 @@ function makeDb(
       admin: {
         listUsers: () =>
           Promise.resolve({ data: { users: authUsers }, error: null }),
+        getUserById: (id: string) => {
+          const user = authUsers.find((u) => u.id === id) ?? null;
+          return Promise.resolve({ data: { user }, error: null });
+        },
       },
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -155,17 +159,24 @@ describe("listOrganisationMembers", () => {
 });
 
 describe("setMemberRole", () => {
-  it("promotes a member to admin", async () => {
+  it("promotes a member to admin and returns the member with email", async () => {
     const profiles = [
       profile({ user_id: "admin1", role: "admin" }),
       profile({ user_id: "u2", role: "member" }),
     ];
-    const result = await setMemberRole(makeDb(profiles), {
-      organisationId: ORG,
-      targetUserId: "u2",
-      role: "admin",
-    });
+    const result = await setMemberRole(
+      makeDb(profiles, [{ id: "u2", email: "u2@firm.example" }]),
+      {
+        organisationId: ORG,
+        targetUserId: "u2",
+        role: "admin",
+      },
+    );
     expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.member.role).toBe("admin");
+      expect(result.member.email).toBe("u2@firm.example");
+    }
     expect(profiles.find((p) => p.user_id === "u2")?.role).toBe("admin");
   });
 

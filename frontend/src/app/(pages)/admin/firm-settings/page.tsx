@@ -388,18 +388,31 @@ function FirmApiKeysSection() {
                 {error && (
                     <p className="px-5 py-3 text-xs text-red-600">{error}</p>
                 )}
-                <div className="divide-y divide-gray-100">
-                    {FIRM_API_KEY_FIELDS.map((field) => (
-                        <FirmApiKeyRow
-                            key={field.provider}
-                            label={field.label}
-                            placeholder={field.placeholder}
-                            configured={!!status?.[field.provider]}
-                            run={mfa.run}
-                            onSave={(value) => save(field.provider, value)}
-                        />
-                    ))}
-                </div>
+                {status === null ? (
+                    // Skeleton while status loads, so a real "Not set" badge
+                    // never flashes before the firm's keys are known.
+                    <div className="space-y-4 px-5 py-4">
+                        {FIRM_API_KEY_FIELDS.map((field) => (
+                            <div key={field.provider} className="space-y-2">
+                                <div className="h-4 w-48 animate-pulse rounded bg-gray-100" />
+                                <div className="h-9 w-full animate-pulse rounded bg-gray-100" />
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    <div className="divide-y divide-gray-100">
+                        {FIRM_API_KEY_FIELDS.map((field) => (
+                            <FirmApiKeyRow
+                                key={field.provider}
+                                label={field.label}
+                                placeholder={field.placeholder}
+                                configured={!!status[field.provider]}
+                                run={mfa.run}
+                                onSave={(value) => save(field.provider, value)}
+                            />
+                        ))}
+                    </div>
+                )}
             </SectionCard>
             {mfa.popup}
         </>
