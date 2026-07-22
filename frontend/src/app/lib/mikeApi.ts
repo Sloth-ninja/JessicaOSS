@@ -212,9 +212,31 @@ export async function exportTabularReviewsData(): Promise<{
     return apiBlobRequest("/user/tabular-reviews/export");
 }
 
+export type OrganisationRole = "admin" | "member";
+
+export interface OrganisationPolicies {
+    memberApiKeys: boolean;
+    memberMcpConnectors: boolean;
+}
+
+/**
+ * The user's structured organisation (firm) membership. `null` for orgless
+ * self-hosters and unmigrated databases. Distinct from the free-text
+ * `organisation` field (the user's self-entered firm name). WS8; no gating
+ * behaviour consumes these flags yet.
+ */
+export interface OrganisationMembership {
+    id: string;
+    name: string;
+    role: OrganisationRole;
+    policies: OrganisationPolicies;
+}
+
 export interface UserProfile {
     displayName: string | null;
     organisation: string | null;
+    firm: OrganisationMembership | null;
+    isAdmin: boolean;
     messageCreditsUsed: number;
     creditsResetDate: string;
     creditsRemaining: number;

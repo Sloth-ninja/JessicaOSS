@@ -18,6 +18,10 @@ import {
 } from "../lib/userApiKeys";
 import { getLocalLlmStatus } from "../lib/llm/localConfig";
 import {
+    type OrganisationMembership,
+    resolveUserOrganisation,
+} from "../lib/organisations";
+import {
     completeUserMcpConnectorOAuth,
     createUserMcpConnector,
     deleteUserMcpConnector,
@@ -252,7 +256,12 @@ async function selectProfile(
     return legacy;
 }
 
-function serializeProfile(row: UserProfileRow, apiKeyStatus?: ApiKeyStatus) {
+// Exported for unit testing of the payload shape (admin / member / orgless).
+export function serializeProfile(
+    row: UserProfileRow,
+    apiKeyStatus?: ApiKeyStatus,
+    membership: OrganisationMembership | null = null,
+) {
     const creditsUsed = row.message_credits_used ?? 0;
     const titleFallback = apiKeyStatus?.gemini
         ? DEFAULT_TITLE_MODEL
@@ -263,7 +272,14 @@ function serializeProfile(row: UserProfileRow, apiKeyStatus?: ApiKeyStatus) {
             : DEFAULT_TITLE_MODEL;
     return {
         displayName: row.display_name,
+        // `organisation` (free-text) is the user's self-entered firm name,
+        // unchanged. `firm` is the structured organisation membership (WS8):
+        // it carries the firm id/name, the user's role, and firm policy flags,
+        // and is null for orgless users / unmigrated databases. A distinct key
+        // avoids colliding with the existing free-text field.
         organisation: row.organisation,
+        firm: membership,
+        isAdmin: membership?.role === "admin",
         messageCreditsUsed: creditsUsed,
         creditsResetDate: row.credits_reset_date,
         creditsRemaining: Math.max(MONTHLY_CREDIT_LIMIT - creditsUsed, 0),
@@ -458,7 +474,25 @@ async function loadProfile(
         row = resetData as UserProfileRow;
     }
 
-    return { data: serializeProfile(row, options.apiKeyStatus), error: null };
+    // Organisation membership is supplementary: resolve it here (single join
+    // query, 42703-tolerant, default-org assignment on first load) but never let
+    // an org-subsystem hiccup break the core profile load — degrade to orgless
+    // and log, so pilot users are never blocked (login-spinner incident,
+    // docs/DURABLE_LESSONS.md).
+    let membership: OrganisationMembership | null = null;
+    try {
+        membership = await resolveUserOrganisation(db, userId);
+    } catch (err) {
+        console.error("[user/profile] organisation resolve failed", {
+            userId,
+            error: errorMessage(err),
+        });
+    }
+
+    return {
+        data: serializeProfile(row, options.apiKeyStatus, membership),
+        error: null,
+    };
 }
 
 // POST /user/profile
