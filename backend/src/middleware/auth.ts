@@ -1,7 +1,11 @@
 import { Request, Response, NextFunction } from "express";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { createServerSupabase } from "../lib/supabase";
-import { isAdmin } from "../lib/organisations";
+import {
+  isAdmin,
+  resolveUserOrganisation,
+  type OrganisationPolicies,
+} from "../lib/organisations";
 import { safeErrorLog } from "../lib/safeError";
 
 const isDev = process.env.NODE_ENV !== "production";
@@ -239,4 +243,56 @@ export async function requireMfaIfEnrolled(
   }
 
   next();
+}
+
+/**
+ * Gate a member-configurable WRITE route on a firm policy (WS8 PR B). Runs AFTER
+ * requireAuth (which populates res.locals.userId). Behaviour:
+ *
+ *   - Orgless callers and firms whose policy is ON  → next() (unchanged).
+ *   - Firms whose policy is OFF                      → fixed 403 `detail`.
+ *   - Admins are NOT exempt: an admin's personal-key / personal-connector writes
+ *     follow the same member policy (admins manage these on the firm surface).
+ *
+ * Resilience: the org lookup is reused (resolveUserOrganisation) and, on ANY
+ * lookup error, this middleware FAILS OPEN — it logs and calls next() as though
+ * the policy were ON. This is deliberate: transiently blocking a member's own
+ * writes on a DB hiccup is worse for availability than a brief policy gap, and
+ * the whole body is wrapped so a rejection can never escape as an unhandled
+ * rejection or leave the request hanging (docs/DURABLE_LESSONS.md). The fixed
+ * `detail` string keeps raw provider/DB text away from the client (#22 contract).
+ */
+export function requireMemberPolicy(
+  policy: keyof OrganisationPolicies,
+  detail: string,
+) {
+  return async function requireMemberPolicyMiddleware(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    const userId =
+      typeof res.locals.userId === "string" ? res.locals.userId : "";
+    try {
+      const db = createServerSupabase();
+      const membership = await resolveUserOrganisation(db, userId);
+      // Orgless callers and policy-ON firms: unchanged.
+      if (!membership || membership.policies[policy]) {
+        next();
+        return;
+      }
+      res.status(403).json({ detail });
+    } catch (err) {
+      // Deliberate fail-open (see doc comment): availability beats a brief
+      // policy gap on a transient lookup failure.
+      console.error("[auth/policy] member policy check failed (fail-open)", {
+        method: req.method,
+        path: req.originalUrl,
+        userId,
+        policy,
+        error: safeErrorLog(err),
+      });
+      next();
+    }
+  };
 }

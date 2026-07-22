@@ -25,6 +25,12 @@ vi.mock("../middleware/auth", () => ({
   },
   requireMfaIfEnrolled: (_req: unknown, _res: unknown, next: () => void) =>
     next(),
+  // Firm-policy gate is a factory returning a middleware; pass-through here so
+  // these route tests exercise handler behaviour (enforcement is covered in
+  // middleware/auth.policy.test.ts).
+  requireMemberPolicy:
+    () => (_req: unknown, _res: unknown, next: () => void) =>
+      next(),
 }));
 
 // getUserApiKeyStatus is the call that threw in production when the

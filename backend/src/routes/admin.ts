@@ -10,6 +10,8 @@ import {
     getUserOrganisationId,
     listOrganisationMembers,
     setMemberRole,
+    updateOrganisationPolicies,
+    type OrganisationPolicies,
 } from "../lib/organisations";
 import {
     getOrganisationApiKeyStatus,
@@ -126,5 +128,67 @@ adminRouter.patch(
                 .json({ detail: "That member is not part of your firm." });
         }
         res.json({ member: result.member });
+    }),
+);
+
+// Parse a PATCH /admin/policies body: {memberApiKeys?, memberMcpConnectors?}.
+// Only these two boolean fields are accepted; at least one must be present.
+function parsePolicyPatch(body: unknown):
+    | { ok: true; patch: Partial<OrganisationPolicies> }
+    | { ok: false; detail: string } {
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return { ok: false, detail: "Expected a JSON object" };
+    }
+    const raw = body as Record<string, unknown>;
+    const allowed = ["memberApiKeys", "memberMcpConnectors"] as const;
+    const invalid = Object.keys(raw).find(
+        (key) => !(allowed as readonly string[]).includes(key),
+    );
+    if (invalid) {
+        return { ok: false, detail: `Unsupported policy field: ${invalid}` };
+    }
+    const patch: Partial<OrganisationPolicies> = {};
+    for (const key of allowed) {
+        if (key in raw) {
+            if (typeof raw[key] !== "boolean") {
+                return { ok: false, detail: `${key} must be a boolean` };
+            }
+            patch[key] = raw[key] as boolean;
+        }
+    }
+    if (
+        patch.memberApiKeys === undefined &&
+        patch.memberMcpConnectors === undefined
+    ) {
+        return { ok: false, detail: "No policy fields to update." };
+    }
+    return { ok: true, patch };
+}
+
+// PATCH /admin/policies — update the firm's member policies (which member
+// self-service surfaces are permitted). Scoped to the caller's own firm; MFA
+// stepped up like the other mutating admin routes. Returns the resulting flags.
+adminRouter.patch(
+    "/policies",
+    requireMfaIfEnrolled,
+    asyncHandler(async (req, res) => {
+        const parsed = parsePolicyPatch(req.body);
+        if (!parsed.ok) {
+            return void res.status(400).json({ detail: parsed.detail });
+        }
+
+        const db = createServerSupabase();
+        const orgId = await callerOrganisationId(
+            db,
+            res.locals.userId as string,
+        );
+        if (!orgId) return void res.status(403).json({ detail: ADMIN_REQUIRED });
+
+        const policies = await updateOrganisationPolicies(
+            db,
+            orgId,
+            parsed.patch,
+        );
+        res.json({ policies });
     }),
 );

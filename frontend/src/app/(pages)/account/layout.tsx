@@ -4,7 +4,12 @@ import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useUserProfile } from "@/contexts/UserProfileContext";
 import { accountTabButtonClassName } from "./accountStyles";
+import {
+    personalApiKeysBlocked,
+    personalConnectorsBlocked,
+} from "./firmPolicy";
 
 interface TabDef {
     id: string;
@@ -33,6 +38,18 @@ export default function AccountLayout({
     const router = useRouter();
     const pathname = usePathname();
     const { isAuthenticated, authLoading } = useAuth();
+    const { profile } = useUserProfile();
+
+    // Firm policy (WS8 PR B): a member's own API-key / connector tabs are hidden
+    // — not disabled — when their firm disables the policy. Orgless users and
+    // policy-ON firms see every tab. While the profile is still loading we show
+    // all tabs (default-permissive), so a tab never flickers away after paint.
+    const firm = profile?.firm ?? null;
+    const tabs = TABS.filter((tab) => {
+        if (tab.id === "api-keys") return !personalApiKeysBlocked(firm);
+        if (tab.id === "connectors") return !personalConnectorsBlocked(firm);
+        return true;
+    });
 
     useEffect(() => {
         if (!authLoading && !isAuthenticated) {
@@ -69,7 +86,7 @@ export default function AccountLayout({
                         <div className="-m-1 min-w-0 p-1">
                             <div className="-m-1 min-w-0 overflow-x-auto overflow-y-hidden p-1">
                                 <ul className="mb-0 flex gap-1 md:flex-col">
-                                    {TABS.map((tab) => {
+                                    {tabs.map((tab) => {
                                         const active =
                                             pathname === tab.href ||
                                             (tab.href !== "/account" &&

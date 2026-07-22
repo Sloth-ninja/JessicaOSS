@@ -204,6 +204,46 @@ export async function getUserOrganisationId(
     return row?.organisation_id ?? null;
 }
 
+/**
+ * Update a firm's member policies (allow_member_api_keys /
+ * allow_member_mcp_connectors) and return the resulting policy flags. Scoped to
+ * the given organisation id (the admin routes resolve this from the caller's own
+ * membership, so an admin can never touch another firm's row). Only the fields
+ * present on `patch` are written; a select-back returns the authoritative state.
+ */
+export async function updateOrganisationPolicies(
+    db: Db,
+    organisationId: string,
+    patch: Partial<OrganisationPolicies>,
+): Promise<OrganisationPolicies> {
+    const update: Record<string, unknown> = {
+        updated_at: new Date().toISOString(),
+    };
+    if (typeof patch.memberApiKeys === "boolean") {
+        update.allow_member_api_keys = patch.memberApiKeys;
+    }
+    if (typeof patch.memberMcpConnectors === "boolean") {
+        update.allow_member_mcp_connectors = patch.memberMcpConnectors;
+    }
+
+    const { data, error } = await db
+        .from("organisations")
+        .update(update)
+        .eq("id", organisationId)
+        .select("allow_member_api_keys, allow_member_mcp_connectors")
+        .maybeSingle();
+    if (error) throw error;
+
+    const row = data as {
+        allow_member_api_keys: boolean | null;
+        allow_member_mcp_connectors: boolean | null;
+    } | null;
+    return {
+        memberApiKeys: row?.allow_member_api_keys === true,
+        memberMcpConnectors: row?.allow_member_mcp_connectors === true,
+    };
+}
+
 export interface OrganisationMember {
     userId: string;
     displayName: string | null;

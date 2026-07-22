@@ -372,6 +372,24 @@ export async function updateFirmMemberRole(
     return data.member;
 }
 
+/**
+ * Update the firm's member policies (WS8 PR B). Only the provided fields are
+ * changed; the server returns the resulting flags. Admin + MFA gated server-side.
+ */
+export async function updateFirmPolicies(
+    patch: Partial<OrganisationPolicies>,
+): Promise<OrganisationPolicies> {
+    const data = await apiRequest<{ policies: OrganisationPolicies }>(
+        "/admin/policies",
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(patch),
+        },
+    );
+    return data.policies;
+}
+
 export interface McpToolSummary {
     id: string;
     toolName: string;

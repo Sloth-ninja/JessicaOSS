@@ -38,6 +38,8 @@ import {
 } from "../accountStyles";
 import { AccountSection } from "../AccountSection";
 import { AccountToggle } from "../AccountToggle";
+import { useUserProfile } from "@/contexts/UserProfileContext";
+import { FirmManagedCard, personalConnectorsBlocked } from "../firmPolicy";
 
 type PendingMfaAction =
     | { type: "create" }
@@ -112,6 +114,7 @@ function isGoogleMcpConnector(connector: McpConnectorSummary) {
 }
 
 export default function ConnectorsPage() {
+    const { profile } = useUserProfile();
     const [connectors, setConnectors] = useState<McpConnectorSummary[]>([]);
     const [loading, setLoading] = useState(true);
     const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -587,6 +590,19 @@ export default function ConnectorsPage() {
             );
         }
     };
+
+    // Firm policy (WS8 PR B): members whose firm disables custom connectors have
+    // this tab hidden; a direct navigation renders a neutral card rather than the
+    // gallery or an error. Placed after all hooks to respect the rules of hooks.
+    if (personalConnectorsBlocked(profile?.firm)) {
+        return (
+            <FirmManagedCard
+                heading="Connectors"
+                title="Managed by your firm"
+                description={`Connectors are managed by ${profile?.firm?.name ?? "your firm"}. Ask your firm admin if you need a new connector added.`}
+            />
+        );
+    }
 
     return (
         <div>

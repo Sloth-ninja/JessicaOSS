@@ -1,6 +1,10 @@
 import crypto from "crypto";
 import { Router } from "express";
-import { requireAuth, requireMfaIfEnrolled } from "../middleware/auth";
+import {
+    requireAuth,
+    requireMemberPolicy,
+    requireMfaIfEnrolled,
+} from "../middleware/auth";
 import { asyncHandler } from "../lib/asyncHandler";
 import { createServerSupabase } from "../lib/supabase";
 import {
@@ -49,6 +53,13 @@ import {
 export const userRouter = Router();
 
 const MONTHLY_CREDIT_LIMIT = 999999;
+
+// Fixed 403 details for firm-policy-gated member writes (WS8 PR B). Generic and
+// non-leaky — the same string regardless of firm/provider (#22 contract).
+const PERSONAL_API_KEYS_MANAGED_DETAIL =
+    "Personal API keys are managed by your firm.";
+const PERSONAL_CONNECTORS_MANAGED_DETAIL =
+    "Connectors are managed by your firm.";
 
 // Additive: merges the server-env-only local-model status alongside the
 // per-user ApiKeyStatus fields. There is no per-user local key/base URL
@@ -607,6 +618,10 @@ userRouter.get("/api-keys", requireAuth, async (_req, res) => {
 userRouter.put(
     "/api-keys/:provider",
     requireAuth,
+    // Firm policy: when a member's firm disables personal API keys, block the
+    // save (and the null-save "delete") before MFA — a blocked write should not
+    // prompt for step-up. Orgless / policy-ON callers are unaffected.
+    requireMemberPolicy("memberApiKeys", PERSONAL_API_KEYS_MANAGED_DETAIL),
     requireMfaIfEnrolled,
     async (req, res) => {
         const userId = res.locals.userId as string;
@@ -682,6 +697,13 @@ userRouter.get(
 userRouter.post(
     "/mcp-connectors",
     requireAuth,
+    // Firm policy: block creating personal connectors when the firm disables
+    // them. Reads (GET list/detail) stay open so existing connectors keep
+    // working in chat; only create/update/delete/oauth-start are gated.
+    requireMemberPolicy(
+        "memberMcpConnectors",
+        PERSONAL_CONNECTORS_MANAGED_DETAIL,
+    ),
     requireMfaIfEnrolled,
     async (req, res) => {
         const userId = res.locals.userId as string;
@@ -721,6 +743,10 @@ userRouter.post(
 userRouter.patch(
     "/mcp-connectors/:connectorId",
     requireAuth,
+    requireMemberPolicy(
+        "memberMcpConnectors",
+        PERSONAL_CONNECTORS_MANAGED_DETAIL,
+    ),
     requireMfaIfEnrolled,
     async (req, res) => {
         const userId = res.locals.userId as string;
@@ -781,6 +807,10 @@ userRouter.patch(
 userRouter.delete(
     "/mcp-connectors/:connectorId",
     requireAuth,
+    requireMemberPolicy(
+        "memberMcpConnectors",
+        PERSONAL_CONNECTORS_MANAGED_DETAIL,
+    ),
     requireMfaIfEnrolled,
     async (req, res) => {
         const userId = res.locals.userId as string;
@@ -804,6 +834,10 @@ userRouter.delete(
 userRouter.post(
     "/mcp-connectors/:connectorId/oauth/start",
     requireAuth,
+    requireMemberPolicy(
+        "memberMcpConnectors",
+        PERSONAL_CONNECTORS_MANAGED_DETAIL,
+    ),
     requireMfaIfEnrolled,
     async (req, res) => {
         const userId = res.locals.userId as string;

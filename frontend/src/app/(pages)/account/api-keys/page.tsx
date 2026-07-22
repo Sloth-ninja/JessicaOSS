@@ -14,6 +14,7 @@ import {
     accountGlassInputClassName,
 } from "../accountStyles";
 import { AccountSection } from "../AccountSection";
+import { FirmManagedCard, personalApiKeysBlocked } from "../firmPolicy";
 
 function saveErrorMessage(
     action: "save" | "remove",
@@ -58,6 +59,19 @@ const MODEL_API_KEY_FIELDS = [
 
 export default function ApiKeysPage() {
     const { profile, updateApiKey } = useUserProfile();
+
+    // Firm policy (WS8 PR B): the tab is hidden for members whose firm disables
+    // personal keys, but a direct navigation still lands here — render a neutral
+    // "managed by your firm" card rather than the editable form or an error.
+    if (personalApiKeysBlocked(profile?.firm)) {
+        return (
+            <FirmManagedCard
+                heading="API Keys"
+                title="Managed by your firm"
+                description={`Model access is provided by ${profile?.firm?.name ?? "your firm"}. There is no key to add or manage here. Ask your firm admin if you need a model that isn't listed.`}
+            />
+        );
+    }
 
     return (
         <div>

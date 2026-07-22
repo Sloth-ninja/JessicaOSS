@@ -15,6 +15,7 @@ import type { AddressInfo } from "node:net";
 // via vi.hoisted so the hoisted vi.mock factories can close over it.
 const state = vi.hoisted(() => ({
   isAdmin: true,
+  mfaOk: true,
   orgId: "org-1" as string | null,
   setMemberRoleResult: { ok: true, member: {} } as
     | { ok: true; member: unknown }
@@ -45,8 +46,19 @@ vi.mock("../middleware/auth", () => ({
     }
     next();
   },
-  requireMfaIfEnrolled: (_req: unknown, _res: unknown, next: () => void) =>
-    next(),
+  requireMfaIfEnrolled: (
+    _req: unknown,
+    res: { status: (n: number) => { json: (b: unknown) => void } },
+    next: () => void,
+  ) => {
+    if (!state.mfaOk) {
+      res
+        .status(403)
+        .json({ code: "mfa_verification_required", detail: "MFA verification required" });
+      return;
+    }
+    next();
+  },
 }));
 
 vi.mock("../lib/supabase", () => ({
@@ -55,11 +67,14 @@ vi.mock("../lib/supabase", () => ({
 
 const listOrganisationMembers = vi.fn();
 const setMemberRole = vi.fn();
+const updateOrganisationPolicies = vi.fn();
 vi.mock("../lib/organisations", () => ({
   getUserOrganisationId: () => Promise.resolve(state.orgId),
   listOrganisationMembers: (...args: unknown[]) =>
     listOrganisationMembers(...args),
   setMemberRole: (...args: unknown[]) => setMemberRole(...args),
+  updateOrganisationPolicies: (...args: unknown[]) =>
+    updateOrganisationPolicies(...args),
 }));
 
 const saveOrganisationApiKey = vi.fn();
@@ -109,11 +124,13 @@ afterAll(
 
 beforeEach(() => {
   state.isAdmin = true;
+  state.mfaOk = true;
   state.orgId = "org-1";
   state.setMemberRoleResult = { ok: true, member: { userId: "u2" } };
   listOrganisationMembers.mockReset();
   setMemberRole.mockReset();
   saveOrganisationApiKey.mockReset();
+  updateOrganisationPolicies.mockReset();
   setMemberRole.mockImplementation(() =>
     Promise.resolve(state.setMemberRoleResult),
   );
@@ -228,5 +245,72 @@ describe("PATCH /admin/members/:userId/role", () => {
     expect(await res.json()).toEqual({
       detail: "That member is not part of your firm.",
     });
+  });
+});
+
+describe("PATCH /admin/policies", () => {
+  const patchPolicies = (body: unknown) =>
+    fetch(`${baseUrl}/admin/policies`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  it("is gated to admins (403 for a non-admin)", async () => {
+    state.isAdmin = false;
+    const res = await patchPolicies({ memberApiKeys: true });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({
+      detail: "Administrator access is required.",
+    });
+    expect(updateOrganisationPolicies).not.toHaveBeenCalled();
+  });
+
+  it("is MFA-gated (403 when the session is not stepped up)", async () => {
+    state.mfaOk = false;
+    const res = await patchPolicies({ memberApiKeys: false });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({
+      code: "mfa_verification_required",
+    });
+    expect(updateOrganisationPolicies).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unsupported policy field with 400", async () => {
+    const res = await patchPolicies({ memberApiKeys: true, wat: false });
+    expect(res.status).toBe(400);
+    expect(updateOrganisationPolicies).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-boolean value with 400", async () => {
+    const res = await patchPolicies({ memberApiKeys: "yes" });
+    expect(res.status).toBe(400);
+    expect(updateOrganisationPolicies).not.toHaveBeenCalled();
+  });
+
+  it("rejects an empty patch (no fields) with 400", async () => {
+    const res = await patchPolicies({});
+    expect(res.status).toBe(400);
+    expect(updateOrganisationPolicies).not.toHaveBeenCalled();
+  });
+
+  it("persists the patch scoped to the caller's firm and returns the flags", async () => {
+    updateOrganisationPolicies.mockResolvedValue({
+      memberApiKeys: false,
+      memberMcpConnectors: true,
+    });
+    const res = await patchPolicies({
+      memberApiKeys: false,
+      memberMcpConnectors: true,
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      policies: { memberApiKeys: false, memberMcpConnectors: true },
+    });
+    expect(updateOrganisationPolicies).toHaveBeenCalledWith(
+      expect.anything(),
+      "org-1",
+      { memberApiKeys: false, memberMcpConnectors: true },
+    );
   });
 });
