@@ -4,8 +4,10 @@ import {
   getUserApiKeys,
   saveUserApiKey,
 } from "./userApiKeys";
+import { encryptApiKey } from "./apiKeyCrypto";
 
 const USER = "user-1";
+const ORG = "org-1";
 
 type Row = {
   user_id: string;
@@ -16,29 +18,99 @@ type Row = {
   updated_at?: string;
 };
 
-// Minimal stand-in for the Supabase query builder used by userApiKeys.ts:
-// supports the exact select/upsert/delete chains those functions call, backed
-// by an in-memory row store so the encrypt→decrypt round-trip runs for real.
-function makeDb(store: Row[]) {
+type OrgRow = {
+  organisation_id: string;
+  provider: string;
+  encrypted_key: string;
+  iv: string;
+  auth_tag: string;
+};
+
+function orgKey(provider: string, value: string): OrgRow {
+  return { organisation_id: ORG, provider, ...encryptApiKey(value) };
+}
+
+// Table-aware stand-in for the Supabase query builder. Covers the exact chains
+// userApiKeys.ts now drives across three tables:
+//   - user_profiles          → organisation_id lookup (firm precedence layer)
+//   - organisation_api_keys  → firm-shared keys
+//   - user_api_keys          → the user's own keys (select/upsert/delete)
+// `orgId` null models an orgless user (no firm layer).
+function makeDb(opts: {
+  userKeys?: Row[];
+  orgKeys?: OrgRow[];
+  orgId?: string | null;
+  orgKeysError?: boolean;
+}) {
+  const userKeys = opts.userKeys ?? [];
+  const orgKeys = opts.orgKeys ?? [];
+  const orgId = opts.orgId ?? null;
+
   return {
-    from() {
+    from(table: string) {
+      if (table === "user_profiles") {
+        return {
+          select() {
+            return {
+              eq() {
+                return {
+                  maybeSingle() {
+                    return Promise.resolve({
+                      data: { organisation_id: orgId },
+                      error: null,
+                    });
+                  },
+                };
+              },
+            };
+          },
+        };
+      }
+
+      if (table === "organisation_api_keys") {
+        return {
+          select() {
+            return {
+              eq(_col: string, organisationId: string) {
+                if (opts.orgKeysError) {
+                  return Promise.resolve({
+                    data: null,
+                    error: {
+                      code: "XX000",
+                      message: "organisation_api_keys read failed",
+                    },
+                  });
+                }
+                return Promise.resolve({
+                  data: orgKeys.filter(
+                    (r) => r.organisation_id === organisationId,
+                  ),
+                  error: null,
+                });
+              },
+            };
+          },
+        };
+      }
+
+      // user_api_keys
       return {
         select() {
           return {
             eq(_col: string, userId: string) {
               return Promise.resolve({
-                data: store.filter((r) => r.user_id === userId),
+                data: userKeys.filter((r) => r.user_id === userId),
                 error: null,
               });
             },
           };
         },
         upsert(row: Row) {
-          const i = store.findIndex(
+          const i = userKeys.findIndex(
             (r) => r.user_id === row.user_id && r.provider === row.provider,
           );
-          if (i >= 0) store[i] = row;
-          else store.push(row);
+          if (i >= 0) userKeys[i] = row;
+          else userKeys.push(row);
           return Promise.resolve({ error: null });
         },
         delete() {
@@ -46,10 +118,10 @@ function makeDb(store: Row[]) {
             eq(_c1: string, userId: string) {
               return {
                 eq(_c2: string, provider: string) {
-                  const i = store.findIndex(
+                  const i = userKeys.findIndex(
                     (r) => r.user_id === userId && r.provider === provider,
                   );
-                  if (i >= 0) store.splice(i, 1);
+                  if (i >= 0) userKeys.splice(i, 1);
                   return Promise.resolve({ error: null });
                 },
               };
@@ -62,7 +134,7 @@ function makeDb(store: Row[]) {
   } as any;
 }
 
-describe("userApiKeys precedence (user key overrides env)", () => {
+describe("userApiKeys precedence (user > firm > env)", () => {
   beforeEach(() => {
     vi.stubEnv("USER_API_KEYS_ENCRYPTION_SECRET", "test-encryption-secret");
     // Start every test from a clean env; individual tests set what they need.
@@ -78,12 +150,11 @@ describe("userApiKeys precedence (user key overrides env)", () => {
     vi.unstubAllEnvs();
   });
 
-  describe("getUserApiKeys", () => {
+  describe("getUserApiKeys — orgless (user > env, unchanged)", () => {
     it("prefers the user's decrypted key over the env key for every provider", async () => {
       vi.stubEnv("ANTHROPIC_API_KEY", "env-claude");
       vi.stubEnv("COMPANIES_HOUSE_API_KEY", "env-ch");
-      const store: Row[] = [];
-      const db = makeDb(store);
+      const db = makeDb({ orgId: null });
 
       await saveUserApiKey(USER, "claude", "user-claude", db);
       await saveUserApiKey(USER, "companies_house", "user-ch", db);
@@ -95,14 +166,13 @@ describe("userApiKeys precedence (user key overrides env)", () => {
 
     it("falls back to the env key when the user has no key", async () => {
       vi.stubEnv("COMPANIES_HOUSE_API_KEY", "env-ch");
-      const keys = await getUserApiKeys(USER, makeDb([]));
+      const keys = await getUserApiKeys(USER, makeDb({ orgId: null }));
       expect(keys.companies_house).toBe("env-ch");
     });
 
     it("reverts to the env key after the user's key is removed", async () => {
       vi.stubEnv("COMPANIES_HOUSE_API_KEY", "env-ch");
-      const store: Row[] = [];
-      const db = makeDb(store);
+      const db = makeDb({ orgId: null });
 
       await saveUserApiKey(USER, "companies_house", "user-ch", db);
       expect((await getUserApiKeys(USER, db)).companies_house).toBe("user-ch");
@@ -112,7 +182,7 @@ describe("userApiKeys precedence (user key overrides env)", () => {
     });
 
     it("returns null when neither a user key nor an env key exists", async () => {
-      const keys = await getUserApiKeys(USER, makeDb([]));
+      const keys = await getUserApiKeys(USER, makeDb({ orgId: null }));
       expect(keys.companies_house).toBeNull();
       expect(keys.claude).toBeNull();
     });
@@ -120,25 +190,82 @@ describe("userApiKeys precedence (user key overrides env)", () => {
     it("keeps the env key as fallback when a stored key fails to decrypt", async () => {
       vi.stubEnv("COMPANIES_HOUSE_API_KEY", "env-ch");
       // A row that cannot be decrypted with the current secret (garbage bytes).
-      const store: Row[] = [
-        {
-          user_id: USER,
-          provider: "companies_house",
-          encrypted_key: "not-real",
-          iv: "AAAAAAAAAAAAAAAA",
-          auth_tag: "AAAAAAAAAAAAAAAAAAAAAA==",
-        },
-      ];
-      const keys = await getUserApiKeys(USER, makeDb(store));
+      const db = makeDb({
+        orgId: null,
+        userKeys: [
+          {
+            user_id: USER,
+            provider: "companies_house",
+            encrypted_key: "not-real",
+            iv: "AAAAAAAAAAAAAAAA",
+            auth_tag: "AAAAAAAAAAAAAAAAAAAAAA==",
+          },
+        ],
+      });
+      const keys = await getUserApiKeys(USER, db);
       expect(keys.companies_house).toBe("env-ch");
     });
   });
 
-  describe("getUserApiKeyStatus", () => {
-    it("reports source 'user' when a user key exists, even if an env key is also set", async () => {
+  describe("getUserApiKeys — firm layer (user > firm > env)", () => {
+    it("uses the firm key when the user has none, over the env fallback", async () => {
       vi.stubEnv("COMPANIES_HOUSE_API_KEY", "env-ch");
-      const store: Row[] = [];
-      const db = makeDb(store);
+      const db = makeDb({
+        orgId: ORG,
+        orgKeys: [orgKey("companies_house", "firm-ch")],
+      });
+      const keys = await getUserApiKeys(USER, db);
+      expect(keys.companies_house).toBe("firm-ch");
+    });
+
+    it("lets the user's own key override the firm key", async () => {
+      const db = makeDb({
+        orgId: ORG,
+        orgKeys: [orgKey("claude", "firm-claude")],
+      });
+      await saveUserApiKey(USER, "claude", "user-claude", db);
+      const keys = await getUserApiKeys(USER, db);
+      expect(keys.claude).toBe("user-claude");
+    });
+
+    it("uses the firm key with no env key set at all", async () => {
+      const db = makeDb({
+        orgId: ORG,
+        orgKeys: [orgKey("openai", "firm-openai")],
+      });
+      const keys = await getUserApiKeys(USER, db);
+      expect(keys.openai).toBe("firm-openai");
+    });
+
+    it("does not apply a firm key from another provider", async () => {
+      const db = makeDb({
+        orgId: ORG,
+        orgKeys: [orgKey("openai", "firm-openai")],
+      });
+      const keys = await getUserApiKeys(USER, db);
+      expect(keys.gemini).toBeNull();
+    });
+
+    it("degrades to user/env keys when the firm-keys read fails", async () => {
+      // A transient organisation_api_keys read error must never break chat key
+      // resolution for a whole firm — the firm layer is skipped, env still wins.
+      vi.stubEnv("COMPANIES_HOUSE_API_KEY", "env-ch");
+      const db = makeDb({ orgId: ORG, orgKeysError: true });
+      await saveUserApiKey(USER, "claude", "user-claude", db);
+
+      const keys = await getUserApiKeys(USER, db);
+      expect(keys.companies_house).toBe("env-ch"); // env fallback intact
+      expect(keys.claude).toBe("user-claude"); // personal key intact
+    });
+  });
+
+  describe("getUserApiKeyStatus — sources reflect the winning layer", () => {
+    it("reports source 'user' when a user key exists, even with firm + env set", async () => {
+      vi.stubEnv("COMPANIES_HOUSE_API_KEY", "env-ch");
+      const db = makeDb({
+        orgId: ORG,
+        orgKeys: [orgKey("companies_house", "firm-ch")],
+      });
       await saveUserApiKey(USER, "companies_house", "user-ch", db);
 
       const status = await getUserApiKeyStatus(USER, db);
@@ -146,33 +273,62 @@ describe("userApiKeys precedence (user key overrides env)", () => {
       expect(status.sources.companies_house).toBe("user");
     });
 
-    it("reports source 'env' when only an env key is set", async () => {
+    it("reports source 'firm' when a firm key exists and the user has none", async () => {
       vi.stubEnv("COMPANIES_HOUSE_API_KEY", "env-ch");
-      const status = await getUserApiKeyStatus(USER, makeDb([]));
+      const db = makeDb({
+        orgId: ORG,
+        orgKeys: [orgKey("companies_house", "firm-ch")],
+      });
+      const status = await getUserApiKeyStatus(USER, db);
+      expect(status.companies_house).toBe(true);
+      expect(status.sources.companies_house).toBe("firm");
+    });
+
+    it("reports source 'env' for an org member with an env key but no firm key", async () => {
+      vi.stubEnv("COMPANIES_HOUSE_API_KEY", "env-ch");
+      const status = await getUserApiKeyStatus(
+        USER,
+        makeDb({ orgId: ORG, orgKeys: [] }),
+      );
       expect(status.companies_house).toBe(true);
       expect(status.sources.companies_house).toBe("env");
     });
 
-    it("reports unconfigured (false / null) when neither is set", async () => {
-      const status = await getUserApiKeyStatus(USER, makeDb([]));
+    it("reports source 'env' for an orgless user with only an env key", async () => {
+      vi.stubEnv("COMPANIES_HOUSE_API_KEY", "env-ch");
+      const status = await getUserApiKeyStatus(USER, makeDb({ orgId: null }));
+      expect(status.sources.companies_house).toBe("env");
+    });
+
+    it("reports unconfigured (false / null) when nothing is set", async () => {
+      const status = await getUserApiKeyStatus(USER, makeDb({ orgId: ORG }));
       expect(status.companies_house).toBe(false);
       expect(status.sources.companies_house).toBeNull();
     });
 
-    it("reverts source to 'env' after the user's key is removed", async () => {
+    it("degrades to source 'env' when the firm-keys read fails", async () => {
       vi.stubEnv("COMPANIES_HOUSE_API_KEY", "env-ch");
-      const store: Row[] = [];
-      const db = makeDb(store);
-
-      await saveUserApiKey(USER, "companies_house", "user-ch", db);
-      expect((await getUserApiKeyStatus(USER, db)).sources.companies_house).toBe(
-        "user",
+      const status = await getUserApiKeyStatus(
+        USER,
+        makeDb({ orgId: ORG, orgKeysError: true }),
       );
+      expect(status.companies_house).toBe(true);
+      expect(status.sources.companies_house).toBe("env");
+    });
 
-      await saveUserApiKey(USER, "companies_house", null, db);
-      expect((await getUserApiKeyStatus(USER, db)).sources.companies_house).toBe(
-        "env",
+    it("source is 'firm' with a firm key, 'env' without it (env fallback present)", async () => {
+      vi.stubEnv("COMPANIES_HOUSE_API_KEY", "env-ch");
+      const withFirm = await getUserApiKeyStatus(
+        USER,
+        makeDb({ orgId: ORG, orgKeys: [orgKey("companies_house", "firm-ch")] }),
       );
+      expect(withFirm.sources.companies_house).toBe("firm");
+
+      const withoutFirm = await getUserApiKeyStatus(
+        USER,
+        makeDb({ orgId: ORG, orgKeys: [] }),
+      );
+      expect(withoutFirm.sources.companies_house).toBe("env");
     });
   });
 });

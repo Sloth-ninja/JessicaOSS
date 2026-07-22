@@ -7,6 +7,89 @@
 
 ---
 
+## 2026-07-22 — WS8 PR C: firm API keys, admin area, member roles (branch `ws8-firm-keys`)
+
+**Scope:** the first user-visible firm-administration surface, built on the PR A
+(#34) foundation. Admins get a **Firm settings** screen to manage the firm's
+shared provider API keys and members' roles; every member's resolved API key now
+layers **user > firm > env**. No new migration — the `organisation_api_keys`
+table already exists from PR A. Orgless self-hosters are unchanged everywhere.
+
+**Backend.**
+- New `src/lib/apiKeyCrypto.ts`: the AES-256-GCM encrypt/decrypt (scheme
+  unchanged, same key derivation) extracted from `userApiKeys.ts` so firm keys
+  reuse it. `userApiKeys.ts` keeps thin wrappers (personal-key call sites + log
+  tag untouched — minimal diff).
+- New `src/lib/organisationApiKeys.ts`: `getOrganisationApiKeyStatus` (per-
+  provider booleans, never key material), `getOrganisationApiKeys` (decrypted
+  map, undecryptable rows skipped + logged), `saveOrganisationApiKey`
+  (upsert/delete-on-empty, `onConflict organisation_id,provider`).
+- `userApiKeys.ts` precedence extended to **user > firm > env**: `ApiKeySource`
+  gains `"firm"`; both `getUserApiKeys` and `getUserApiKeyStatus` resolve the
+  caller's org (`getUserOrganisationId`) and layer the firm's keys between env
+  and personal. Orgless / unmigrated (42703) users skip the firm layer entirely.
+- `organisations.ts` adds `getUserOrganisationId` (lightweight, 42703-tolerant),
+  `listOrganisationMembers` (profile fields + auth email via `admin.listUsers`),
+  and `setMemberRole` — scoping + double-submit safety encoded in the UPDATE
+  predicate (`.eq(user_id).eq(organisation_id)` + select-back; zero rows ⇒
+  `not_found`), plus a **last-admin guard** that counts the other admins
+  immediately before a demotion and refuses (`last_admin`) when none remain. No
+  RPC (no migration authorised); the residual check-then-write window is
+  acceptable at pilot scale and noted for a future DB-function upgrade.
+  **Recovery** if two concurrent demotions ever raced a firm to zero admins: an
+  operator re-promotes a member directly on production Supabase with the
+  service_role (SQL editor), scoped to the firm —
+  `update public.user_profiles set role = 'admin', updated_at = now() where user_id = '<USER_ID>' and organisation_id = '<ORG_ID>';`
+  — then the firm has an admin again and can self-manage.
+- New `src/routes/admin.ts`, mounted at `/admin` in `index.ts`, all behind
+  `requireAuth` + `requireAdmin` (router-level), every handler `asyncHandler`-
+  wrapped with fixed generic details: `GET /admin/firm-keys`,
+  `PUT /admin/firm-keys/:provider` (+ `requireMfaIfEnrolled`, delete-on-null),
+  `GET /admin/members`, `PATCH /admin/members/:userId/role` (+
+  `requireMfaIfEnrolled`; 409 last-admin, 404 out-of-firm, 400 bad role).
+
+**Frontend.**
+- `AppSidebar` gains a **Firm admin** group (label + "Firm settings" link),
+  rendered only when `profile.isAdmin`. Dashboard is deferred to PR D (not
+  stubbed).
+- New `(pages)/admin/firm-settings/page.tsx`: Members (list, role badges,
+  promote/demote with confirm + MFA step-up, last-admin demote disabled client-
+  side, invite note pointing at Supabase for now), Firm API keys (per-provider
+  rows, "Used by all members / your own key takes priority" note), and a
+  read-only Policies preview card ("enforced in the next update" — enforcement
+  is PR B, not faked here). Non-admins are redirected to `/assistant`.
+- `account/api-keys` surfaces the new firm state: "Provided by your firm — your
+  own key takes priority if added" (no Remove on a firm-provided key).
+- `mikeApi.ts`: `ApiKeySource` gains `"firm"`; new `getFirmApiKeyStatus`,
+  `saveFirmApiKey`, `getFirmMembers`, `updateFirmMemberRole` + types.
+
+**Tests.** Backend vitest **201 passing** (was 175): rewrote `userApiKeys.test.ts`
+to a table-aware mock covering the full user/firm/env/orgless precedence matrix
+plus firm-layer read-failure degradation (skip firm, keep user/env); new
+`organisationApiKeys.test.ts` (encrypt→decrypt round-trip, status booleans,
+delete-on-empty, org scoping), `organisationMembers.test.ts` (`getUserOrganisationId`,
+member list + emails, `setMemberRole` promote/demote/last-admin/cross-firm-scoping),
+and `routes/admin.test.ts` (non-admin 403 on every route, firm-key save, member
+list, role 200/400/404/409).
+
+**Review fixes (approve-with-fixes, 22/07/2026).** Firm-key resolution in
+`userApiKeys.ts` now wraps the whole firm layer in try/catch — any
+`organisation_api_keys` read error is logged with a scoped tag and the firm layer
+skipped (env fallback intact), so a transient error can never break chat key
+resolution or profile status for a whole firm. `listOrganisationMembers` now
+paginates `auth.admin.listUsers` until drained (guarded at 20 pages) — the
+per-call `perPage` is a project-wide cap, not per-firm. The last-admin count now
+filters via `normaliseRole` so it can't miscount non-normalised data.
+`setMemberRole` populates the member's email in its success payload (degrading to
+null on lookup failure). Firm-keys section gained a loading skeleton so "Not set"
+never flashes before status loads.
+
+**Verification.** Backend `tsc --noEmit` clean; `vitest run` 201/201. Frontend
+`tsc --noEmit` clean; `eslint src` 34 errors / 77 warnings — **identical to the
+main baseline** (all pre-existing; the two changed pages/components add zero).
+`evals:smoke` from the main checkout: 4/4 pass. No new env vars, no dependency
+changes, no migration.
+
 ## 2026-07-22 — WS8 PR A: organisations, admin role, profile plumbing (branch `ws8-org-foundation`)
 
 **Scope:** foundation for firm administration. Adds the organisation (firm)

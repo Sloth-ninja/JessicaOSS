@@ -14,6 +14,7 @@ import {
     ClipboardCheck,
     Landmark,
     Lock,
+    Settings,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUserProfile } from "@/contexts/UserProfileContext";
@@ -297,6 +298,27 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
             )}
             {RESEARCH_NAV_ITEMS.map(renderNavItem)}
             {RESEARCH_NAV_ITEMS_DISABLED.map(renderDisabledNavItem)}
+
+            {/* Firm admin — only for organisation admins (profile.isAdmin).
+                Dashboard lands in a later PR; only Firm settings for now. */}
+            {profile?.isAdmin && (
+                <>
+                    {isOpen && (
+                        <div
+                            className={`mt-2.5 mb-1 px-5 text-xs font-semibold text-gray-500 ${
+                                shouldAnimate ? "sidebar-fade-in" : ""
+                            }`}
+                        >
+                            Firm admin
+                        </div>
+                    )}
+                    {renderNavItem({
+                        href: "/admin/firm-settings",
+                        label: "Firm settings",
+                        icon: Settings,
+                    })}
+                </>
+            )}
 
             {isOpen && (
                 <div className="mt-4 flex-1 min-h-0 flex flex-col gap-4">

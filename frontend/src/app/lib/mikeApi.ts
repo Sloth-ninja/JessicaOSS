@@ -285,7 +285,9 @@ export type ApiKeyProvider =
     | "openai"
     | "openrouter"
     | "companies_house";
-export type ApiKeySource = "user" | "env" | null;
+// "firm" = a firm-shared key provided by the user's organisation (WS8). A
+// personal key ("user") always takes priority over it.
+export type ApiKeySource = "user" | "firm" | "env" | null;
 export type ApiKeyState = Record<
     ApiKeyProvider,
     {
@@ -318,6 +320,56 @@ export async function saveApiKey(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ api_key: apiKey }),
     });
+}
+
+// ── Firm administration (WS8) ──────────────────────────────────────────────
+// All /admin routes are gated server-side to organisation admins (requireAuth +
+// requireAdmin); the UI additionally only surfaces them when profile.isAdmin.
+
+/** Per-provider "configured" flags for the firm's shared keys (no key material). */
+export type FirmApiKeyStatus = Record<ApiKeyProvider, boolean>;
+
+export interface FirmMember {
+    userId: string;
+    displayName: string | null;
+    email: string | null;
+    role: OrganisationRole;
+    createdAt: string | null;
+}
+
+export async function getFirmApiKeyStatus(): Promise<FirmApiKeyStatus> {
+    return apiRequest<FirmApiKeyStatus>("/admin/firm-keys");
+}
+
+export async function saveFirmApiKey(
+    provider: ApiKeyProvider,
+    apiKey: string | null,
+): Promise<FirmApiKeyStatus> {
+    return apiRequest<FirmApiKeyStatus>(`/admin/firm-keys/${provider}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: apiKey }),
+    });
+}
+
+export async function getFirmMembers(): Promise<FirmMember[]> {
+    const data = await apiRequest<{ members: FirmMember[] }>("/admin/members");
+    return data.members;
+}
+
+export async function updateFirmMemberRole(
+    userId: string,
+    role: OrganisationRole,
+): Promise<FirmMember> {
+    const data = await apiRequest<{ member: FirmMember }>(
+        `/admin/members/${userId}/role`,
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ role }),
+        },
+    );
+    return data.member;
 }
 
 export interface McpToolSummary {
