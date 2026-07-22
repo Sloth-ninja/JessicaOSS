@@ -393,6 +393,62 @@ export async function updateFirmPolicies(
     return data.policies;
 }
 
+// ── Firm usage dashboard (WS8 PR D) ─────────────────────────────────────────
+// GET /admin/usage — read-only, admin-gated. `days` selects the reporting
+// window (7 or 30) governing the tiles, member activity columns and the daily
+// trend; the workflow-template table always reports both a 7d and a 30d column.
+
+export interface FirmUsageTotals {
+    activeMembers: number;
+    totalMembers: number;
+    chats: number;
+    workflowRuns: number;
+    documents: number;
+}
+
+export interface FirmUsageMember {
+    userId: string;
+    displayName: string | null;
+    email: string | null;
+    /** ISO timestamp of the member's most recent activity, or null. */
+    lastActive: string | null;
+    chats: number;
+    workflowRuns: number;
+}
+
+export interface FirmUsageWorkflow {
+    workflowId: string;
+    title: string;
+    runs7d: number;
+    runs30d: number;
+    /** ISO timestamp of the most recent run, or null. */
+    lastRun: string | null;
+}
+
+export interface FirmUsageDailyPoint {
+    /** UTC calendar day, YYYY-MM-DD. */
+    date: string;
+    chats: number;
+}
+
+export interface FirmUsage {
+    period: { days: number; since: string; until: string };
+    totals: FirmUsageTotals;
+    members: FirmUsageMember[];
+    workflows: FirmUsageWorkflow[];
+    daily: FirmUsageDailyPoint[];
+}
+
+export async function getFirmUsage(
+    days: number,
+    signal?: AbortSignal,
+): Promise<FirmUsage> {
+    return apiRequest<FirmUsage>(
+        `/admin/usage?days=${encodeURIComponent(days)}`,
+        signal ? { signal } : undefined,
+    );
+}
+
 export interface McpToolSummary {
     id: string;
     toolName: string;

@@ -15,6 +15,7 @@ import {
     Landmark,
     Lock,
     Settings,
+    BarChart3,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUserProfile } from "@/contexts/UserProfileContext";
@@ -299,8 +300,7 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
             {RESEARCH_NAV_ITEMS.map(renderNavItem)}
             {RESEARCH_NAV_ITEMS_DISABLED.map(renderDisabledNavItem)}
 
-            {/* Firm admin — only for organisation admins (profile.isAdmin).
-                Dashboard lands in a later PR; only Firm settings for now. */}
+            {/* Firm admin — only for organisation admins (profile.isAdmin). */}
             {profile?.isAdmin && (
                 <>
                     {isOpen && (
@@ -312,6 +312,11 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                             Firm admin
                         </div>
                     )}
+                    {renderNavItem({
+                        href: "/admin/dashboard",
+                        label: "Dashboard",
+                        icon: BarChart3,
+                    })}
                     {renderNavItem({
                         href: "/admin/firm-settings",
                         label: "Firm settings",

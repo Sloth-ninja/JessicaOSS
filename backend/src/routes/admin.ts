@@ -18,6 +18,7 @@ import {
     saveOrganisationApiKey,
 } from "../lib/organisationApiKeys";
 import { normalizeApiKeyProvider } from "../lib/userApiKeys";
+import { getOrganisationUsage, normaliseUsageDays } from "../lib/usageStats";
 
 export const adminRouter = Router();
 
@@ -74,6 +75,25 @@ adminRouter.put(
 
         await saveOrganisationApiKey(orgId, provider, apiKey, db);
         res.json(await getOrganisationApiKeyStatus(orgId, db));
+    }),
+);
+
+// GET /admin/usage — composed usage payload for the admin dashboard (WS8 PR D):
+// period totals, per-member activity, per-workflow-template runs and a per-day
+// chat trend. Read-only; org-scoped to the caller's own firm inside
+// getOrganisationUsage. ?days=7|30 selects the window (default 7); the
+// workflow-template 7d/30d columns are reported regardless of the toggle.
+adminRouter.get(
+    "/usage",
+    asyncHandler(async (req, res) => {
+        const db = createServerSupabase();
+        const orgId = await callerOrganisationId(
+            db,
+            res.locals.userId as string,
+        );
+        if (!orgId) return void res.status(403).json({ detail: ADMIN_REQUIRED });
+        const days = normaliseUsageDays(req.query.days);
+        res.json(await getOrganisationUsage(db, orgId, { days }));
     }),
 );
 
