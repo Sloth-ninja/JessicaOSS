@@ -261,16 +261,27 @@ export async function requireMfaIfEnrolled(
  * the whole body is wrapped so a rejection can never escape as an unhandled
  * rejection or leave the request hanging (docs/DURABLE_LESSONS.md). The fixed
  * `detail` string keeps raw provider/DB text away from the client (#22 contract).
+ *
+ * `shouldGate` optionally narrows enforcement to specific requests: when given
+ * and it returns false, the gate is skipped entirely (next()). Used so a key
+ * REMOVAL (null-save) on `PUT /user/api-keys/:provider` always passes — removing
+ * a personal key complies with a keys-off policy, and members must always be
+ * able to clean up their own inert keys.
  */
 export function requireMemberPolicy(
   policy: keyof OrganisationPolicies,
   detail: string,
+  shouldGate?: (req: Request) => boolean,
 ) {
   return async function requireMemberPolicyMiddleware(
     req: Request,
     res: Response,
     next: NextFunction,
   ): Promise<void> {
+    if (shouldGate && !shouldGate(req)) {
+      next();
+      return;
+    }
     const userId =
       typeof res.locals.userId === "string" ? res.locals.userId : "";
     try {

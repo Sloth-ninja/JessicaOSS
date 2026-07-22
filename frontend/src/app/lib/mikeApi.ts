@@ -305,6 +305,9 @@ export type LocalModelStatus = { configured: boolean; models: string[] };
 export type ApiKeyStatus = Record<ApiKeyProvider, boolean> & {
     sources?: Partial<Record<ApiKeyProvider, ApiKeySource>>;
     local?: LocalModelStatus;
+    // Providers where a saved personal key is inert because the firm disabled
+    // personal keys (WS8 PR B). Not in use, but still removable.
+    inertPersonalKeys?: ApiKeyProvider[];
 };
 
 export async function getApiKeyStatus(): Promise<ApiKeyStatus> {

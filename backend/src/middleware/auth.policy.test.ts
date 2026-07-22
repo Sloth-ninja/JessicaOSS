@@ -70,6 +70,20 @@ beforeAll(async () => {
     requireMemberPolicy("memberMcpConnectors", CONNECTORS_DETAIL),
     (_req, res) => res.json({ ok: true }),
   );
+  // Mirrors PUT /user/api-keys/:provider: only a real (non-empty) SAVE is gated;
+  // a null/empty api_key (removal) always passes.
+  app.put(
+    "/keys-save-only",
+    fakeAuth,
+    requireMemberPolicy(
+      "memberApiKeys",
+      KEYS_DETAIL,
+      (req) =>
+        typeof req.body?.api_key === "string" &&
+        req.body.api_key.trim().length > 0,
+    ),
+    (_req, res) => res.json({ ok: true }),
+  );
   await new Promise<void>((resolve) => {
     server = app.listen(0, resolve);
   });
@@ -160,6 +174,44 @@ describe("requireMemberPolicy — memberMcpConnectors", () => {
   it("fails open when the org lookup throws", async () => {
     state.throws = true;
     const res = await postConnectors();
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("requireMemberPolicy — shouldGate predicate (save-only gate)", () => {
+  const putKeysSave = (body: unknown) =>
+    fetch(`${baseUrl}/keys-save-only`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  it("blocks a real SAVE under policy OFF", async () => {
+    state.resolve = membership({
+      memberApiKeys: false,
+      memberMcpConnectors: true,
+    });
+    const res = await putKeysSave({ api_key: "sk-live" });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ detail: KEYS_DETAIL });
+  });
+
+  it("lets a REMOVAL (null api_key) through under policy OFF", async () => {
+    state.resolve = membership({
+      memberApiKeys: false,
+      memberMcpConnectors: true,
+    });
+    const res = await putKeysSave({ api_key: null });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+
+  it("lets a REMOVAL (empty/whitespace api_key) through under policy OFF", async () => {
+    state.resolve = membership({
+      memberApiKeys: false,
+      memberMcpConnectors: true,
+    });
+    const res = await putKeysSave({ api_key: "   " });
     expect(res.status).toBe(200);
   });
 });

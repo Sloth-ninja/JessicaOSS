@@ -41,10 +41,16 @@ function makeDb(opts: {
   orgKeys?: OrgRow[];
   orgId?: string | null;
   orgKeysError?: boolean;
+  // Firm policy (WS8 PR B). Defaults ON (personal keys allowed) so the existing
+  // precedence tests are unchanged. `orgContextError` makes the user_profiles
+  // (org/policy) lookup fail, to exercise the deliberate policy fail-open.
+  allowMemberApiKeys?: boolean;
+  orgContextError?: boolean;
 }) {
   const userKeys = opts.userKeys ?? [];
   const orgKeys = opts.orgKeys ?? [];
   const orgId = opts.orgId ?? null;
+  const allowMemberApiKeys = opts.allowMemberApiKeys ?? true;
 
   return {
     from(table: string) {
@@ -55,8 +61,22 @@ function makeDb(opts: {
               eq() {
                 return {
                   maybeSingle() {
+                    if (opts.orgContextError) {
+                      return Promise.resolve({
+                        data: null,
+                        error: {
+                          code: "XX000",
+                          message: "user_profiles read failed",
+                        },
+                      });
+                    }
                     return Promise.resolve({
-                      data: { organisation_id: orgId },
+                      data: {
+                        organisation_id: orgId,
+                        organisation: orgId
+                          ? { allow_member_api_keys: allowMemberApiKeys }
+                          : null,
+                      },
                       error: null,
                     });
                   },
@@ -256,6 +276,70 @@ describe("userApiKeys precedence (user > firm > env)", () => {
       const keys = await getUserApiKeys(USER, db);
       expect(keys.companies_house).toBe("env-ch"); // env fallback intact
       expect(keys.claude).toBe("user-claude"); // personal key intact
+    });
+  });
+
+  describe("firm policy off — personal keys are inert (WS8 PR B)", () => {
+    it("getUserApiKeys skips the personal key and uses the firm key", async () => {
+      const db = makeDb({
+        orgId: ORG,
+        allowMemberApiKeys: false,
+        orgKeys: [orgKey("claude", "firm-claude")],
+      });
+      await saveUserApiKey(USER, "claude", "user-claude", db);
+      const keys = await getUserApiKeys(USER, db);
+      // Policy off ⇒ firm > env; the saved personal key does not apply.
+      expect(keys.claude).toBe("firm-claude");
+    });
+
+    it("getUserApiKeys falls back to env (not the personal key) with no firm key", async () => {
+      vi.stubEnv("COMPANIES_HOUSE_API_KEY", "env-ch");
+      const db = makeDb({ orgId: ORG, allowMemberApiKeys: false });
+      await saveUserApiKey(USER, "companies_house", "user-ch", db);
+      const keys = await getUserApiKeys(USER, db);
+      expect(keys.companies_house).toBe("env-ch");
+    });
+
+    it("getUserApiKeyStatus never reports source 'user' and lists the key as inert", async () => {
+      vi.stubEnv("COMPANIES_HOUSE_API_KEY", "env-ch");
+      const db = makeDb({
+        orgId: ORG,
+        allowMemberApiKeys: false,
+        orgKeys: [orgKey("companies_house", "firm-ch")],
+      });
+      await saveUserApiKey(USER, "companies_house", "user-ch", db);
+      const status = await getUserApiKeyStatus(USER, db);
+      expect(status.companies_house).toBe(true);
+      expect(status.sources.companies_house).toBe("firm");
+      expect(status.inertPersonalKeys).toEqual(["companies_house"]);
+    });
+
+    it("getUserApiKeyStatus reports source 'env' + inert when only env backs it", async () => {
+      vi.stubEnv("COMPANIES_HOUSE_API_KEY", "env-ch");
+      const db = makeDb({ orgId: ORG, allowMemberApiKeys: false });
+      await saveUserApiKey(USER, "companies_house", "user-ch", db);
+      const status = await getUserApiKeyStatus(USER, db);
+      expect(status.sources.companies_house).toBe("env");
+      expect(status.inertPersonalKeys).toEqual(["companies_house"]);
+    });
+
+    it("no inertPersonalKeys field when the member has no personal key", async () => {
+      const db = makeDb({ orgId: ORG, allowMemberApiKeys: false });
+      const status = await getUserApiKeyStatus(USER, db);
+      expect(status.inertPersonalKeys).toBeUndefined();
+    });
+
+    it("fail-open: when the org/policy lookup errors, the personal key still applies", async () => {
+      // A transient user_profiles (org/policy) read failure must not strand a
+      // member without their own key — availability first.
+      const db = makeDb({ orgId: ORG, orgContextError: true });
+      await saveUserApiKey(USER, "claude", "user-claude", db);
+      const keys = await getUserApiKeys(USER, db);
+      expect(keys.claude).toBe("user-claude");
+
+      const status = await getUserApiKeyStatus(USER, db);
+      expect(status.sources.claude).toBe("user");
+      expect(status.inertPersonalKeys).toBeUndefined();
     });
   });
 

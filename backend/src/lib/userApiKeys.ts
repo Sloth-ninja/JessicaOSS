@@ -5,7 +5,7 @@ import {
     encryptApiKey,
     type EncryptedKeyFields,
 } from "./apiKeyCrypto";
-import { getUserOrganisationId } from "./organisations";
+import { getUserOrganisationKeyContext } from "./organisations";
 import {
     getOrganisationApiKeys,
     getOrganisationApiKeyStatus,
@@ -23,6 +23,13 @@ export type ApiKeyProvider =
 export type ApiKeySource = "user" | "firm" | "env" | null;
 export type ApiKeyStatus = Record<ApiKeyProvider, boolean> & {
     sources: Record<ApiKeyProvider, ApiKeySource>;
+    /**
+     * Providers where the caller has a SAVED personal key that is NOT currently
+     * used because their firm disabled personal keys (WS8 PR B, policy off).
+     * The key is inert but still removable (removal always complies with the
+     * policy). Absent/empty when there is nothing inert to surface.
+     */
+    inertPersonalKeys?: ApiKeyProvider[];
 };
 
 type EncryptedKeyRow = EncryptedKeyFields & {
@@ -114,14 +121,20 @@ export async function getUserApiKeyStatus(
 
     // Firm layer: a firm-shared key overrides the env fallback (source "firm").
     // Orgless users (and unmigrated databases) have no firm layer — unchanged.
-    // Degrade honestly: any failure resolving the firm's keys must never break
-    // a whole firm's key status — log with a scoped tag and skip the firm layer
-    // (env fallback still applies), per the DURABLE_LESSONS discipline.
+    // The same lookup also yields the firm's personal-key policy (one query, no
+    // second round-trip). Degrade honestly: any failure resolving the firm must
+    // never break a whole firm's key status — log with a scoped tag, skip the
+    // firm layer (env fallback still applies), and FAIL OPEN on the policy
+    // (personalKeysAllowed stays true → personal keys still apply), per the
+    // DURABLE_LESSONS discipline. Availability first.
+    let personalKeysAllowed = true;
     try {
-        const organisationId = await getUserOrganisationId(db, userId);
-        if (organisationId) {
+        const orgContext = await getUserOrganisationKeyContext(db, userId);
+        if (orgContext) {
+            // Policy off ⇒ a member's personal key is not used (firm > env).
+            personalKeysAllowed = orgContext.allowMemberApiKeys;
             const firmStatus = await getOrganisationApiKeyStatus(
-                organisationId,
+                orgContext.id,
                 db,
             );
             for (const provider of PROVIDERS) {
@@ -144,14 +157,23 @@ export async function getUserApiKeyStatus(
         .eq("user_id", userId);
     if (error) throw error;
 
-    // A user's own key always takes precedence over firm + env, so it reports
-    // source "user" even when a firm or env key is also configured.
+    // A user's own key normally takes precedence over firm + env (source
+    // "user"). When the firm disables personal keys, a saved personal key is
+    // INERT — not layered into the resolved status, source never "user" — but we
+    // still report it under `inertPersonalKeys` so the member can remove it.
+    const inertPersonalKeys: ApiKeyProvider[] = [];
     for (const row of data ?? []) {
         const provider = normalizeApiKeyProvider(String(row.provider));
-        if (provider) {
+        if (!provider) continue;
+        if (personalKeysAllowed) {
             status[provider] = true;
             status.sources[provider] = "user";
+        } else {
+            inertPersonalKeys.push(provider);
         }
+    }
+    if (inertPersonalKeys.length > 0) {
+        status.inertPersonalKeys = inertPersonalKeys;
     }
 
     return status;
@@ -171,16 +193,20 @@ export async function getUserApiKeys(
         companies_house: envApiKey("companies_house"),
     };
 
-    // Firm layer: a firm-shared key overrides the env fallback but never a
-    // personal key. Orgless users / unmigrated databases keep env-only.
-    // Degrade honestly: any failure resolving the firm's keys must never break
-    // chat key resolution for a whole firm — log with a scoped tag and skip the
-    // firm layer (env fallback still applies), per the DURABLE_LESSONS
-    // discipline. A personal key still overrides everything below.
+    // Firm layer: a firm-shared key overrides the env fallback but (normally)
+    // never a personal key. The same lookup yields the firm's personal-key
+    // policy (one query). Orgless users / unmigrated databases keep env-only.
+    // Degrade honestly: any failure resolving the firm must never break chat key
+    // resolution for a whole firm — log, skip the firm layer (env fallback still
+    // applies), and FAIL OPEN on the policy (personalKeysAllowed stays true, so
+    // a personal key still overrides), per DURABLE_LESSONS. Availability first.
+    let personalKeysAllowed = true;
     try {
-        const organisationId = await getUserOrganisationId(db, userId);
-        if (organisationId) {
-            const firmKeys = await getOrganisationApiKeys(organisationId, db);
+        const orgContext = await getUserOrganisationKeyContext(db, userId);
+        if (orgContext) {
+            // Policy off ⇒ resolution is firm > env; the personal key is skipped.
+            personalKeysAllowed = orgContext.allowMemberApiKeys;
+            const firmKeys = await getOrganisationApiKeys(orgContext.id, db);
             for (const provider of PROVIDERS) {
                 const firmKey = firmKeys[provider];
                 if (firmKey?.trim()) apiKeys[provider] = firmKey;
@@ -192,6 +218,11 @@ export async function getUserApiKeys(
             { userId, error: err instanceof Error ? err.message : String(err) },
         );
     }
+
+    // When the firm disables personal keys, a saved personal key is inert — do
+    // not layer it over the firm/env key. (Availability: on the fail-open path
+    // above, personalKeysAllowed stays true and personal keys apply as before.)
+    if (!personalKeysAllowed) return apiKeys;
 
     const { data, error } = await db
         .from("user_api_keys")

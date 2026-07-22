@@ -42,8 +42,11 @@ export default function AccountLayout({
 
     // Firm policy (WS8 PR B): a member's own API-key / connector tabs are hidden
     // — not disabled — when their firm disables the policy. Orgless users and
-    // policy-ON firms see every tab. While the profile is still loading we show
-    // all tabs (default-permissive), so a tab never flickers away after paint.
+    // policy-ON firms see every tab. Tradeoff: default-permissive while the
+    // profile loads means a policy-OFF member may see a tab appear then vanish
+    // once the profile arrives. Chosen deliberately — the common cases (orgless,
+    // policy-ON) stay flash-free, and the routes themselves are server-enforced
+    // and render a neutral card, so a brief flash exposes nothing.
     const firm = profile?.firm ?? null;
     const tabs = TABS.filter((tab) => {
         if (tab.id === "api-keys") return !personalApiKeysBlocked(firm);

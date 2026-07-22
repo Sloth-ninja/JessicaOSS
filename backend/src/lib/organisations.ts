@@ -204,6 +204,55 @@ export async function getUserOrganisationId(
     return row?.organisation_id ?? null;
 }
 
+/** The caller's firm id plus the flags the API-key layer needs, in ONE query. */
+export interface OrganisationKeyContext {
+    id: string;
+    /** Firm allows members to configure/use their own provider API keys. */
+    allowMemberApiKeys: boolean;
+}
+
+/**
+ * Resolve the caller's firm id AND its `allow_member_api_keys` policy in a single
+ * join query — the API-key resolution layer (`userApiKeys.ts`) needs both to
+ * layer firm keys and to decide whether a member's personal key applies. Returns
+ * null for orgless users and unmigrated databases (42703-tolerant). Callers
+ * treat a thrown error as fail-open (personal keys still apply) — see
+ * `getUserApiKeyStatus` / `getUserApiKeys`.
+ */
+export async function getUserOrganisationKeyContext(
+    db: Db = createServerSupabase(),
+    userId: string,
+): Promise<OrganisationKeyContext | null> {
+    const { data, error } = await db
+        .from("user_profiles")
+        .select(
+            "organisation_id, organisation:organisations(allow_member_api_keys)",
+        )
+        .eq("user_id", userId)
+        .maybeSingle();
+    if (error) {
+        if (isMissingOrganisationColumn(error)) return null;
+        throw error;
+    }
+    const row = data as {
+        organisation_id?: string | null;
+        organisation:
+            | { allow_member_api_keys?: unknown }
+            | { allow_member_api_keys?: unknown }[]
+            | null;
+    } | null;
+    if (!row || !row.organisation_id) return null;
+    const embed = Array.isArray(row.organisation)
+        ? (row.organisation[0] ?? null)
+        : row.organisation;
+    const allow =
+        !!embed &&
+        typeof embed === "object" &&
+        (embed as { allow_member_api_keys?: unknown }).allow_member_api_keys ===
+            true;
+    return { id: row.organisation_id, allowMemberApiKeys: allow };
+}
+
 /**
  * Update a firm's member policies (allow_member_api_keys /
  * allow_member_mcp_connectors) and return the resulting policy flags. Scoped to

@@ -618,10 +618,17 @@ userRouter.get("/api-keys", requireAuth, async (_req, res) => {
 userRouter.put(
     "/api-keys/:provider",
     requireAuth,
-    // Firm policy: when a member's firm disables personal API keys, block the
-    // save (and the null-save "delete") before MFA — a blocked write should not
-    // prompt for step-up. Orgless / policy-ON callers are unaffected.
-    requireMemberPolicy("memberApiKeys", PERSONAL_API_KEYS_MANAGED_DETAIL),
+    // Firm policy: when a member's firm disables personal API keys, block a real
+    // SAVE before MFA (a blocked write should not prompt for step-up). A key
+    // REMOVAL (null/empty api_key) always passes — removing an inert key complies
+    // with the policy. Orgless / policy-ON callers are unaffected.
+    requireMemberPolicy(
+        "memberApiKeys",
+        PERSONAL_API_KEYS_MANAGED_DETAIL,
+        (req) =>
+            typeof req.body?.api_key === "string" &&
+            req.body.api_key.trim().length > 0,
+    ),
     requireMfaIfEnrolled,
     async (req, res) => {
         const userId = res.locals.userId as string;
@@ -864,6 +871,9 @@ userRouter.post(
 );
 
 // GET /user/mcp-connectors/oauth/callback
+// No requireMemberPolicy here on purpose: this leg is transitively protected by
+// the gated oauth/start (a valid `state` is only mintable there, which IS
+// policy-gated). If oauth/start is ever ungated, gate this too.
 userRouter.get("/mcp-connectors/oauth/callback", async (req, res) => {
     const nonce = crypto.randomBytes(16).toString("base64");
     const state = typeof req.query.state === "string" ? req.query.state : "";

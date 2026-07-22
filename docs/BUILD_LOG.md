@@ -71,7 +71,40 @@ are unchanged everywhere. No migration (`allow_member_api_keys` /
 - *Connector reads/refresh/tool-toggle stay open* — the plan gates
   create/update/delete/oauth-start; existing connectors must keep working in chat.
 
+**Follow-up (independent review, round 2 — approve-with-fixes).**
+- *Pre-existing personal keys under policy-OFF are now honestly inert, not
+  silently active.* Two halves:
+  (a) **Removal always allowed.** `requireMemberPolicy` gained an optional
+  `shouldGate(req)` predicate; on `PUT /user/api-keys/:provider` only a real
+  (non-empty) SAVE is gated — a null/empty api_key (removal) always passes, so
+  members can always clean up their own keys (removal complies with the policy).
+  (b) **Resolution is policy-aware.** `getUserApiKeys` / `getUserApiKeyStatus`
+  now resolve the caller's org id AND `allow_member_api_keys` in ONE query
+  (`getUserOrganisationKeyContext`, reused from the firm-key layer — no second
+  lookup); when the policy is off the personal-key layer is SKIPPED (resolution =
+  firm > env; status source never `"user"`). The existing fail-open is preserved:
+  on an org/policy lookup error the personal key still applies (availability
+  first). A saved-but-unused key is reported in a new optional
+  `ApiKeyStatus.inertPersonalKeys` so the member can remove it.
+- *Frontend:* the api-keys "managed by your firm" card now lists any lingering
+  personal key with a **Remove** action and copy ("Your saved key is not
+  currently used — your firm provides keys. You can remove it."), MFA-guarded,
+  `reloadProfile` on success. `inertPersonalKeys` threads through
+  `UserProfileContext`.
+- *Minor:* comment at `GET /mcp-connectors/oauth/callback` noting it is
+  transitively protected by the gated `oauth/start` (valid `state` only mintable
+  there); corrected the `account/layout.tsx` default-permissive comment to state
+  the real tradeoff (a policy-OFF tab may flash in then vanish during profile
+  load — chosen so orgless / policy-ON stay flash-free; routes are
+  server-enforced + neutral-carded).
+
 **Verification.**
+- Backend `npx tsc --noEmit` clean; `npx vitest run` **224 passed / 19 files**
+  (round-2 additions: `userApiKeys.test.ts` policy-off resolution — personal key
+  skipped for `getUserApiKeys` + status source `firm`/`env` + `inertPersonalKeys`
+  + fail-open-still-includes-personal; `auth.policy.test.ts` save-only gate —
+  SAVE→403, removal(null/empty)→pass).
+- Superseded first-round count below (215) — kept for provenance:
 - Backend `npx tsc --noEmit` clean; `npx vitest run` **215 passed / 19 files**
   (new `middleware/auth.policy.test.ts`: OFF→403 both details, ON→pass,
   admin-not-exempt→403, orgless→pass, lookup-error→fail-open-pass;
