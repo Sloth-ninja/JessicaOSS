@@ -7,6 +7,73 @@
 
 ---
 
+## 2026-07-22 — WS8 PR A: organisations, admin role, profile plumbing (branch `ws8-org-foundation`)
+
+**Scope:** foundation for firm administration. Adds the organisation (firm)
+entity, an admin/member role on profiles, firm-level shared API keys, backend
+resolution + an admin guard, and profile plumbing through to the frontend types.
+**No gating behaviour** — the policy flags are present but unconsumed; this PR
+changes nothing users can see yet. Self-hosters with no organisation keep the
+existing per-user behaviour everywhere. Owner-approved design (22/07/2026): pilot
+firm "Aria Grace Law CIC", admin `ezana-haddis@aria-grace.com`, new invitees
+auto-assigned to the default org.
+
+**Migration** `backend/migrations/20260721_01_firm_administration.sql` (basename
+human-authorised in `.claude/hooks/authorized-migrations.json`; additive only, no
+pilot data): `organisations` (name + `allow_member_api_keys` /
+`allow_member_mcp_connectors` / `enabled_connector_ids` jsonb, default-closed);
+`user_profiles` gains `organisation_id uuid references organisations on delete
+set null` + `role text default 'member' check (admin|member)` + an index;
+`organisation_api_keys` (encrypted, same AES-256-GCM columns as `user_api_keys`,
+`unique(organisation_id, provider)`). RLS enabled on both new tables and
+`revoke all … from anon, authenticated` (service_role untouched — the grant
+posture from DURABLE_LESSONS). Mirrored verbatim into `backend/schema.sql`
+(organisations created before `user_profiles` so the FK resolves in a fresh DB).
+
+**Backend.** New `src/lib/organisations.ts`: `resolveUserOrganisation` (single
+`user_profiles`⋈`organisations` join → `{id, name, role, policies}` | null),
+`isAdmin` (side-effect-free role read), and `assignDefaultOrganisation` — orgless
+users with `DEFAULT_ORGANISATION_ID` set are auto-assigned to the default firm as
+members on first profile load; idempotent and race-safe via the orgless guard
+encoded in the UPDATE predicate (`.is("organisation_id", null)`, DURABLE_LESSONS).
+All paths tolerate an unmigrated DB (Postgres `42703` → orgless), mirroring the
+`enforceLoginMfaIfEnabled` pattern. `src/middleware/auth.ts` adds `requireAdmin`
+(runs after `requireAuth`; fixed 403 detail for non-admin/orgless; whole body
+try/catch, generic 500). `routes/user.ts` `serializeProfile` now emits the
+structured membership under **`firm`** plus `isAdmin`, resolved in `loadProfile`
+and degrading to orgless (logged) on any org-subsystem error so the core profile
+load can never be blocked (login-spinner incident).
+
+**Frontend.** `mikeApi.ts` + `UserProfileContext` profile types carry
+`firm: OrganisationMembership | null` and `isAdmin`. No consumption yet.
+
+**Decision — `firm` vs `organisation` key.** `serializeProfile` already emits a
+free-text `organisation` string (the user's self-entered firm name, edited on the
+account page / collected at signup and consumed by the frontend). The structured
+membership is therefore emitted under a distinct key `firm` to avoid a breaking
+collision; the free-text field is left untouched (minimal-diff, no regression).
+
+**Seed doc** `docs/FIRM_SETUP.md`: operator runbook — apply the migration to
+production Supabase (paste file contents in the SQL editor, not a path), create
+the `Aria Grace Law CIC` org, backfill existing profiles, promote the admin by
+`auth.users` email, then set `DEFAULT_ORGANISATION_ID` as a Fly secret and
+redeploy. `DEFAULT_ORGANISATION_ID` documented in `backend/.env.example` +
+CLAUDE.md env registry.
+
+**Verification.**
+- Backend `npx tsc --noEmit` clean; `npx vitest run` → 15 files, 170 tests pass
+  (+20 new: `organisations.test.ts` 15 — resolution, policy coercion, orgless,
+  42703 fallback, default-org assignment + idempotency/no-stomp, isAdmin,
+  no-side-effect; `user.serialize.test.ts` 5 — admin/member/orgless payload
+  shapes + free-text/`firm` coexistence).
+- Frontend `npx tsc --noEmit` clean; `npm run lint` at the main baseline (the two
+  changed files introduce no new lint problems).
+- `npm run evals:smoke` from the main checkout → 4 passed, 0 failed.
+
+**Deferred:** admin-facing role/policy management UI + firm shared-key
+consumption (PR B/C). RLS is enabled with no client policies (backend-only
+access via service_role), matching the existing table posture.
+
 ## 2026-07-21 — Harden async handlers + profile-load error state (branch `harden-async-handlers`)
 
 **Incident (21/07/2026):** production Supabase lost the `service_role` grant on

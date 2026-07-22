@@ -1,5 +1,8 @@
 import { Request, Response, NextFunction } from "express";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createServerSupabase } from "../lib/supabase";
+import { isAdmin } from "../lib/organisations";
+import { safeErrorLog } from "../lib/safeError";
 
 const isDev = process.env.NODE_ENV !== "production";
 const devLog = (...args: Parameters<typeof console.log>) => {
@@ -122,6 +125,43 @@ export async function requireAuth(
     return;
   }
   next();
+}
+
+/**
+ * Gate a route to organisation admins. Runs AFTER requireAuth (which populates
+ * res.locals.userId). Non-admins and orgless users get a fixed 403 detail; the
+ * whole body is wrapped so a rejected async call can never escape as an
+ * unhandled rejection or leave the request hanging (docs/DURABLE_LESSONS.md).
+ */
+export async function requireAdmin(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const userId =
+      typeof res.locals.userId === "string" ? res.locals.userId : "";
+    if (!userId) {
+      res.status(401).json({ detail: "Missing auth session" });
+      return;
+    }
+
+    const db = createServerSupabase();
+    if (!(await isAdmin(db, userId))) {
+      res.status(403).json({ detail: "Administrator access is required." });
+      return;
+    }
+    next();
+  } catch (err) {
+    console.error("[auth/admin] admin check failed", {
+      method: req.method,
+      path: req.originalUrl,
+      userId: res.locals.userId,
+      error: safeErrorLog(err),
+    });
+    // Fixed generic detail — raw provider/DB text never reaches the client.
+    res.status(500).json({ detail: "Something went wrong. Please try again." });
+  }
 }
 
 export async function requireMfaIfEnrolled(

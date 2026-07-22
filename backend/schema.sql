@@ -6,6 +6,26 @@
 create extension if not exists "pgcrypto";
 
 -- ---------------------------------------------------------------------------
+-- Organisations (firms)
+-- ---------------------------------------------------------------------------
+-- A firm groups users under an admin. Policy flags default-closed: members may
+-- not use their own provider keys or MCP connectors unless the firm opts in.
+-- enabled_connector_ids is a jsonb array of connector ids enabled for members.
+-- Self-hosters with no organisation keep the existing per-user behaviour.
+
+create table if not exists public.organisations (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  allow_member_api_keys boolean not null default false,
+  allow_member_mcp_connectors boolean not null default false,
+  enabled_connector_ids jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.organisations enable row level security;
+
+-- ---------------------------------------------------------------------------
 -- User profiles
 -- ---------------------------------------------------------------------------
 
@@ -14,6 +34,10 @@ create table if not exists public.user_profiles (
   user_id uuid not null unique references auth.users(id) on delete cascade,
   display_name text,
   organisation text,
+  -- Firm membership + role. on delete set null degrades members to orgless
+  -- rather than deleting accounts when a firm is removed.
+  organisation_id uuid references public.organisations(id) on delete set null,
+  role text not null default 'member' check (role in ('admin', 'member')),
   tier text not null default 'Free',
   message_credits_used integer not null default 0,
   credits_reset_date timestamptz not null default (now() + interval '30 days'),
@@ -27,6 +51,9 @@ create table if not exists public.user_profiles (
 
 create index if not exists idx_user_profiles_user
   on public.user_profiles(user_id);
+
+create index if not exists idx_user_profiles_organisation
+  on public.user_profiles(organisation_id);
 
 create or replace function public.handle_new_user()
 returns trigger
@@ -66,6 +93,25 @@ create index if not exists idx_user_api_keys_user
   on public.user_api_keys(user_id);
 
 alter table public.user_api_keys enable row level security;
+
+-- Firm-level (shared) provider API keys. Same AES-256-GCM encryption scheme as
+-- user_api_keys; consumed by a later PR. Created here so the foundation is whole.
+create table if not exists public.organisation_api_keys (
+  id uuid primary key default gen_random_uuid(),
+  organisation_id uuid not null references public.organisations(id) on delete cascade,
+  provider text not null check (provider in ('claude', 'gemini', 'openai', 'openrouter', 'companies_house')),
+  encrypted_key text not null,
+  iv text not null,
+  auth_tag text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(organisation_id, provider)
+);
+
+create index if not exists idx_organisation_api_keys_organisation
+  on public.organisation_api_keys(organisation_id);
+
+alter table public.organisation_api_keys enable row level security;
 
 create table if not exists public.user_mcp_connectors (
   id uuid primary key default gen_random_uuid(),
@@ -757,6 +803,8 @@ create index if not exists tabular_review_chat_messages_chat_idx
 -- backend verifies the user's JWT. Do not grant the browser anon/authenticated
 -- roles direct table privileges for backend-owned data.
 
+revoke all on public.organisations from anon, authenticated;
+revoke all on public.organisation_api_keys from anon, authenticated;
 revoke all on public.user_profiles from anon, authenticated;
 revoke all on public.projects from anon, authenticated;
 revoke all on public.project_subfolders from anon, authenticated;

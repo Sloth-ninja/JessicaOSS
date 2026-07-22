@@ -12,6 +12,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
     type ApiKeyState,
     type ApiKeyProvider,
+    type OrganisationMembership,
     type UserProfile as ApiUserProfile,
     getUserProfile,
     isMfaRequiredError,
@@ -23,6 +24,9 @@ import {
 interface UserProfile {
     displayName: string | null;
     organisation: string | null;
+    /** Structured firm membership (WS8); null for orgless users. */
+    firm: OrganisationMembership | null;
+    isAdmin: boolean;
     messageCreditsUsed: number;
     creditsResetDate: string;
     creditsRemaining: number;
