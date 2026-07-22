@@ -49,34 +49,36 @@ Both queries should return the expected rows before you seed.
 
 ---
 
-## Step 2 — Create the pilot organisation
+## Step 2 — Create the firm and backfill members (one shot, no copying)
+
+This single statement creates the organisation if it does not exist, finds it
+if it does, and assigns every still-orgless user to it as a member. It is safe
+to re-run and never overwrites an existing membership. **No placeholder to
+replace** — the id is resolved inside the query. (An earlier version of this
+guide used a `<ORG_ID>` placeholder that had to be replaced by hand; pasting
+it literally fails with `22P02: invalid input syntax for type uuid`.)
 
 ```sql
-insert into public.organisations (name)
-values ('Aria Grace Law CIC')
-returning id;
-```
-
-**Copy the returned `id`** — you need it for Steps 3, 4 and 5. Call it
-`<ORG_ID>` below.
-
-If you re-run setup later, do not insert a duplicate — reuse the existing row:
-
-```sql
-select id from public.organisations where name = 'Aria Grace Law CIC';
-```
-
-## Step 3 — Backfill existing users into the firm
-
-Every existing pilot user joins the firm as a member. This only touches rows
-that are still orgless, so it is safe to re-run.
-
-```sql
+with existing as (
+  select id from public.organisations where name = 'Aria Grace Law CIC' limit 1
+), created as (
+  insert into public.organisations (name)
+  select 'Aria Grace Law CIC'
+  where not exists (select 1 from existing)
+  returning id
+), org as (
+  select id from existing union all select id from created
+)
 update public.user_profiles
-set organisation_id = '<ORG_ID>',
+set organisation_id = (select id from org),
     updated_at = now()
 where organisation_id is null;
 ```
+
+## Step 3 — (merged into Step 2)
+
+Nothing to do — the backfill happened above. Kept as a numbered placeholder so
+the remaining step numbers match earlier references.
 
 ## Step 4 — Promote the admin
 
@@ -110,10 +112,19 @@ If that email has not signed up yet, run this step after they do.
 ## Step 5 — Point new users at the firm (Fly secret) and redeploy
 
 Set `DEFAULT_ORGANISATION_ID` so new (and any remaining orgless) users are
-auto-assigned to the firm as members on first profile load:
+auto-assigned to the firm as members on first profile load. First fetch the
+firm's id:
+
+```sql
+select id from public.organisations where name = 'Aria Grace Law CIC';
+```
+
+Copy the UUID it returns, then run the command below **with the UUID pasted in
+place of the angle-bracket placeholder (remove the brackets too)** — this is
+the one step where a real value must be substituted by hand:
 
 ```bash
-fly secrets set DEFAULT_ORGANISATION_ID='<ORG_ID>' --app jessicaoss-api
+fly secrets set DEFAULT_ORGANISATION_ID='<paste-the-uuid-here>' --app jessicaoss-api
 ```
 
 Setting a secret triggers a redeploy. If it does not, redeploy manually:
