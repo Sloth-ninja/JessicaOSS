@@ -87,6 +87,10 @@ export default function ApiKeysPage() {
                                 profile?.apiKeys[field.provider].source ===
                                 "env"
                             }
+                            isFirmProvided={
+                                profile?.apiKeys[field.provider].source ===
+                                "firm"
+                            }
                             onSave={(value) =>
                                 updateApiKey(
                                     field.provider,
@@ -111,6 +115,7 @@ function ApiKeyField({
     placeholder,
     hasSavedKey,
     isServerConfigured,
+    isFirmProvided,
     onSave,
     onRemove,
 }: {
@@ -119,6 +124,7 @@ function ApiKeyField({
     placeholder: string;
     hasSavedKey: boolean;
     isServerConfigured: boolean;
+    isFirmProvided: boolean;
     onSave: (value: string) => Promise<boolean>;
     onRemove: () => Promise<boolean>;
 }) {
@@ -201,6 +207,12 @@ function ApiKeyField({
                 {description && (
                     <p className="text-sm text-gray-500 mb-3">{description}</p>
                 )}
+                {isFirmProvided && (
+                    <p className="text-sm text-gray-500 mb-3">
+                        Provided by your firm — your own key takes priority if
+                        added.
+                    </p>
+                )}
                 {isServerConfigured && (
                     <p className="text-sm text-gray-500 mb-3">
                         A server default is available. Add your own key to use
@@ -216,9 +228,11 @@ function ApiKeyField({
                             placeholder={
                                 isServerConfigured
                                     ? "Enter your own key to override the server default"
-                                    : hasSavedKey
-                                      ? "Saved key hidden"
-                                      : placeholder
+                                    : isFirmProvided
+                                      ? "Enter your own key to override the firm key"
+                                      : hasSavedKey
+                                        ? "Saved key hidden"
+                                        : placeholder
                             }
                             className={`pr-10 ${accountGlassInputClassName}`}
                             autoComplete="off"
@@ -254,7 +268,7 @@ function ApiKeyField({
                                 "Save"
                             )}
                         </button>
-                        {hasSavedKey && !isServerConfigured && (
+                        {hasSavedKey && !isServerConfigured && !isFirmProvided && (
                             <button
                                 type="button"
                                 onClick={handleRemove}

@@ -1,6 +1,15 @@
-import crypto from "crypto";
 import { createServerSupabase } from "./supabase";
 import type { UserApiKeys } from "./llm";
+import {
+    decryptApiKey,
+    encryptApiKey,
+    type EncryptedKeyFields,
+} from "./apiKeyCrypto";
+import { getUserOrganisationId } from "./organisations";
+import {
+    getOrganisationApiKeys,
+    getOrganisationApiKeyStatus,
+} from "./organisationApiKeys";
 
 type Db = ReturnType<typeof createServerSupabase>;
 export type ApiKeyProvider =
@@ -9,16 +18,15 @@ export type ApiKeyProvider =
     | "openai"
     | "openrouter"
     | "companies_house";
-export type ApiKeySource = "user" | "env" | null;
+// Precedence of a resolved key: a personal key ("user") beats a firm-shared key
+// ("firm"), which beats the server env fallback ("env"); null = unconfigured.
+export type ApiKeySource = "user" | "firm" | "env" | null;
 export type ApiKeyStatus = Record<ApiKeyProvider, boolean> & {
     sources: Record<ApiKeyProvider, ApiKeySource>;
 };
 
-type EncryptedKeyRow = {
+type EncryptedKeyRow = EncryptedKeyFields & {
     provider: ApiKeyProvider;
-    encrypted_key: string;
-    iv: string;
-    auth_tag: string;
 };
 
 const PROVIDERS: ApiKeyProvider[] = [
@@ -54,48 +62,19 @@ export function hasEnvApiKey(provider: ApiKeyProvider): boolean {
     return !!envApiKey(provider);
 }
 
-function encryptionKey(): Buffer {
-    const secret = process.env.USER_API_KEYS_ENCRYPTION_SECRET;
-    if (!secret) {
-        throw new Error("USER_API_KEYS_ENCRYPTION_SECRET is not configured");
-    }
-    return crypto.scryptSync(secret, "mike-user-api-keys-v1", 32);
-}
-
-function encrypt(value: string): Omit<EncryptedKeyRow, "provider"> {
-    const iv = crypto.randomBytes(12);
-    const cipher = crypto.createCipheriv("aes-256-gcm", encryptionKey(), iv);
-    const encrypted = Buffer.concat([
-        cipher.update(value, "utf8"),
-        cipher.final(),
-    ]);
-    return {
-        encrypted_key: encrypted.toString("base64"),
-        iv: iv.toString("base64"),
-        auth_tag: cipher.getAuthTag().toString("base64"),
-    };
+// AES-256-GCM crypto lives in ./apiKeyCrypto (shared with organisationApiKeys).
+// These thin wrappers keep the personal-key call sites and log tag unchanged.
+function encrypt(value: string): EncryptedKeyFields {
+    return encryptApiKey(value);
 }
 
 function decrypt(row: EncryptedKeyRow): string | null {
-    try {
-        const decipher = crypto.createDecipheriv(
-            "aes-256-gcm",
-            encryptionKey(),
-            Buffer.from(row.iv, "base64"),
-        );
-        decipher.setAuthTag(Buffer.from(row.auth_tag, "base64"));
-        const decrypted = Buffer.concat([
-            decipher.update(Buffer.from(row.encrypted_key, "base64")),
-            decipher.final(),
-        ]);
-        return decrypted.toString("utf8");
-    } catch (err) {
+    return decryptApiKey(row, (err) =>
         console.error("[user-api-keys] failed to decrypt stored key", {
             provider: row.provider,
             error: err instanceof Error ? err.message : String(err),
-        });
-        return null;
-    }
+        }),
+    );
 }
 
 function isProvider(value: string): value is ApiKeyProvider {
@@ -133,14 +112,30 @@ export async function getUserApiKeyStatus(
         }
     }
 
+    // Firm layer: a firm-shared key overrides the env fallback (source "firm").
+    // Orgless users (and unmigrated databases) have no firm layer — unchanged.
+    const organisationId = await getUserOrganisationId(db, userId);
+    if (organisationId) {
+        const firmStatus = await getOrganisationApiKeyStatus(
+            organisationId,
+            db,
+        );
+        for (const provider of PROVIDERS) {
+            if (firmStatus[provider]) {
+                status[provider] = true;
+                status.sources[provider] = "firm";
+            }
+        }
+    }
+
     const { data, error } = await db
         .from("user_api_keys")
         .select("provider")
         .eq("user_id", userId);
     if (error) throw error;
 
-    // A user's own key always takes precedence over the env fallback, so it
-    // reports source "user" even when an env key is also configured.
+    // A user's own key always takes precedence over firm + env, so it reports
+    // source "user" even when a firm or env key is also configured.
     for (const row of data ?? []) {
         const provider = normalizeApiKeyProvider(String(row.provider));
         if (provider) {
@@ -156,7 +151,8 @@ export async function getUserApiKeys(
     userId: string,
     db: Db = createServerSupabase(),
 ): Promise<UserApiKeys> {
-    // Env keys are the fallback; a user's own decrypted key overrides them below.
+    // Env keys are the fallback; firm keys, then the user's own key, override
+    // them below (user > firm > env).
     const apiKeys: UserApiKeys = {
         claude: envApiKey("claude"),
         gemini: envApiKey("gemini"),
@@ -164,6 +160,17 @@ export async function getUserApiKeys(
         openrouter: envApiKey("openrouter"),
         companies_house: envApiKey("companies_house"),
     };
+
+    // Firm layer: a firm-shared key overrides the env fallback but never a
+    // personal key. Orgless users / unmigrated databases keep env-only.
+    const organisationId = await getUserOrganisationId(db, userId);
+    if (organisationId) {
+        const firmKeys = await getOrganisationApiKeys(organisationId, db);
+        for (const provider of PROVIDERS) {
+            const firmKey = firmKeys[provider];
+            if (firmKey?.trim()) apiKeys[provider] = firmKey;
+        }
+    }
 
     const { data, error } = await db
         .from("user_api_keys")
@@ -174,9 +181,10 @@ export async function getUserApiKeys(
     for (const row of (data ?? []) as EncryptedKeyRow[]) {
         const provider = normalizeApiKeyProvider(row.provider);
         if (!provider) continue;
-        // The user's own key always takes precedence. Only fall back to the env
-        // key when decryption fails or yields an empty value (preserving the
-        // prior trim/decrypt-error behaviour rather than nulling a live env key).
+        // The user's own key always takes precedence. Only fall back to the
+        // underlying firm/env key when decryption fails or yields an empty value
+        // (preserving the prior trim/decrypt-error behaviour rather than nulling
+        // a live firm/env key).
         const decrypted = decrypt(row);
         if (decrypted?.trim()) apiKeys[provider] = decrypted;
     }

@@ -181,3 +181,163 @@ export async function isAdmin(
     if (!row || !row.organisation_id) return false;
     return normaliseRole(row.role) === "admin";
 }
+
+/**
+ * The caller's organisation id, or null when orgless / unmigrated (42703).
+ * Lightweight read used by the API-key precedence layer (user > firm > env) and
+ * the admin routes to scope every operation to the caller's own firm.
+ */
+export async function getUserOrganisationId(
+    db: Db = createServerSupabase(),
+    userId: string,
+): Promise<string | null> {
+    const { data, error } = await db
+        .from("user_profiles")
+        .select("organisation_id")
+        .eq("user_id", userId)
+        .maybeSingle();
+    if (error) {
+        if (isMissingOrganisationColumn(error)) return null;
+        throw error;
+    }
+    const row = data as { organisation_id?: string | null } | null;
+    return row?.organisation_id ?? null;
+}
+
+export interface OrganisationMember {
+    userId: string;
+    displayName: string | null;
+    email: string | null;
+    role: OrganisationRole;
+    createdAt: string | null;
+}
+
+type MemberProfileRow = {
+    user_id: string;
+    display_name: string | null;
+    role: string | null;
+    created_at: string | null;
+};
+
+/**
+ * List a firm's members: profile fields (display name, role, created_at) joined
+ * with the auth email where available. Emails come from the auth admin API (the
+ * auth schema is not exposed to PostgREST); a member whose email cannot be
+ * resolved simply reports null rather than failing the whole list.
+ */
+export async function listOrganisationMembers(
+    db: Db = createServerSupabase(),
+    organisationId: string,
+): Promise<OrganisationMember[]> {
+    const { data, error } = await db
+        .from("user_profiles")
+        .select("user_id, display_name, role, created_at")
+        .eq("organisation_id", organisationId);
+    if (error) throw error;
+
+    const rows = (data ?? []) as MemberProfileRow[];
+
+    // Resolve emails in one admin call. Paginated at pilot scale (perPage large
+    // enough for a single firm); a miss degrades to a null email, never a throw.
+    const emailByUserId = new Map<string, string | null>();
+    try {
+        const { data: authData, error: authError } =
+            await db.auth.admin.listUsers({ page: 1, perPage: 1000 });
+        if (!authError) {
+            for (const user of authData?.users ?? []) {
+                if (user?.id) emailByUserId.set(user.id, user.email ?? null);
+            }
+        }
+    } catch (err) {
+        console.error("[organisations] member email lookup failed", {
+            organisationId,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+
+    return rows.map((row) => ({
+        userId: row.user_id,
+        displayName: row.display_name,
+        email: emailByUserId.get(row.user_id) ?? null,
+        role: normaliseRole(row.role),
+        createdAt: row.created_at,
+    }));
+}
+
+export type SetMemberRoleResult =
+    | { ok: true; member: OrganisationMember }
+    | { ok: false; reason: "not_found" | "last_admin" };
+
+/**
+ * Change a member's role, scoped to the caller's own firm and guarded against
+ * removing the firm's last admin.
+ *
+ * Scoping and double-submit safety are encoded in the UPDATE predicate itself
+ * (`.eq("user_id", …).eq("organisation_id", callerOrgId)` + select-back; zero
+ * rows ⇒ the target is not in the caller's firm — DURABLE_LESSONS: encode state
+ * transitions in the predicate). The last-admin guard needs an aggregate a
+ * single PostgREST predicate can't express (no RPC — no new migration is
+ * authorised for PR C), so it counts the *other* admins immediately before the
+ * demotion and refuses when none remain. At pilot scale the residual
+ * check-then-write window is acceptable; noted for a future DB-function upgrade.
+ */
+export async function setMemberRole(
+    db: Db,
+    params: {
+        organisationId: string;
+        targetUserId: string;
+        role: OrganisationRole;
+    },
+): Promise<SetMemberRoleResult> {
+    const { organisationId, targetUserId, role } = params;
+
+    // Scoped read: the target must belong to the caller's firm.
+    const { data: targetData, error: targetError } = await db
+        .from("user_profiles")
+        .select("user_id, display_name, role, created_at")
+        .eq("user_id", targetUserId)
+        .eq("organisation_id", organisationId)
+        .maybeSingle();
+    if (targetError) throw targetError;
+    const target = targetData as MemberProfileRow | null;
+    if (!target) return { ok: false, reason: "not_found" };
+
+    // Last-admin guard: never demote the only remaining admin of the firm.
+    if (role === "member" && normaliseRole(target.role) === "admin") {
+        const { data: adminData, error: adminError } = await db
+            .from("user_profiles")
+            .select("user_id")
+            .eq("organisation_id", organisationId)
+            .eq("role", "admin");
+        if (adminError) throw adminError;
+        const otherAdmins = (adminData ?? []).filter(
+            (r) => (r as { user_id: string }).user_id !== targetUserId,
+        );
+        if (otherAdmins.length === 0) {
+            return { ok: false, reason: "last_admin" };
+        }
+    }
+
+    // Guarded write: scoped to the caller's firm; select-back confirms a hit.
+    const { data: updatedData, error: updateError } = await db
+        .from("user_profiles")
+        .update({ role, updated_at: new Date().toISOString() })
+        .eq("user_id", targetUserId)
+        .eq("organisation_id", organisationId)
+        .select("user_id, display_name, role, created_at");
+    if (updateError) throw updateError;
+    const updated = (updatedData ?? []) as MemberProfileRow[];
+    if (updated.length === 0) return { ok: false, reason: "not_found" };
+
+    const row = updated[0];
+    return {
+        ok: true,
+        member: {
+            userId: row.user_id,
+            displayName: row.display_name,
+            email: null,
+            role: normaliseRole(row.role),
+            createdAt: row.created_at,
+        },
+    };
+}
