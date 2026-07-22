@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AlertCircle, Check, ChevronDown, Loader2 } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, Info, Loader2 } from "lucide-react";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -29,12 +29,16 @@ import {
     accountGlassInputClassName,
 } from "../accountStyles";
 import { AccountSection } from "../AccountSection";
+import { personalApiKeysBlocked } from "../firmPolicy";
 
 type ModelPreferenceField = "titleModel" | "tabularModel";
 
 export default function ModelPreferencesPage() {
     const { profile, updateModelPreference } = useUserProfile();
     const localModels = profile?.localModels ?? [];
+    // Firm policy (WS8 PR B): when a member's firm provides model access (personal
+    // API keys off), surface an honest note — there is no key to add anywhere.
+    const firmProvidesModels = personalApiKeysBlocked(profile?.firm);
     const [savingField, setSavingField] = useState<ModelPreferenceField | null>(
         null,
     );
@@ -129,6 +133,19 @@ export default function ModelPreferencesPage() {
                     />
                 </div>
             </AccountSection>
+            {firmProvidesModels && (
+                <div className="mt-4 flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                    <Info className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                    <p className="text-sm leading-relaxed text-gray-600">
+                        <span className="font-medium text-gray-900">
+                            Model access is provided by{" "}
+                            {profile?.firm?.name ?? "your firm"}.
+                        </span>{" "}
+                        There is no key to add or manage here. Ask your firm
+                        admin if you need a model that isn&apos;t listed.
+                    </p>
+                </div>
+            )}
         </div>
     );
 }

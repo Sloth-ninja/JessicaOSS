@@ -7,6 +7,122 @@
 
 ---
 
+## 2026-07-22 — WS8 PR B: firm policy enforcement (keys + connectors) (branch `ws8-policy-enforcement`)
+
+**Scope:** make the two firm policies from PR C real. When a caller belongs to a
+firm whose policy is OFF, the matching personal WRITE routes are blocked (403,
+fixed detail) and the matching member UI surface is hidden; admins can now flip
+the policies live from Firm settings. Orgless self-hosters and policy-ON firms
+are unchanged everywhere. No migration (`allow_member_api_keys` /
+`allow_member_mcp_connectors` already exist from PR A); no new env vars.
+
+**Backend.**
+- New middleware factory `requireMemberPolicy(policy, detail)` in
+  `middleware/auth.ts`: reuses the existing org lookup (`resolveUserOrganisation`)
+  and gates a write route on a firm policy. Orgless callers and policy-ON firms
+  pass through; a policy-OFF firm gets a fixed 403 detail. **Admins are NOT
+  exempt** — an admin's personal-key / personal-connector writes follow the same
+  member policy (admins manage these on the firm surface; simpler and safer).
+  **Deliberate fail-open:** on ANY org-lookup error the middleware logs
+  (`safeErrorLog`) and calls `next()` as though the policy were ON — transiently
+  blocking a member's own writes on a DB hiccup is worse for availability than a
+  brief policy gap, and the whole body is wrapped so a rejection can never escape
+  as an unhandled rejection or hang the request (DURABLE_LESSONS 2026-07-21).
+- Gated write routes (`routes/user.ts`): `PUT /user/api-keys/:provider`
+  (`memberApiKeys`, "Personal API keys are managed by your firm."; the null-save
+  "delete" is the same route, so it is blocked too) and the personal MCP
+  connector writes — `POST /user/mcp-connectors`, `PATCH` + `DELETE
+  /mcp-connectors/:connectorId`, `POST /mcp-connectors/:connectorId/oauth/start`
+  (`memberMcpConnectors`, "Connectors are managed by your firm."). The gate runs
+  BEFORE `requireMfaIfEnrolled` so a blocked write never prompts for step-up.
+  **Reads stay open** (`GET` list/detail, plus `refresh-tools` / tool-toggle on
+  existing connectors) so a member's existing connectors keep working in chat —
+  only create/reconfigure/connect is gated, per the approved plan's explicit list.
+- `organisations.ts` adds `updateOrganisationPolicies(db, orgId, patch)` —
+  writes only the provided flags, select-back returns the authoritative state.
+- `routes/admin.ts` adds `PATCH /admin/policies` (`requireAdmin` router-level +
+  `requireMfaIfEnrolled`, `asyncHandler`): body `{memberApiKeys?,
+  memberMcpConnectors?}` (booleans; at least one; unknown fields 400), scoped to
+  the caller's own firm, returns `{ policies }`.
+
+**Frontend.**
+- New `(pages)/account/firmPolicy.tsx`: `personalApiKeysBlocked` /
+  `personalConnectorsBlocked` helpers + a neutral `FirmManagedCard`.
+- `account/layout.tsx` filters its TABS: the **API Keys** tab is absent when the
+  firm's `memberApiKeys` is off, **Connectors** when `memberMcpConnectors` is off
+  (org non-null). Default-permissive while the profile loads, so a tab never
+  flickers away after paint. Direct navigation to a hidden route renders the
+  neutral "Managed by your firm" card (api-keys + connectors pages), never an
+  error. Model Preferences shows the "Model access is provided by <firm>" note
+  when personal keys are off. Company Search's "add a key" empty state points a
+  policy-OFF member at their firm admin instead of the hidden API Keys tab.
+- Firm settings **Policies card is now live**: two `AccountToggle`s with an
+  optimistic flip inside the MFA-guarded action, rollback on error, and a
+  `reloadProfile()` on success so the admin's own tabs update immediately.
+- `mikeApi.ts` adds `updateFirmPolicies`.
+
+**Decisions.**
+- *Admins are not exempt from the member key/connector write gate* — they use the
+  firm-keys surface; one rule for the whole firm is simpler and safer than a
+  role carve-out. Admins are of course NOT blocked from the `/admin` firm-key or
+  policy routes.
+- *Fail-open on lookup error* (see backend note) — availability over a brief,
+  self-correcting policy gap; logged + code-commented at the seam.
+- *Connector reads/refresh/tool-toggle stay open* — the plan gates
+  create/update/delete/oauth-start; existing connectors must keep working in chat.
+
+**Follow-up (independent review, round 2 — approve-with-fixes).**
+- *Pre-existing personal keys under policy-OFF are now honestly inert, not
+  silently active.* Two halves:
+  (a) **Removal always allowed.** `requireMemberPolicy` gained an optional
+  `shouldGate(req)` predicate; on `PUT /user/api-keys/:provider` only a real
+  (non-empty) SAVE is gated — a null/empty api_key (removal) always passes, so
+  members can always clean up their own keys (removal complies with the policy).
+  (b) **Resolution is policy-aware.** `getUserApiKeys` / `getUserApiKeyStatus`
+  now resolve the caller's org id AND `allow_member_api_keys` in ONE query
+  (`getUserOrganisationKeyContext`, reused from the firm-key layer — no second
+  lookup); when the policy is off the personal-key layer is SKIPPED (resolution =
+  firm > env; status source never `"user"`). The existing fail-open is preserved:
+  on an org/policy lookup error the personal key still applies (availability
+  first). A saved-but-unused key is reported in a new optional
+  `ApiKeyStatus.inertPersonalKeys` so the member can remove it.
+- *Frontend:* the api-keys "managed by your firm" card now lists any lingering
+  personal key with a **Remove** action and copy ("Your saved key is not
+  currently used — your firm provides keys. You can remove it."), MFA-guarded,
+  `reloadProfile` on success. `inertPersonalKeys` threads through
+  `UserProfileContext`.
+- *Minor:* comment at `GET /mcp-connectors/oauth/callback` noting it is
+  transitively protected by the gated `oauth/start` (valid `state` only mintable
+  there); corrected the `account/layout.tsx` default-permissive comment to state
+  the real tradeoff (a policy-OFF tab may flash in then vanish during profile
+  load — chosen so orgless / policy-ON stay flash-free; routes are
+  server-enforced + neutral-carded).
+
+**Verification.**
+- Backend `npx tsc --noEmit` clean; `npx vitest run` **224 passed / 19 files**
+  (round-2 additions: `userApiKeys.test.ts` policy-off resolution — personal key
+  skipped for `getUserApiKeys` + status source `firm`/`env` + `inertPersonalKeys`
+  + fail-open-still-includes-personal; `auth.policy.test.ts` save-only gate —
+  SAVE→403, removal(null/empty)→pass).
+- Superseded first-round count below (215) — kept for provenance:
+- Backend `npx tsc --noEmit` clean; `npx vitest run` **215 passed / 19 files**
+  (new `middleware/auth.policy.test.ts`: OFF→403 both details, ON→pass,
+  admin-not-exempt→403, orgless→pass, lookup-error→fail-open-pass;
+  `admin.test.ts` extended: PATCH /policies authz, MFA-gate, validation×3,
+  scoped persistence; `user.serialize.test.ts` unchanged-shape still green).
+- Frontend `npx tsc --noEmit` clean; ESLint 0 errors on changed files (only
+  pre-existing baseline warnings in `connectors/page.tsx`). No framework for
+  frontend unit tests yet — manual states to verify: member policy-OFF (tabs
+  absent, direct-nav neutral cards, models note, company-search note), admin
+  toggles (optimistic + rollback on induced error, MFA step-up), orgless
+  (everything visible, no gating).
+- Backend changed src files are 4-space and not prettier-clean on `main` (no
+  prettier config; DURABLE_LESSONS 2026-07-07) — edits match existing style,
+  `prettier --write` deliberately NOT run; the new test file is prettier-clean.
+- `npm run evals:smoke` from the main checkout: 4 passed / 0 failed.
+
+---
+
 ## 2026-07-22 — WS8 PR C: firm API keys, admin area, member roles (branch `ws8-firm-keys`)
 
 **Scope:** the first user-visible firm-administration surface, built on the PR A

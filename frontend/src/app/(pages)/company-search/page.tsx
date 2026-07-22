@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { KeyRound, MessageSquare, Search } from "lucide-react";
 import { useUserProfile } from "@/contexts/UserProfileContext";
+import { personalApiKeysBlocked } from "@/app/(pages)/account/firmPolicy";
 import { PageHeader } from "@/app/components/shared/PageHeader";
 import { TableToolbar } from "@/app/components/shared/TableToolbar";
 import { SkeletonLine } from "@/app/components/shared/TablePrimitive";
@@ -104,6 +105,9 @@ export default function CompanySearchPage() {
     const keyConfigured = profile
         ? profile.apiKeys.companies_house.configured && !keyMissingFromApi
         : !keyMissingFromApi;
+    // Firm policy (WS8 PR B): a member whose firm manages keys can't add their
+    // own — point them at their firm admin instead of the hidden API keys tab.
+    const firmManagesKeys = personalApiKeysBlocked(profile?.firm);
 
     const searchSeq = useRef(0);
 
@@ -226,17 +230,28 @@ export default function CompanySearchPage() {
                         <h3 className="text-sm font-semibold text-gray-900">
                             Companies House key not configured
                         </h3>
-                        <p className="mt-1.5 text-[13px] leading-relaxed text-gray-500">
-                            Add a Companies House API key in Account → API keys
-                            to enable company search. Registration is free at
-                            developer.company-information.service.gov.uk.
-                        </p>
-                        <Link
-                            href="/account/api-keys"
-                            className="mt-4 inline-flex h-8 items-center rounded-md border border-gray-200 bg-white px-3 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50"
-                        >
-                            Go to API keys
-                        </Link>
+                        {firmManagesKeys ? (
+                            <p className="mt-1.5 text-[13px] leading-relaxed text-gray-500">
+                                Company search uses a Companies House key managed
+                                by {profile?.firm?.name ?? "your firm"}. Ask your
+                                firm admin to add one to enable it.
+                            </p>
+                        ) : (
+                            <>
+                                <p className="mt-1.5 text-[13px] leading-relaxed text-gray-500">
+                                    Add a Companies House API key in Account → API
+                                    keys to enable company search. Registration is
+                                    free at
+                                    developer.company-information.service.gov.uk.
+                                </p>
+                                <Link
+                                    href="/account/api-keys"
+                                    className="mt-4 inline-flex h-8 items-center rounded-md border border-gray-200 bg-white px-3 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50"
+                                >
+                                    Go to API keys
+                                </Link>
+                            </>
+                        )}
                     </div>
                 </div>
             ) : (

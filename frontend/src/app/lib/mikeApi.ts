@@ -305,6 +305,9 @@ export type LocalModelStatus = { configured: boolean; models: string[] };
 export type ApiKeyStatus = Record<ApiKeyProvider, boolean> & {
     sources?: Partial<Record<ApiKeyProvider, ApiKeySource>>;
     local?: LocalModelStatus;
+    // Providers where a saved personal key is inert because the firm disabled
+    // personal keys (WS8 PR B). Not in use, but still removable.
+    inertPersonalKeys?: ApiKeyProvider[];
 };
 
 export async function getApiKeyStatus(): Promise<ApiKeyStatus> {
@@ -370,6 +373,24 @@ export async function updateFirmMemberRole(
         },
     );
     return data.member;
+}
+
+/**
+ * Update the firm's member policies (WS8 PR B). Only the provided fields are
+ * changed; the server returns the resulting flags. Admin + MFA gated server-side.
+ */
+export async function updateFirmPolicies(
+    patch: Partial<OrganisationPolicies>,
+): Promise<OrganisationPolicies> {
+    const data = await apiRequest<{ policies: OrganisationPolicies }>(
+        "/admin/policies",
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(patch),
+        },
+    );
+    return data.policies;
 }
 
 export interface McpToolSummary {

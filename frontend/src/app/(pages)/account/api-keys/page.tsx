@@ -1,19 +1,24 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Info, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useUserProfile } from "@/contexts/UserProfileContext";
 import {
     MfaVerificationPopup,
     needsMfaVerification,
 } from "@/app/components/shared/MfaVerificationPopup";
-import { isMfaRequiredError, MikeApiError } from "@/app/lib/mikeApi";
+import {
+    isMfaRequiredError,
+    MikeApiError,
+    type ApiKeyProvider,
+} from "@/app/lib/mikeApi";
 import {
     accountGlassIconButtonClassName,
     accountGlassInputClassName,
 } from "../accountStyles";
 import { AccountSection } from "../AccountSection";
+import { FirmManagedCard, personalApiKeysBlocked } from "../firmPolicy";
 
 function saveErrorMessage(
     action: "save" | "remove",
@@ -58,6 +63,20 @@ const MODEL_API_KEY_FIELDS = [
 
 export default function ApiKeysPage() {
     const { profile, updateApiKey } = useUserProfile();
+
+    // Firm policy (WS8 PR B): the tab is hidden for members whose firm disables
+    // personal keys, but a direct navigation still lands here — render a neutral
+    // "managed by your firm" card rather than the editable form or an error. If
+    // the member has a lingering personal key (saved before the policy was
+    // turned off), it is inert but still removable — surfaced below the card.
+    if (personalApiKeysBlocked(profile?.firm)) {
+        return (
+            <FirmManagedApiKeys
+                firmName={profile?.firm?.name ?? "your firm"}
+                inertKeys={profile?.inertPersonalKeys ?? []}
+            />
+        );
+    }
 
     return (
         <div>
@@ -105,6 +124,116 @@ export default function ApiKeysPage() {
                     </div>
                 ))}
             </AccountSection>
+        </div>
+    );
+}
+
+const PROVIDER_LABELS: Record<string, string> = Object.fromEntries(
+    MODEL_API_KEY_FIELDS.map((field) => [field.provider, field.label]),
+);
+
+// Policy-off view: the neutral "managed by your firm" card, plus any lingering
+// personal keys (saved before the policy was turned off) with a Remove action.
+function FirmManagedApiKeys({
+    firmName,
+    inertKeys,
+}: {
+    firmName: string;
+    inertKeys: ApiKeyProvider[];
+}) {
+    const { reloadProfile } = useUserProfile();
+    const many = inertKeys.length > 1;
+    return (
+        <>
+            <FirmManagedCard
+                heading="API Keys"
+                title="Managed by your firm"
+                description={`Model access is provided by ${firmName}. There is no key to add or manage here. Ask your firm admin if you need a model that isn't listed.`}
+            />
+            {inertKeys.length > 0 && (
+                <AccountSection className="mt-4">
+                    <div className="px-4 py-5">
+                        <div className="flex items-start gap-3">
+                            <Info className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                            <p className="text-sm leading-relaxed text-gray-600">
+                                Your saved {many ? "keys are" : "key is"} not
+                                currently used — your firm provides keys. You can
+                                remove {many ? "them" : "it"}.
+                            </p>
+                        </div>
+                        <div className="mt-4 divide-y divide-gray-100 border-t border-gray-100">
+                            {inertKeys.map((provider) => (
+                                <InertKeyRow
+                                    key={provider}
+                                    provider={provider}
+                                    label={PROVIDER_LABELS[provider] ?? provider}
+                                    onRemoved={reloadProfile}
+                                />
+                            ))}
+                        </div>
+                    </div>
+                </AccountSection>
+            )}
+        </>
+    );
+}
+
+function InertKeyRow({
+    provider,
+    label,
+    onRemoved,
+}: {
+    provider: ApiKeyProvider;
+    label: string;
+    onRemoved: () => Promise<void>;
+}) {
+    const { updateApiKey } = useUserProfile();
+    const [busy, setBusy] = useState(false);
+    const [pendingMfa, setPendingMfa] = useState(false);
+
+    // Removal always complies with the firm policy (the backend lets the
+    // null-save through the gate), so it just needs the same MFA step-up as any
+    // key change. reloadProfile refreshes the true resolved state afterwards.
+    const remove = async () => {
+        setBusy(true);
+        try {
+            if (await needsMfaVerification()) {
+                setPendingMfa(true);
+                return;
+            }
+            await updateApiKey(provider, null);
+            await onRemoved();
+        } catch (error) {
+            if (isMfaRequiredError(error)) {
+                setPendingMfa(true);
+                return;
+            }
+            alert(`Failed to remove ${label}.`);
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div className="flex items-center justify-between gap-3 py-3 first:pt-0">
+            <span className="text-sm text-gray-800">{label}</span>
+            <button
+                type="button"
+                onClick={remove}
+                disabled={busy}
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-red-600 transition-colors hover:text-red-700 disabled:cursor-not-allowed disabled:text-red-300"
+            >
+                {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Remove
+            </button>
+            <MfaVerificationPopup
+                open={pendingMfa}
+                onCancel={() => setPendingMfa(false)}
+                onVerified={() => {
+                    setPendingMfa(false);
+                    void remove();
+                }}
+            />
         </div>
     );
 }

@@ -37,6 +37,9 @@ interface UserProfile {
     apiKeys: ApiKeyState;
     /** Server-reported local:-prefixed model ids; empty when unconfigured. */
     localModels: string[];
+    /** Providers with a saved personal key that is inert because the firm
+     *  disabled personal keys (WS8 PR B) — surfaced so it can be removed. */
+    inertPersonalKeys: ApiKeyProvider[];
 }
 
 // Cap how long the initial profile load may block the app. Without this, a
@@ -104,6 +107,7 @@ function toProfile(data: ApiUserProfile): UserProfile {
         mfaOnLogin: profile.mfaOnLogin === true,
         apiKeys,
         localModels: apiKeyStatus.local?.models ?? [],
+        inertPersonalKeys: apiKeyStatus.inertPersonalKeys ?? [],
     };
 }
 

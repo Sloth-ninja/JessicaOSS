@@ -5,7 +5,8 @@
 // requireAdmin). Three sections mirror the approved mock-up:
 //   1. Members     — list + role badges + promote/demote (MFA-gated).
 //   2. Firm API keys — per-provider shared keys used by all members.
-//   3. Policies    — SHOWN but read-only; enforcement lands in a later update.
+//   3. Policies    — live toggles (WS8 PR B); enforced server-side + reflected
+//                    in every member's account settings.
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -24,11 +25,14 @@ import {
     MikeApiError,
     saveFirmApiKey,
     updateFirmMemberRole,
+    updateFirmPolicies,
     type ApiKeyProvider,
     type FirmApiKeyStatus,
     type FirmMember,
+    type OrganisationPolicies,
     type OrganisationRole,
 } from "@/app/lib/mikeApi";
+import { AccountToggle } from "@/app/(pages)/account/AccountToggle";
 
 const FIRM_API_KEY_FIELDS: {
     provider: ApiKeyProvider;
@@ -512,56 +516,113 @@ function FirmApiKeyRow({
     );
 }
 
+const POLICY_ROWS: {
+    key: keyof OrganisationPolicies;
+    title: string;
+    desc: string;
+}[] = [
+    {
+        key: "memberApiKeys",
+        title: "Members may add personal API keys",
+        desc: "When off, the API Keys tab is hidden from members' account settings — removed, not disabled. Members rely on the firm keys above.",
+    },
+    {
+        key: "memberMcpConnectors",
+        title: "Members may add custom connectors",
+        desc: "When off, the Connectors tab is hidden from members' account settings. Firm-managed connectors remain available to everyone in chat.",
+    },
+];
+
 function PoliciesCard() {
-    const policies = [
-        {
-            title: "Members may add personal API keys",
-            desc: "When off, the API Keys tab is hidden from members' account settings. Members rely on the firm keys above.",
+    const mfa = useMfaGuardedAction();
+    const { profile, reloadProfile } = useUserProfile();
+    const [policies, setPolicies] = useState<OrganisationPolicies>(
+        profile?.firm?.policies ?? {
+            memberApiKeys: false,
+            memberMcpConnectors: false,
         },
-        {
-            title: "Members may add custom connectors",
-            desc: "When off, the Add custom connector option is hidden from members' Connectors gallery. Firm-managed connectors remain visible to everyone.",
-        },
-    ];
+    );
+    const [busyKey, setBusyKey] = useState<
+        keyof OrganisationPolicies | null
+    >(null);
+    const [error, setError] = useState<string | null>(null);
+
+    const toggle = (key: keyof OrganisationPolicies, next: boolean) => {
+        const previous = policies[key];
+        setError(null);
+        // The whole update (optimistic flip + network + reconcile) is the
+        // guarded action so it replays intact after an MFA step-up. On any
+        // failure the optimistic flip is rolled back; mfa-required is rethrown
+        // for the guard, everything else surfaces inline.
+        void mfa.run(async () => {
+            setBusyKey(key);
+            setPolicies((current) => ({ ...current, [key]: next }));
+            try {
+                const updated = await updateFirmPolicies({ [key]: next });
+                setPolicies(updated);
+                // Refresh the profile so the admin's own account tabs reflect
+                // the change immediately (their surfaces are gated too).
+                await reloadProfile();
+            } catch (err) {
+                setPolicies((current) => ({ ...current, [key]: previous }));
+                if (isMfaRequiredError(err)) throw err;
+                if (err instanceof MikeApiError && err.message) {
+                    setError(err.message);
+                } else {
+                    setError("Could not update that policy.");
+                }
+            } finally {
+                setBusyKey(null);
+            }
+        });
+    };
+
     return (
-        <SectionCard
-            title="Policies"
-            description="Control what members can configure for themselves."
-        >
-            <ul className="divide-y divide-gray-100">
-                {policies.map((policy) => (
-                    <li
-                        key={policy.title}
-                        className="flex items-start justify-between gap-4 px-5 py-4"
-                    >
-                        <div>
-                            <p className="text-sm font-semibold text-gray-900">
-                                {policy.title}
-                            </p>
-                            <p className="mt-0.5 max-w-lg text-xs leading-relaxed text-gray-500">
-                                {policy.desc}
-                            </p>
-                        </div>
-                        {/* Read-only placeholder toggle — enforcement is not yet
-                            wired up, so it is deliberately disabled. */}
-                        <span
-                            aria-disabled="true"
-                            title="Enforced in the next update"
-                            className="mt-0.5 inline-flex h-5 w-9 shrink-0 items-center rounded-full bg-gray-200 p-0.5 opacity-60"
+        <>
+            <SectionCard
+                title="Policies"
+                description="Control what members can configure for themselves."
+            >
+                {error && (
+                    <p className="px-5 py-3 text-xs text-red-600">{error}</p>
+                )}
+                <ul className="divide-y divide-gray-100">
+                    {POLICY_ROWS.map((policy) => (
+                        <li
+                            key={policy.key}
+                            className="flex items-start justify-between gap-4 px-5 py-4"
                         >
-                            <span className="h-4 w-4 rounded-full bg-white shadow-sm" />
-                        </span>
-                    </li>
-                ))}
-            </ul>
-            <div className="flex items-start gap-2.5 border-t border-gray-100 bg-gray-50 px-5 py-3.5">
-                <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
-                <p className="text-xs leading-relaxed text-gray-600">
-                    Policy enforcement is coming in the next update. These
-                    controls are shown here as a preview and cannot be changed
-                    yet.
-                </p>
-            </div>
-        </SectionCard>
+                            <div>
+                                <p className="text-sm font-semibold text-gray-900">
+                                    {policy.title}
+                                </p>
+                                <p className="mt-0.5 max-w-lg text-xs leading-relaxed text-gray-500">
+                                    {policy.desc}
+                                </p>
+                            </div>
+                            <div className="mt-0.5 shrink-0">
+                                <AccountToggle
+                                    size="md"
+                                    checked={policies[policy.key]}
+                                    loading={busyKey === policy.key}
+                                    onChange={(next) =>
+                                        toggle(policy.key, next)
+                                    }
+                                />
+                            </div>
+                        </li>
+                    ))}
+                </ul>
+                <div className="flex items-start gap-2.5 border-t border-gray-100 bg-gray-50 px-5 py-3.5">
+                    <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                    <p className="text-xs leading-relaxed text-gray-600">
+                        Changes take effect immediately. Turning a policy off
+                        hides the matching tab from members&apos; account
+                        settings — it is removed, not shown disabled.
+                    </p>
+                </div>
+            </SectionCard>
+            {mfa.popup}
+        </>
     );
 }
