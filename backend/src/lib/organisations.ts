@@ -293,6 +293,59 @@ export async function updateOrganisationPolicies(
     };
 }
 
+/**
+ * Read a firm's curated connector-gallery shortlist (`enabled_connector_ids`, a
+ * jsonb array of registry ids). WS8 PR E. An empty array is the documented "no
+ * curation" state (the whole shortlist is visible). Returns [] for orgless
+ * callers and unmigrated databases (42703-tolerant) — i.e. degrades to "show
+ * everything", never hides the gallery on a lookup miss.
+ */
+export async function getOrganisationEnabledConnectorIds(
+    db: Db,
+    organisationId: string,
+): Promise<string[]> {
+    const { data, error } = await db
+        .from("organisations")
+        .select("enabled_connector_ids")
+        .eq("id", organisationId)
+        .maybeSingle();
+    if (error) {
+        if (isMissingOrganisationColumn(error)) return [];
+        throw error;
+    }
+    const raw = (data as { enabled_connector_ids?: unknown } | null)
+        ?.enabled_connector_ids;
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((value): value is string => typeof value === "string");
+}
+
+/**
+ * Replace a firm's curated connector-gallery shortlist. Scoped to the given
+ * organisation id (the admin route resolves this from the caller's own
+ * membership). The caller is responsible for validating the ids against the
+ * registry before calling. Returns the persisted list.
+ */
+export async function setOrganisationEnabledConnectorIds(
+    db: Db,
+    organisationId: string,
+    enabledConnectorIds: string[],
+): Promise<string[]> {
+    const { data, error } = await db
+        .from("organisations")
+        .update({
+            enabled_connector_ids: enabledConnectorIds,
+            updated_at: new Date().toISOString(),
+        })
+        .eq("id", organisationId)
+        .select("enabled_connector_ids")
+        .maybeSingle();
+    if (error) throw error;
+    const raw = (data as { enabled_connector_ids?: unknown } | null)
+        ?.enabled_connector_ids;
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((value): value is string => typeof value === "string");
+}
+
 export interface OrganisationMember {
     userId: string;
     displayName: string | null;

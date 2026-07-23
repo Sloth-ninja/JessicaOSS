@@ -23,8 +23,18 @@ import {
 import { getLocalLlmStatus } from "../lib/llm/localConfig";
 import {
     type OrganisationMembership,
+    getOrganisationEnabledConnectorIds,
+    getUserOrganisationId,
     resolveUserOrganisation,
 } from "../lib/organisations";
+import {
+    getConnectorRegistryEntry,
+    isOneClickEntry,
+} from "../lib/mcpConnectorRegistry";
+import {
+    buildConnectorGallery,
+    normaliseServerUrl,
+} from "../lib/mcpConnectorGallery";
 import {
     completeUserMcpConnectorOAuth,
     createUserMcpConnector,
@@ -657,6 +667,101 @@ userRouter.put(
             res.status(500).json({ detail: "Could not update API key." });
         }
     },
+);
+
+// ── Connector gallery (WS8 PR E) ────────────────────────────────────────────
+
+// GET /user/connector-gallery — the firm-curated shortlist (each with a live
+// connection status derived from the caller's own connectors) plus the caller's
+// custom connectors. Reads are always open; adding is gated on the connect leg.
+userRouter.get(
+    "/connector-gallery",
+    requireAuth,
+    asyncHandler(async (_req, res) => {
+        const userId = res.locals.userId as string;
+        const db = createServerSupabase();
+        const orgId = await getUserOrganisationId(db, userId);
+        const enabledConnectorIds = orgId
+            ? await getOrganisationEnabledConnectorIds(db, orgId)
+            : null;
+        const items = await buildConnectorGallery(userId, enabledConnectorIds, db);
+        res.json({ items });
+    }),
+);
+
+// POST /user/connector-gallery/:registryId/connect — create (or reuse) the
+// connector for a one-click registry entry and start OAuth. A personal-connector
+// WRITE, so it is gated by the firm policy exactly like POST /mcp-connectors,
+// and MFA-stepped-up. Unknown / non-one-click / not-curated ids → 404 (generic).
+userRouter.post(
+    "/connector-gallery/:registryId/connect",
+    requireAuth,
+    requireMemberPolicy(
+        "memberMcpConnectors",
+        PERSONAL_CONNECTORS_MANAGED_DETAIL,
+    ),
+    requireMfaIfEnrolled,
+    asyncHandler(async (req, res) => {
+        const userId = res.locals.userId as string;
+        const db = createServerSupabase();
+
+        const entry = getConnectorRegistryEntry(req.params.registryId);
+        if (!entry || !isOneClickEntry(entry)) {
+            return void res
+                .status(404)
+                .json({ detail: "Unknown connector." });
+        }
+
+        // Respect the firm's curation: a member cannot connect an entry the firm
+        // has hidden. An empty list means "all visible" (documented semantic).
+        const orgId = await getUserOrganisationId(db, userId);
+        if (orgId) {
+            const enabled = await getOrganisationEnabledConnectorIds(db, orgId);
+            if (enabled.length > 0 && !enabled.includes(entry.id)) {
+                return void res
+                    .status(404)
+                    .json({ detail: "Unknown connector." });
+            }
+        }
+
+        try {
+            // Reuse an existing connector for this endpoint rather than creating
+            // a duplicate on a repeat/reconnect.
+            const wanted = normaliseServerUrl(entry.serverUrl);
+            const existing = (
+                await listUserMcpConnectors(userId, db, { includeTools: false })
+            ).find(
+                (connector) =>
+                    normaliseServerUrl(connector.serverUrl) === wanted,
+            );
+            const connector =
+                existing ??
+                (await createUserMcpConnector(
+                    userId,
+                    { name: entry.name, serverUrl: entry.serverUrl },
+                    db,
+                ));
+
+            const redirectUri = `${backendPublicUrl(req)}/user/mcp-connectors/oauth/callback`;
+            const result = await startUserMcpConnectorOAuth(
+                userId,
+                connector.id,
+                redirectUri,
+                db,
+            );
+            res.json({ connectorId: connector.id, ...result });
+        } catch (err) {
+            // Fixed generic detail; raw provider/DB text stays server-side (#22).
+            console.error("[user/connector-gallery] connect failed", {
+                userId,
+                registryId: entry.id,
+                error: errorMessage(err),
+            });
+            res.status(400).json({
+                detail: "Could not start connecting this connector.",
+            });
+        }
+    }),
 );
 
 // GET /user/mcp-connectors
