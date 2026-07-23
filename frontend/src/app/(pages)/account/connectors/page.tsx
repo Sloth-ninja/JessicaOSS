@@ -861,6 +861,7 @@ export default function ConnectorsPage() {
                                                 item.connectorId,
                                             )
                                         }
+                                        onAddCustom={() => setAddOpen(true)}
                                     />
                                 ))}
                             </ul>
@@ -1035,26 +1036,43 @@ function GalleryRow({
     connecting,
     onConnect,
     onOpen,
+    onAddCustom,
 }: {
     item: ConnectorGalleryItem;
     connecting: boolean;
     onConnect: () => void;
     onOpen: () => void;
+    onAddCustom: () => void;
 }) {
     const clickable = !!item.connectorId;
+    // A registry "custom" entry the user has not yet added: informational, not a
+    // connectable one-click and not one of the user's own connectors. Reads as
+    // "available via a custom connector" rather than a broken "Not connected".
+    const informational = item.availability === "custom" && !item.connectorId;
     return (
         <li className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3">
             <button
                 type="button"
-                onClick={onOpen}
-                disabled={!clickable}
-                className={`flex min-w-0 items-center gap-2.5 text-left ${
-                    clickable ? "cursor-pointer" : "cursor-default"
-                }`}
+                onClick={clickable ? onOpen : onAddCustom}
+                className="flex min-w-0 items-start gap-2.5 text-left"
             >
                 <LogoTile name={item.name} size="sm" />
-                <span className="truncate text-sm font-medium text-gray-900">
-                    {item.name}
+                <span className="min-w-0">
+                    <span className="flex items-center gap-2">
+                        <span className="truncate text-sm font-medium text-gray-900">
+                            {item.name}
+                        </span>
+                        {informational && (
+                            <span className="shrink-0 rounded-full border border-amber-600/20 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
+                                Custom
+                            </span>
+                        )}
+                    </span>
+                    {informational && (
+                        <span className="mt-0.5 block truncate text-xs text-gray-500">
+                            {item.description}
+                        </span>
+                    )}
                 </span>
             </button>
             <span className="truncate text-xs text-gray-500">
@@ -1074,6 +1092,14 @@ function GalleryRow({
                         {item.status === "connection_issue"
                             ? "Reconnect"
                             : "Connect"}
+                    </button>
+                ) : informational ? (
+                    <button
+                        type="button"
+                        onClick={onAddCustom}
+                        className="text-xs font-medium text-gray-500 transition-colors hover:text-gray-900"
+                    >
+                        Add via custom connector
                     </button>
                 ) : (
                     <StatusPill status={item.status} />

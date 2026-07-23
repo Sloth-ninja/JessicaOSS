@@ -94,6 +94,15 @@ export function filterRegistryByOrgCuration(
 
 // Latest tool-call status per connector, keyed by connector id. Only "error"
 // (the most recent call failed) matters for the gallery.
+//
+// Trade-off: this reads ONE shared 500-row newest-first window across all the
+// caller's connectors, not the latest row per connector. A very chatty connector
+// could push a quieter connector's most-recent (error) row out of the window,
+// so that connector would report no recent error. This degrades in the SAFE
+// direction — we may MISS an error (show "connected" instead of "connection
+// issue"), never INVENT one. At pilot scale (few connectors, modest call
+// volume) the window comfortably covers every connector; noted for a future
+// per-connector `distinct on` / RPC upgrade if connector counts grow.
 async function loadLatestAuditStatus(
     db: Db,
     connectorIds: string[],
@@ -178,7 +187,13 @@ export async function buildConnectorGallery(
             matched: !!connector,
             enabled: connector?.enabled ?? false,
             oauthConnected: connector?.oauthConnected ?? false,
-            isOAuth: connector?.authType === "oauth",
+            // Registry truth, NOT the stored auth_type: createUserMcpConnector
+            // persists auth_type "none" and only flips to "oauth" once a token is
+            // stored. Deriving isOAuth from the stored row would let an abandoned
+            // one-click connect (row exists, no token, no audit rows) skip the
+            // "OAuth not yet authorised → connection_issue" branch and read as
+            // "connected". Using the entry's availability keeps it honest.
+            isOAuth: entry.availability === "oauth",
             hasRecentError:
                 !!connector && latestAudit.get(connector.id) === "error",
         });

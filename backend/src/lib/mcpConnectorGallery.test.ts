@@ -193,6 +193,27 @@ describe("buildConnectorGallery", () => {
         expect(byId.get("google-calendar")?.connectable).toBe(true);
     });
 
+    it("reports an abandoned one-click connect as connection_issue, not connected", async () => {
+        // createUserMcpConnector persists auth_type "none"; it only flips to
+        // "oauth" once a token is stored. A row for a registry OAuth endpoint
+        // with no token and no audit rows is an abandoned connect — it must read
+        // connection_issue (Reconnect), never a false "connected".
+        listUserMcpConnectors.mockResolvedValue([
+            summary({
+                id: "drive-pending",
+                serverUrl: "https://drivemcp.googleapis.com/mcp/v1",
+                authType: "none",
+                oauthConnected: false,
+                enabled: true,
+            }),
+        ]);
+
+        const items = await buildConnectorGallery("user-1", null, makeDb([]));
+        const drive = items.find((i) => i.registryId === "google-drive");
+        expect(drive?.status).toBe("connection_issue");
+        expect(drive?.connectable).toBe(true);
+    });
+
     it("applies org curation and appends unmatched custom connectors", async () => {
         listUserMcpConnectors.mockResolvedValue([
             summary({
