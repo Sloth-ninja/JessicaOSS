@@ -1,9 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+    AlertTriangle,
     ChevronDown,
     Check,
+    CheckCircle2,
+    Circle,
     Eye,
     EyeOff,
     Loader2,
@@ -18,13 +21,16 @@ import {
     needsMfaVerification,
 } from "@/app/components/shared/MfaVerificationPopup";
 import {
+    type ConnectorGalleryItem,
+    type GalleryConnectionStatus,
     type McpConnectorSummary,
     MikeApiError,
+    connectGalleryConnector,
     createMcpConnector,
     deleteMcpConnector,
+    getConnectorGallery,
     getMcpConnector,
     isMfaRequiredError,
-    listMcpConnectors,
     refreshMcpConnectorTools,
     setMcpToolEnabled,
     startMcpConnectorOAuth,
@@ -43,6 +49,7 @@ import { FirmManagedCard, personalConnectorsBlocked } from "../firmPolicy";
 
 type PendingMfaAction =
     | { type: "create" }
+    | { type: "gallery-connect"; registryId: string }
     | { type: "save"; connectorId: string }
     | { type: "clear-token"; connectorId: string }
     | { type: "delete"; connectorId: string }
@@ -113,12 +120,74 @@ function isGoogleMcpConnector(connector: McpConnectorSummary) {
     }
 }
 
+// Opens the popup to the authorization URL and resolves once the OAuth callback
+// posts a success message (or rejects on failure / close / timeout). Shared by
+// the one-click gallery connect and the custom-connector add/refresh flows.
+function waitForOAuthPopup(
+    popup: Window,
+    connectorId: string,
+): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+        const timeout = window.setTimeout(() => {
+            cleanup();
+            reject(new Error("OAuth authorization timed out."));
+        }, 5 * 60 * 1000);
+        const poll = window.setInterval(() => {
+            if (popup.closed) {
+                cleanup();
+                reject(new Error("OAuth authorization window was closed."));
+            }
+        }, 700);
+        const cleanup = () => {
+            window.clearTimeout(timeout);
+            window.clearInterval(poll);
+            window.removeEventListener("message", onMessage);
+        };
+        const onMessage = (event: MessageEvent<McpOAuthPopupMessage>) => {
+            if (event.origin !== mcpOAuthMessageOrigin) return;
+            if (event.data?.type !== "mcp_oauth_result") return;
+            if (event.data.connectorId && event.data.connectorId !== connectorId) {
+                return;
+            }
+            const sourceWindow = event.source as Window | null;
+            sourceWindow?.postMessage(
+                { type: "mcp_oauth_result_ack" },
+                event.origin,
+            );
+            cleanup();
+            if (event.data.success) {
+                resolve();
+                return;
+            }
+            reject(new Error(event.data.detail || "OAuth authorization failed."));
+        };
+        window.addEventListener("message", onMessage);
+    });
+}
+
+function statusMeta(status: GalleryConnectionStatus): {
+    label: string;
+    tone: "connected" | "not_connected" | "issue";
+} {
+    if (status === "connected")
+        return { label: "Connected", tone: "connected" };
+    if (status === "connection_issue")
+        return { label: "Connection issue", tone: "issue" };
+    return { label: "Not connected", tone: "not_connected" };
+}
+
 export default function ConnectorsPage() {
     const { profile } = useUserProfile();
-    const [connectors, setConnectors] = useState<McpConnectorSummary[]>([]);
+    const [gallery, setGallery] = useState<ConnectorGalleryItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [busyKey, setBusyKey] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [filter, setFilter] = useState<
+        "all" | "connected" | "not_connected"
+    >("all");
+    const [connectingId, setConnectingId] = useState<string | null>(null);
+    const [addMenuOpen, setAddMenuOpen] = useState(false);
+    const addMenuRef = useRef<HTMLDivElement | null>(null);
     const [pendingMfaAction, setPendingMfaAction] =
         useState<PendingMfaAction | null>(null);
     const [addOpen, setAddOpen] = useState(false);
@@ -151,11 +220,10 @@ export default function ConnectorsPage() {
 
     const selectedConnector = selectedConnectorDetails;
 
-    const loadConnectors = useCallback(async () => {
-        setLoading(true);
+    const loadGallery = useCallback(async () => {
         setError(null);
         try {
-            setConnectors(await listMcpConnectors());
+            setGallery(await getConnectorGallery());
         } catch (err) {
             setError(
                 err instanceof Error ? err.message : "Failed to load connectors.",
@@ -166,8 +234,30 @@ export default function ConnectorsPage() {
     }, []);
 
     useEffect(() => {
-        void loadConnectors();
-    }, [loadConnectors]);
+        void loadGallery();
+    }, [loadGallery]);
+
+    // Close the Add menu on an outside click / Escape.
+    useEffect(() => {
+        if (!addMenuOpen) return;
+        const onClick = (event: MouseEvent) => {
+            if (
+                addMenuRef.current &&
+                !addMenuRef.current.contains(event.target as Node)
+            ) {
+                setAddMenuOpen(false);
+            }
+        };
+        const onKey = (event: KeyboardEvent) => {
+            if (event.key === "Escape") setAddMenuOpen(false);
+        };
+        document.addEventListener("mousedown", onClick);
+        document.addEventListener("keydown", onKey);
+        return () => {
+            document.removeEventListener("mousedown", onClick);
+            document.removeEventListener("keydown", onKey);
+        };
+    }, [addMenuOpen]);
 
     useEffect(() => {
         if (!selectedConnector) return;
@@ -188,6 +278,9 @@ export default function ConnectorsPage() {
         selectedConnector?.serverUrl,
     ]);
 
+    // Update the open details modal in place, and refresh the gallery in the
+    // background so its statuses/rows reflect the mutation. `options` preserve
+    // an already-loaded tool list when the update carries none.
     const replaceConnector = (
         connector: McpConnectorSummary,
         options: { preserveToolsOnEmpty?: boolean } = {},
@@ -202,26 +295,14 @@ export default function ConnectorsPage() {
             }
             return connector;
         };
-        setConnectors((prev) => {
-            const exists = prev.some((item) => item.id === connector.id);
-            if (!exists) return [connector, ...prev];
-            return prev.map((item) =>
-                item.id === connector.id ? mergeConnector(item) : item,
-            );
-        });
         setSelectedConnectorDetails((current) =>
             current?.id === connector.id ? mergeConnector(current) : current,
         );
+        void loadGallery();
     };
 
     const openConnectorDetails = async (connectorId: string) => {
         setSelectedConnectorId(connectorId);
-        setSelectedConnectorDetails((current) =>
-            current?.id === connectorId
-                ? current
-                : connectors.find((connector) => connector.id === connectorId) ??
-                  null,
-        );
         setDetailError(null);
         setLoadingConnectorId(connectorId);
         try {
@@ -302,53 +383,63 @@ export default function ConnectorsPage() {
         }
         popup.location.href = authorizationUrl;
 
-        await new Promise<void>((resolve, reject) => {
-            const timeout = window.setTimeout(() => {
-                cleanup();
-                reject(new Error("OAuth authorization timed out."));
-            }, 5 * 60 * 1000);
-            const poll = window.setInterval(() => {
-                if (popup.closed) {
-                    cleanup();
-                    reject(new Error("OAuth authorization window was closed."));
-                }
-            }, 700);
-            const cleanup = () => {
-                window.clearTimeout(timeout);
-                window.clearInterval(poll);
-                window.removeEventListener("message", onMessage);
-            };
-            const onMessage = (event: MessageEvent<McpOAuthPopupMessage>) => {
-                if (event.origin !== mcpOAuthMessageOrigin) return;
-                if (event.data?.type !== "mcp_oauth_result") return;
-                if (
-                    event.data.connectorId &&
-                    event.data.connectorId !== connectorId
-                ) {
-                    return;
-                }
-                const sourceWindow = event.source as Window | null;
-                sourceWindow?.postMessage(
-                    { type: "mcp_oauth_result_ack" },
-                    event.origin,
-                );
-                cleanup();
-                if (event.data.success) {
-                    resolve();
-                    return;
-                }
-                reject(
-                    new Error(
-                        event.data.detail || "OAuth authorization failed.",
-                    ),
-                );
-            };
-            window.addEventListener("message", onMessage);
-        });
+        await waitForOAuthPopup(popup, connectorId);
 
         const refreshed = await refreshMcpConnectorTools(connectorId);
         replaceConnector(refreshed);
         return refreshed;
+    };
+
+    // One-click connect for a gallery registry entry: create-or-reuse + OAuth on
+    // the server, then drive the same popup as the custom flow. MFA-gated (the
+    // server 403s and we replay after step-up).
+    const handleGalleryConnect = async (registryId: string) => {
+        setError(null);
+        if (await needsMfaVerification()) {
+            setPendingMfaAction({ type: "gallery-connect", registryId });
+            return;
+        }
+        const popup = window.open(
+            "about:blank",
+            "mike_mcp_oauth",
+            "popup,width=560,height=720,menubar=no,toolbar=no,location=no,status=no",
+        );
+        setConnectingId(registryId);
+        try {
+            const { connectorId, authorizationUrl, alreadyAuthorized } =
+                await connectGalleryConnector(registryId);
+            if (alreadyAuthorized) {
+                popup?.close();
+                await refreshMcpConnectorTools(connectorId);
+                await loadGallery();
+                return;
+            }
+            if (!authorizationUrl) {
+                popup?.close();
+                throw new Error("OAuth authorization URL was not returned.");
+            }
+            if (!popup) {
+                window.location.assign(authorizationUrl);
+                return;
+            }
+            popup.location.href = authorizationUrl;
+            await waitForOAuthPopup(popup, connectorId);
+            await refreshMcpConnectorTools(connectorId);
+            await loadGallery();
+        } catch (err) {
+            popup?.close();
+            if (isMfaRequiredError(err)) {
+                setPendingMfaAction({ type: "gallery-connect", registryId });
+                return;
+            }
+            setError(
+                err instanceof Error
+                    ? err.message
+                    : "Could not connect this connector.",
+            );
+        } finally {
+            setConnectingId(null);
+        }
     };
 
     const handleCreate = async () => {
@@ -555,13 +646,11 @@ export default function ConnectorsPage() {
             setBusyKey(`delete:${connectorId}`);
             try {
                 await deleteMcpConnector(connectorId);
-                setConnectors((prev) =>
-                    prev.filter((item) => item.id !== connectorId),
-                );
                 if (selectedConnectorId === connectorId) {
                     setSelectedConnectorId(null);
                     setSelectedConnectorDetails(null);
                 }
+                await loadGallery();
             } finally {
                 setBusyKey(null);
             }
@@ -573,6 +662,9 @@ export default function ConnectorsPage() {
         setPendingMfaAction(null);
         if (!action) return;
         if (action.type === "create") await handleCreate();
+        if (action.type === "gallery-connect") {
+            await handleGalleryConnect(action.registryId);
+        }
         if (action.type === "save") await handleSaveSelectedConnector();
         if (action.type === "clear-token") {
             await handleClearBearerToken(action.connectorId);
@@ -591,6 +683,36 @@ export default function ConnectorsPage() {
         }
     };
 
+    // Filter counts. "Not connected" groups everything that is not connected
+    // (including connection issues), matching the mock-up's two-way split.
+    const counts = useMemo(() => {
+        const connected = gallery.filter(
+            (item) => item.status === "connected",
+        ).length;
+        return {
+            all: gallery.length,
+            connected,
+            not_connected: gallery.length - connected,
+        };
+    }, [gallery]);
+
+    const visibleItems = useMemo(
+        () =>
+            gallery.filter((item) =>
+                filter === "all"
+                    ? true
+                    : filter === "connected"
+                      ? item.status === "connected"
+                      : item.status !== "connected",
+            ),
+        [gallery, filter],
+    );
+
+    const popularItems = useMemo(
+        () => gallery.filter((item) => item.popular),
+        [gallery],
+    );
+
     // Firm policy (WS8 PR B): members whose firm disables custom connectors have
     // this tab hidden; a direct navigation renders a neutral card rather than the
     // gallery or an error. Placed after all hooks to respect the rules of hooks.
@@ -606,19 +728,41 @@ export default function ConnectorsPage() {
 
     return (
         <div>
-            <div className="mb-4">
-                <div className="flex items-center justify-between gap-3">
-                    <h2 className="font-serif text-2xl font-medium text-gray-900">
-                        Connectors
-                    </h2>
+            <div className="mb-4 flex items-center justify-between gap-3">
+                <h2 className="font-serif text-2xl font-medium text-gray-900">
+                    Connectors
+                </h2>
+                <div className="relative" ref={addMenuRef}>
                     <button
                         type="button"
-                        onClick={() => setAddOpen(true)}
+                        onClick={() => setAddMenuOpen((open) => !open)}
+                        aria-haspopup="menu"
+                        aria-expanded={addMenuOpen}
                         className={`inline-flex h-9 items-center gap-1.5 text-sm ${accountGlassPrimaryButtonClassName}`}
                     >
                         <Plus className="h-4 w-4" />
                         Add
+                        <ChevronDown className="h-4 w-4" />
                     </button>
+                    {addMenuOpen && (
+                        <div
+                            role="menu"
+                            className="absolute right-0 z-50 mt-1.5 w-56 rounded-xl border border-white/70 bg-white/90 p-1 shadow-[0_12px_32px_rgba(15,23,42,0.14)] backdrop-blur-xl"
+                        >
+                            <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                    setAddMenuOpen(false);
+                                    setAddOpen(true);
+                                }}
+                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100"
+                            >
+                                <Plus className="h-4 w-4 text-gray-500" />
+                                Add custom connector
+                            </button>
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -628,27 +772,102 @@ export default function ConnectorsPage() {
                 </div>
             )}
 
-            <div className="space-y-3">
-                {loading ? (
-                    <ConnectorsSkeleton />
-                ) : connectors.length === 0 ? (
-                    <AccountSection className="p-4">
-                        <p className="text-sm text-gray-500">
-                            No connectors yet.
-                        </p>
+            {loading ? (
+                <GallerySkeleton />
+            ) : (
+                <>
+                    {popularItems.length > 0 && (
+                        <div className="mb-6">
+                            <p className="mb-2 text-xs font-medium text-gray-500">
+                                Popular
+                            </p>
+                            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                                {popularItems.map((item) => (
+                                    <PopularConnectorCard
+                                        key={item.key}
+                                        item={item}
+                                        connecting={connectingId === item.registryId}
+                                        onConnect={() =>
+                                            item.registryId &&
+                                            void handleGalleryConnect(
+                                                item.registryId,
+                                            )
+                                        }
+                                        onOpen={() =>
+                                            item.connectorId &&
+                                            void openConnectorDetails(
+                                                item.connectorId,
+                                            )
+                                        }
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="mb-3 flex items-center gap-5 border-b border-gray-200">
+                        {(
+                            [
+                                ["all", "All", counts.all],
+                                ["connected", "Connected", counts.connected],
+                                [
+                                    "not_connected",
+                                    "Not connected",
+                                    counts.not_connected,
+                                ],
+                            ] as const
+                        ).map(([key, label, count]) => (
+                            <button
+                                key={key}
+                                type="button"
+                                onClick={() => setFilter(key)}
+                                className={`-mb-px flex h-9 items-center gap-1.5 border-b-2 text-xs font-medium transition-colors ${
+                                    filter === key
+                                        ? "border-gray-900 text-gray-900"
+                                        : "border-transparent text-gray-500 hover:text-gray-800"
+                                }`}
+                            >
+                                {label}
+                                <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">
+                                    {count}
+                                </span>
+                            </button>
+                        ))}
+                    </div>
+
+                    <AccountSection className="overflow-hidden">
+                        {visibleItems.length === 0 ? (
+                            <p className="px-4 py-6 text-sm text-gray-500">
+                                No connectors to show.
+                            </p>
+                        ) : (
+                            <ul className="divide-y divide-gray-100">
+                                {visibleItems.map((item) => (
+                                    <GalleryRow
+                                        key={item.key}
+                                        item={item}
+                                        connecting={
+                                            connectingId === item.registryId
+                                        }
+                                        onConnect={() =>
+                                            item.registryId &&
+                                            void handleGalleryConnect(
+                                                item.registryId,
+                                            )
+                                        }
+                                        onOpen={() =>
+                                            item.connectorId &&
+                                            void openConnectorDetails(
+                                                item.connectorId,
+                                            )
+                                        }
+                                    />
+                                ))}
+                            </ul>
+                        )}
                     </AccountSection>
-                ) : (
-                    connectors.map((connector) => (
-                        <ConnectorRow
-                            key={connector.id}
-                            connector={connector}
-                            busyKey={busyKey}
-                            onOpen={() => void openConnectorDetails(connector.id)}
-                            onConnectorEnabled={handleConnectorEnabled}
-                        />
-                    ))
-                )}
-            </div>
+                </>
+            )}
 
             <AddMcpConnectorModal
                 open={addOpen}
@@ -710,102 +929,191 @@ export default function ConnectorsPage() {
     );
 }
 
-function ConnectorsSkeleton() {
+// Neutral initial-letter tile (NO real brand-logo assets). The background is
+// picked deterministically from the name so tiles are stable but varied.
+const TILE_BACKGROUNDS = [
+    "bg-gray-800",
+    "bg-gray-700",
+    "bg-gray-900",
+    "bg-gray-600",
+    "bg-gray-500",
+];
+
+function tileBackground(name: string): string {
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) {
+        hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+    }
+    return TILE_BACKGROUNDS[hash % TILE_BACKGROUNDS.length];
+}
+
+function LogoTile({ name, size = "md" }: { name: string; size?: "sm" | "md" }) {
+    const dimension = size === "sm" ? "h-6 w-6 text-[11px]" : "h-9 w-9 text-base";
     return (
-        <>
-            {Array.from({ length: 3 }).map((_, index) => (
-                <AccountSection key={index} className="px-4 py-3">
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-3">
-                        <div className="flex min-h-5 min-w-0 items-center gap-2">
-                            <div className="h-3.5 w-28 animate-pulse rounded bg-gray-100" />
-                            <div className="h-1 w-1 rounded-full bg-gray-100" />
-                            <div className="h-3 w-12 animate-pulse rounded bg-gray-100" />
-                        </div>
-                        <div className="flex min-h-5 shrink-0 items-center justify-self-end gap-1.5">
-                            <div className="h-3 w-12 animate-pulse rounded bg-gray-100" />
-                            <div className="h-4 w-7 animate-pulse rounded-full bg-gray-100" />
-                        </div>
-                        <div className="flex min-h-4 min-w-0 items-center">
-                            <div className="h-3 w-full max-w-sm animate-pulse rounded bg-gray-100" />
-                        </div>
-                        <div className="flex min-h-4 items-center justify-self-end">
-                            <div className="h-3 w-12 animate-pulse rounded bg-gray-100" />
-                        </div>
-                    </div>
-                </AccountSection>
-            ))}
-        </>
+        <span
+            aria-hidden
+            className={`flex shrink-0 items-center justify-center rounded-lg font-serif text-white ${dimension} ${tileBackground(name)}`}
+        >
+            {name.trim().charAt(0).toUpperCase() || "?"}
+        </span>
     );
 }
 
-function ConnectorRow({
-    connector,
-    busyKey,
-    onOpen,
-    onConnectorEnabled,
-}: {
-    connector: McpConnectorSummary;
-    busyKey: string | null;
-    onOpen: () => void;
-    onConnectorEnabled: (
-        connectorId: string,
-        enabled: boolean,
-    ) => Promise<void>;
-}) {
-    const toolCount = connector.toolCount ?? connector.tools.length;
-
+function StatusPill({ status }: { status: GalleryConnectionStatus }) {
+    const meta = statusMeta(status);
+    if (meta.tone === "connected") {
+        return (
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-green-700">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                {meta.label}
+            </span>
+        );
+    }
+    if (meta.tone === "issue") {
+        return (
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-800">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                {meta.label}
+            </span>
+        );
+    }
     return (
-        <AccountSection
-            className="cursor-pointer px-4 py-3 transition-colors hover:bg-white/70"
-            role="button"
-            tabIndex={0}
-            onClick={onOpen}
-            onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    onOpen();
-                }
-            }}
-        >
-            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-3">
-                <div className="min-w-0 text-left">
-                    <h3 className="flex min-w-0 items-center gap-2 text-sm font-semibold text-gray-900">
-                        <span className="truncate">{connector.name}</span>
-                        <span className="h-1 w-1 rounded-full bg-gray-300" />
-                        <span className="shrink-0 text-xs font-medium text-gray-500">
-                            {toolCount} {toolCount === 1 ? "tool" : "tools"}
-                        </span>
-                    </h3>
-                </div>
-                <div
-                    className="shrink-0 justify-self-end"
-                    onClick={(event) => event.stopPropagation()}
-                >
-                    <AccountToggle
-                        checked={connector.enabled}
-                        disabled={busyKey === `connector:${connector.id}`}
-                        loading={busyKey === `connector:${connector.id}`}
-                        label={connector.enabled ? "Enabled" : "Disabled"}
-                        onChange={(enabled) =>
-                            void onConnectorEnabled(connector.id, enabled)
-                        }
-                    />
-                </div>
-                <p className="min-w-0 truncate text-xs text-gray-500">
-                    {connector.serverUrl}
+        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500">
+            <Circle className="h-3.5 w-3.5" />
+            {meta.label}
+        </span>
+    );
+}
+
+function PopularConnectorCard({
+    item,
+    connecting,
+    onConnect,
+    onOpen,
+}: {
+    item: ConnectorGalleryItem;
+    connecting: boolean;
+    onConnect: () => void;
+    onOpen: () => void;
+}) {
+    return (
+        <AccountSection className="flex flex-col items-start gap-2.5 p-4">
+            <LogoTile name={item.name} />
+            <div className="min-w-0">
+                <p className="text-sm font-semibold text-gray-900">
+                    {item.name}
                 </p>
+                <p className="text-xs text-gray-500">{item.category}</p>
+            </div>
+            {item.status === "connected" ? (
                 <button
                     type="button"
-                    onClick={(event) => {
-                        event.stopPropagation();
-                        onOpen();
-                    }}
-                    className="shrink-0 justify-self-end text-xs font-medium text-gray-500 transition-colors hover:text-gray-950"
+                    onClick={onOpen}
+                    className="mt-1 flex w-full items-center justify-center rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50"
                 >
-                    Details
+                    <StatusPill status="connected" />
                 </button>
-            </div>
+            ) : (
+                <button
+                    type="button"
+                    onClick={onConnect}
+                    disabled={connecting}
+                    className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                    {connecting && (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    )}
+                    {item.status === "connection_issue" ? "Reconnect" : "Connect"}
+                </button>
+            )}
         </AccountSection>
+    );
+}
+
+function GalleryRow({
+    item,
+    connecting,
+    onConnect,
+    onOpen,
+}: {
+    item: ConnectorGalleryItem;
+    connecting: boolean;
+    onConnect: () => void;
+    onOpen: () => void;
+}) {
+    const clickable = !!item.connectorId;
+    return (
+        <li className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3">
+            <button
+                type="button"
+                onClick={onOpen}
+                disabled={!clickable}
+                className={`flex min-w-0 items-center gap-2.5 text-left ${
+                    clickable ? "cursor-pointer" : "cursor-default"
+                }`}
+            >
+                <LogoTile name={item.name} size="sm" />
+                <span className="truncate text-sm font-medium text-gray-900">
+                    {item.name}
+                </span>
+            </button>
+            <span className="truncate text-xs text-gray-500">
+                {item.category}
+            </span>
+            <span className="flex items-center justify-end">
+                {item.connectable ? (
+                    <button
+                        type="button"
+                        onClick={onConnect}
+                        disabled={connecting}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                        {connecting && (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        )}
+                        {item.status === "connection_issue"
+                            ? "Reconnect"
+                            : "Connect"}
+                    </button>
+                ) : (
+                    <StatusPill status={item.status} />
+                )}
+            </span>
+        </li>
+    );
+}
+
+function GallerySkeleton() {
+    return (
+        <>
+            <div className="mb-6">
+                <div className="mb-2 h-3 w-16 animate-pulse rounded bg-gray-100" />
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {Array.from({ length: 3 }).map((_, index) => (
+                        <AccountSection
+                            key={index}
+                            className="flex flex-col gap-2.5 p-4"
+                        >
+                            <div className="h-9 w-9 animate-pulse rounded-lg bg-gray-100" />
+                            <div className="h-3.5 w-24 animate-pulse rounded bg-gray-100" />
+                            <div className="h-7 w-full animate-pulse rounded-md bg-gray-100" />
+                        </AccountSection>
+                    ))}
+                </div>
+            </div>
+            <AccountSection className="divide-y divide-gray-100">
+                {Array.from({ length: 4 }).map((_, index) => (
+                    <div
+                        key={index}
+                        className="flex items-center gap-2.5 px-4 py-3"
+                    >
+                        <div className="h-6 w-6 animate-pulse rounded-lg bg-gray-100" />
+                        <div className="h-3.5 w-32 animate-pulse rounded bg-gray-100" />
+                        <div className="ml-auto h-3 w-20 animate-pulse rounded bg-gray-100" />
+                    </div>
+                ))}
+            </AccountSection>
+        </>
     );
 }
 

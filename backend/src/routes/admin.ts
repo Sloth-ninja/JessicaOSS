@@ -7,12 +7,18 @@ import {
 import { asyncHandler } from "../lib/asyncHandler";
 import { createServerSupabase } from "../lib/supabase";
 import {
+    getOrganisationEnabledConnectorIds,
     getUserOrganisationId,
     listOrganisationMembers,
     setMemberRole,
+    setOrganisationEnabledConnectorIds,
     updateOrganisationPolicies,
     type OrganisationPolicies,
 } from "../lib/organisations";
+import {
+    CONNECTOR_REGISTRY,
+    connectorRegistryIds,
+} from "../lib/mcpConnectorRegistry";
 import {
     getOrganisationApiKeyStatus,
     saveOrganisationApiKey,
@@ -190,5 +196,87 @@ adminRouter.patch(
             parsed.patch,
         );
         res.json({ policies });
+    }),
+);
+
+// The registry view the curation UI renders (no server URLs / secrets — just
+// what the admin needs to pick a shortlist).
+const CONNECTOR_REGISTRY_VIEW = CONNECTOR_REGISTRY.map((entry) => ({
+    id: entry.id,
+    name: entry.name,
+    description: entry.description,
+    category: entry.category,
+    popular: entry.popular,
+    availability: entry.availability,
+}));
+
+// GET /admin/connector-gallery — the full registry plus the firm's current
+// curation (`enabledConnectorIds`). An empty list means "all visible" (the
+// documented default).
+adminRouter.get(
+    "/connector-gallery",
+    asyncHandler(async (_req, res) => {
+        const db = createServerSupabase();
+        const orgId = await callerOrganisationId(
+            db,
+            res.locals.userId as string,
+        );
+        if (!orgId) return void res.status(403).json({ detail: ADMIN_REQUIRED });
+        const enabledConnectorIds = await getOrganisationEnabledConnectorIds(
+            db,
+            orgId,
+        );
+        res.json({ registry: CONNECTOR_REGISTRY_VIEW, enabledConnectorIds });
+    }),
+);
+
+// Parse a PATCH /admin/connector-gallery body: {enabledConnectorIds: string[]}.
+// Every id must be a known registry id; an empty array is valid and means
+// "all visible". Duplicates are collapsed.
+function parseConnectorCuration(body: unknown):
+    | { ok: true; ids: string[] }
+    | { ok: false; detail: string } {
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return { ok: false, detail: "Expected a JSON object" };
+    }
+    const raw = (body as { enabledConnectorIds?: unknown }).enabledConnectorIds;
+    if (!Array.isArray(raw)) {
+        return { ok: false, detail: "enabledConnectorIds must be an array" };
+    }
+    const valid = connectorRegistryIds();
+    const ids = new Set<string>();
+    for (const value of raw) {
+        if (typeof value !== "string" || !valid.has(value)) {
+            return { ok: false, detail: "Unknown connector id" };
+        }
+        ids.add(value);
+    }
+    return { ok: true, ids: [...ids] };
+}
+
+// PATCH /admin/connector-gallery — set the firm's curated shortlist. Scoped to
+// the caller's own firm; MFA stepped up like the other mutating admin routes.
+adminRouter.patch(
+    "/connector-gallery",
+    requireMfaIfEnrolled,
+    asyncHandler(async (req, res) => {
+        const parsed = parseConnectorCuration(req.body);
+        if (!parsed.ok) {
+            return void res.status(400).json({ detail: parsed.detail });
+        }
+
+        const db = createServerSupabase();
+        const orgId = await callerOrganisationId(
+            db,
+            res.locals.userId as string,
+        );
+        if (!orgId) return void res.status(403).json({ detail: ADMIN_REQUIRED });
+
+        const enabledConnectorIds = await setOrganisationEnabledConnectorIds(
+            db,
+            orgId,
+            parsed.ids,
+        );
+        res.json({ enabledConnectorIds });
     }),
 );

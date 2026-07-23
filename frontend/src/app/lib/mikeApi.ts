@@ -507,6 +507,84 @@ export async function setMcpToolEnabled(
     );
 }
 
+// ── Connector gallery (WS8 PR E) ────────────────────────────────────────────
+
+export type ConnectorAvailability = "oauth" | "custom";
+export type GalleryConnectionStatus =
+    | "connected"
+    | "not_connected"
+    | "connection_issue";
+
+export interface ConnectorGalleryItem {
+    key: string;
+    /** Registry slug for a shortlist entry; null for a bare custom connector. */
+    registryId: string | null;
+    /** The caller's connector row id when they have one. */
+    connectorId: string | null;
+    name: string;
+    description: string;
+    category: string;
+    popular: boolean;
+    availability: ConnectorAvailability;
+    /** True → show a one-click "Connect" affordance. */
+    connectable: boolean;
+    status: GalleryConnectionStatus;
+}
+
+export async function getConnectorGallery(): Promise<ConnectorGalleryItem[]> {
+    const data = await apiRequest<{ items: ConnectorGalleryItem[] }>(
+        "/user/connector-gallery",
+    );
+    return data.items;
+}
+
+/** Start a one-click connect for a registry entry (create + begin OAuth). */
+export async function connectGalleryConnector(registryId: string): Promise<{
+    connectorId: string;
+    authorizationUrl: string | null;
+    alreadyAuthorized: boolean;
+}> {
+    return apiRequest(
+        `/user/connector-gallery/${encodeURIComponent(registryId)}/connect`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+    );
+}
+
+/** Admin view of the registry for firm curation. No server URLs / secrets. */
+export interface ConnectorRegistryAdminEntry {
+    id: string;
+    name: string;
+    description: string;
+    category: string;
+    popular: boolean;
+    availability: ConnectorAvailability;
+}
+
+export async function getConnectorGalleryCuration(): Promise<{
+    registry: ConnectorRegistryAdminEntry[];
+    enabledConnectorIds: string[];
+}> {
+    return apiRequest("/admin/connector-gallery");
+}
+
+/**
+ * Set the firm's curated connector shortlist. An empty array means "all
+ * visible" (the documented default). Admin + MFA gated server-side.
+ */
+export async function updateConnectorGalleryCuration(
+    enabledConnectorIds: string[],
+): Promise<string[]> {
+    const data = await apiRequest<{ enabledConnectorIds: string[] }>(
+        "/admin/connector-gallery",
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ enabledConnectorIds }),
+        },
+    );
+    return data.enabledConnectorIds;
+}
+
 export async function getProject(projectId: string): Promise<Project> {
     return apiRequest<Project>(`/projects/${projectId}`);
 }

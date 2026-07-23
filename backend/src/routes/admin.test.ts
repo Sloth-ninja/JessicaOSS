@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
   isAdmin: true,
   mfaOk: true,
   orgId: "org-1" as string | null,
+  enabledConnectorIds: [] as string[],
   setMemberRoleResult: { ok: true, member: {} } as
     | { ok: true; member: unknown }
     | { ok: false; reason: "not_found" | "last_admin" },
@@ -68,6 +69,7 @@ vi.mock("../lib/supabase", () => ({
 const listOrganisationMembers = vi.fn();
 const setMemberRole = vi.fn();
 const updateOrganisationPolicies = vi.fn();
+const setOrganisationEnabledConnectorIds = vi.fn();
 vi.mock("../lib/organisations", () => ({
   getUserOrganisationId: () => Promise.resolve(state.orgId),
   listOrganisationMembers: (...args: unknown[]) =>
@@ -75,6 +77,10 @@ vi.mock("../lib/organisations", () => ({
   setMemberRole: (...args: unknown[]) => setMemberRole(...args),
   updateOrganisationPolicies: (...args: unknown[]) =>
     updateOrganisationPolicies(...args),
+  getOrganisationEnabledConnectorIds: () =>
+    Promise.resolve(state.enabledConnectorIds),
+  setOrganisationEnabledConnectorIds: (...args: unknown[]) =>
+    setOrganisationEnabledConnectorIds(...args),
 }));
 
 const saveOrganisationApiKey = vi.fn();
@@ -126,11 +132,16 @@ beforeEach(() => {
   state.isAdmin = true;
   state.mfaOk = true;
   state.orgId = "org-1";
+  state.enabledConnectorIds = [];
   state.setMemberRoleResult = { ok: true, member: { userId: "u2" } };
   listOrganisationMembers.mockReset();
   setMemberRole.mockReset();
   saveOrganisationApiKey.mockReset();
   updateOrganisationPolicies.mockReset();
+  setOrganisationEnabledConnectorIds.mockReset();
+  setOrganisationEnabledConnectorIds.mockImplementation(
+    (_db: unknown, _orgId: unknown, ids: string[]) => Promise.resolve(ids),
+  );
   setMemberRole.mockImplementation(() =>
     Promise.resolve(state.setMemberRoleResult),
   );
@@ -312,5 +323,84 @@ describe("PATCH /admin/policies", () => {
       "org-1",
       { memberApiKeys: false, memberMcpConnectors: true },
     );
+  });
+});
+
+describe("GET /admin/connector-gallery", () => {
+  it("returns the registry plus the firm's curation to an admin", async () => {
+    state.enabledConnectorIds = ["google-drive", "gmail"];
+    const res = await fetch(`${baseUrl}/admin/connector-gallery`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      registry: { id: string }[];
+      enabledConnectorIds: string[];
+    };
+    expect(body.enabledConnectorIds).toEqual(["google-drive", "gmail"]);
+    expect(body.registry.length).toBeGreaterThan(0);
+    expect(body.registry.map((e) => e.id)).toContain("google-drive");
+    // Never leaks server URLs / secrets in the admin view.
+    expect(body.registry[0]).not.toHaveProperty("serverUrl");
+  });
+
+  it("returns 403 for a non-admin", async () => {
+    state.isAdmin = false;
+    const res = await fetch(`${baseUrl}/admin/connector-gallery`);
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("PATCH /admin/connector-gallery", () => {
+  const patchCuration = (body: unknown) =>
+    fetch(`${baseUrl}/admin/connector-gallery`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  it("rejects a body missing enabledConnectorIds with 400", async () => {
+    const res = await patchCuration({});
+    expect(res.status).toBe(400);
+    expect(setOrganisationEnabledConnectorIds).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown connector id with 400", async () => {
+    const res = await patchCuration({
+      enabledConnectorIds: ["google-drive", "not-a-real-connector"],
+    });
+    expect(res.status).toBe(400);
+    expect(setOrganisationEnabledConnectorIds).not.toHaveBeenCalled();
+  });
+
+  it("accepts an empty array (all visible) and persists it", async () => {
+    const res = await patchCuration({ enabledConnectorIds: [] });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ enabledConnectorIds: [] });
+    expect(setOrganisationEnabledConnectorIds).toHaveBeenCalledWith(
+      expect.anything(),
+      "org-1",
+      [],
+    );
+  });
+
+  it("persists a valid, de-duplicated shortlist scoped to the firm", async () => {
+    const res = await patchCuration({
+      enabledConnectorIds: ["google-drive", "gmail", "google-drive"],
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      enabledConnectorIds: ["google-drive", "gmail"],
+    });
+    expect(setOrganisationEnabledConnectorIds).toHaveBeenCalledWith(
+      expect.anything(),
+      "org-1",
+      ["google-drive", "gmail"],
+    );
+  });
+
+  it("returns 403 without MFA step-up", async () => {
+    state.mfaOk = false;
+    const res = await patchCuration({ enabledConnectorIds: [] });
+    expect(res.status).toBe(403);
+    expect(setOrganisationEnabledConnectorIds).not.toHaveBeenCalled();
   });
 });

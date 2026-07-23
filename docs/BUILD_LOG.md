@@ -7,6 +7,98 @@
 
 ---
 
+## 2026-07-23 — WS8 PR E: connectors gallery (branch `ws8-connectors-gallery`)
+
+**Scope:** turn the personal MCP-connector page into a curated gallery — a Popular
+row, All/Connected/Not-connected filters, a status column ("Connection issue"),
+and one-click Connect for verified providers — plus a firm-admin curation card and
+the org-scoped `enabled_connector_ids` shortlist (column already present from PR A).
+Honesty rule strictly applied: a provider is only one-click if a public remote MCP
+server with OAuth was verified to exist; everything else is an informational
+"custom" entry with no dead Connect button.
+
+**Provider verification (July 2026).** Each candidate checked for a public remote
+MCP endpoint + OAuth before being listed one-click. The existing OAuth machinery
+completes one-click either via Dynamic Client Registration (DCR) or via
+env-provisioned client credentials keyed by host prefix (`oauthClientEnvFor`;
+Google = `GOOGLE_MCP_OAUTH_*`).
+
+| Provider | Verified endpoint / finding | Classification | Source |
+|---|---|---|---|
+| Google Drive | `https://drivemcp.googleapis.com/mcp/v1`, official, OAuth 2.0 (env prefix `GOOGLE_MCP_OAUTH`; code already first-classes Google) | **oauth** (Popular) | developers.google.com/workspace/guides/configure-mcp-servers |
+| Gmail | `https://gmailmcp.googleapis.com/mcp/v1`, official, OAuth 2.0 | **oauth** (Popular) | developers.google.com/workspace/guides/configure-mcp-servers |
+| Google Calendar | `https://calendarmcp.googleapis.com/mcp/v1`, official, OAuth 2.0 | **oauth** (Popular) | developers.google.com/workspace/calendar/api/guides/configure-mcp-server |
+| Canva | `https://mcp.canva.com/mcp`, official, OAuth 2 + **DCR** (no operator config) | **oauth** | canva.dev/docs/mcp |
+| Apollo.io | `https://mcp.apollo.io/mcp`, official, Streamable HTTP + OAuth (metadata published; browser sign-in) | **oauth** | docs.apollo.io/docs/apollo-mcp |
+| Microsoft 365 / SharePoint / Outlook | No official Microsoft-hosted public remote MCP; only self-hosted community servers needing each firm's own Entra app | **custom** | github.com/softeria/ms-365-mcp-server |
+| DocuSign | Hosted MCP exists (`mcp-d.docusign.com/mcp`) but in **beta**; production needs beta-programme enrolment | **custom** | fast.io/resources/mcp-server-for-docusign |
+| Slack | Official hosted `mcp.slack.com/mcp` but **no DCR** — each firm registers its own Slack OAuth app | **custom** | truto.one/blog/best-mcp-server-for-slack-in-2026 |
+| Microsoft Teams | No official Microsoft-hosted MCP; third-party/community only | **custom** | improvado.io/mcp/microsoft-teams |
+| HubSpot | Official hosted `mcp.hubspot.com` (GA Apr 2026) but requires a HubSpot "MCP auth app" for credentials (not pure DCR) | **custom** | developers.hubspot.com/changelog/remote-hubspot-mcp-server-is-now-generally-available |
+| Clio | No vendor-hosted MCP; open-source self-hosted, firm's own Clio OAuth app. Surfaced (UK-legal relevant) as informational | **custom** | github.com/oktopeak/clio-mcp |
+
+Per-entry sources are also recorded as code comments in `mcpConnectorRegistry.ts`.
+
+**Backend.**
+- `lib/mcpConnectorRegistry.ts` — the curated constant (id/name/description/category/
+  popular/availability, `serverUrl`+`authType`+`oauthEnvPrefix` for one-click) with
+  `getConnectorRegistryEntry`, `isOneClickEntry`, `connectorRegistryIds`.
+- `lib/mcpConnectorGallery.ts` — pure `deriveConnectionStatus`
+  (connected/not_connected/connection_issue from matched/enabled/oauthConnected/
+  most-recent-audit-error), `filterRegistryByOrgCuration` (empty ⇒ all), and
+  `buildConnectorGallery` (registry × the caller's connectors, matched by canonical
+  server URL, + unmatched customs appended).
+- `lib/organisations.ts` — `getOrganisationEnabledConnectorIds` (42703-tolerant → [])
+  and `setOrganisationEnabledConnectorIds`.
+- `routes/user.ts` — `GET /user/connector-gallery` and `POST
+  /user/connector-gallery/:registryId/connect` (create-or-reuse + start OAuth via
+  existing machinery; `requireMemberPolicy("memberMcpConnectors")` + MFA gated;
+  unknown/custom/not-curated id → 404 generic; SSRF guard preserved — the constant
+  registry URL still flows through `validateRemoteMcpUrl`). All via `asyncHandler`.
+- `routes/admin.ts` — `GET /admin/connector-gallery` (registry view, no server URLs)
+  + `PATCH /admin/connector-gallery` (requireAdmin + MFA; validates every id against
+  the registry, de-dupes, empty array = all visible).
+
+**Frontend.**
+- `account/connectors/page.tsx` rebuilt per the approved mock-up: Popular cards,
+  filter tabs with counts, list with Type/Status and initial-letter tiles (NO real
+  brand-logo assets), "Add ▾" menu retaining the existing custom-connector form as
+  "Add custom connector". One-click Connect reuses the existing OAuth popup (helper
+  `waitForOAuthPopup` extracted and shared). PR #38's neutral FirmManagedCard is
+  preserved when the firm blocks personal connectors.
+- `admin/firm-settings/page.tsx` — a "Connectors" curation card (checkbox list;
+  empty stored curation renders as all-ticked = "all visible"; full tick-list saved
+  back as [] canonical). MFA-guarded.
+- `lib/mikeApi.ts` — `getConnectorGallery`, `connectGalleryConnector`,
+  `getConnectorGalleryCuration`, `updateConnectorGalleryCuration` + types.
+
+**Decisions / deviations.**
+- Mock-up drew Microsoft 365 and DocuSign as one-click Popular cards; the honesty
+  rule overrides the mock-up — both are "custom" (no verified DCR-capable public
+  endpoint). Popular row is the three verified Google Workspace connectors.
+- Policy-off members see the preserved neutral FirmManagedCard (not a gallery with
+  disabled Add), because the connect route is policy-gated — a visible gallery would
+  show only dead Connect buttons, contradicting the honesty rule.
+- No migration, no new env vars (`enabled_connector_ids` exists from PR A;
+  `GOOGLE_MCP_OAUTH_*` already consumed by `oauthClientEnvFor`).
+
+**Verification.**
+- Backend `npx tsc --noEmit` clean; `npx vitest run` **252 passed** (22 files),
+  incl. **43 new** across `mcpConnectorRegistry.test.ts` (registry/honesty
+  invariants), `mcpConnectorGallery.test.ts` (status derivation, org filtering incl.
+  empty=all, unmatched customs), `routes/admin.test.ts` (curation authz + validation
+  + empty-allowed) and `routes/user.connectorGallery.test.ts` (connect policy-gating
+  403, unknown/custom id 404, curation exclusion, reuse-no-duplicate, happy path).
+- Frontend `npx tsc --noEmit` clean; `eslint` on the three changed files at baseline
+  (connectors page carries the same 3 pre-existing warnings as origin/main; no new
+  problems).
+- `npm run evals:smoke` from the main checkout: 4 passed / 0 failed.
+
+**Integration note:** branched off origin/main before PR #39 (usage dashboard) landed;
+expect only trivial conflicts (firm-admin sidebar, CLAUDE.md, BUILD_LOG) at merge.
+
+---
+
 ## 2026-07-22 — WS8 PR B: firm policy enforcement (keys + connectors) (branch `ws8-policy-enforcement`)
 
 **Scope:** make the two firm policies from PR C real. When a caller belongs to a

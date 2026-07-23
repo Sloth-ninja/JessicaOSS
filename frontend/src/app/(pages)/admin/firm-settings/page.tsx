@@ -19,14 +19,17 @@ import {
     needsMfaVerification,
 } from "@/app/components/shared/MfaVerificationPopup";
 import {
+    getConnectorGalleryCuration,
     getFirmApiKeyStatus,
     getFirmMembers,
     isMfaRequiredError,
     MikeApiError,
     saveFirmApiKey,
+    updateConnectorGalleryCuration,
     updateFirmMemberRole,
     updateFirmPolicies,
     type ApiKeyProvider,
+    type ConnectorRegistryAdminEntry,
     type FirmApiKeyStatus,
     type FirmMember,
     type OrganisationPolicies,
@@ -139,6 +142,7 @@ export default function FirmSettingsPage() {
                 <MembersSection />
                 <FirmApiKeysSection />
                 <PoliciesCard />
+                <ConnectorsCurationCard />
             </div>
         </div>
     );
@@ -619,6 +623,167 @@ function PoliciesCard() {
                         Changes take effect immediately. Turning a policy off
                         hides the matching tab from members&apos; account
                         settings — it is removed, not shown disabled.
+                    </p>
+                </div>
+            </SectionCard>
+            {mfa.popup}
+        </>
+    );
+}
+
+// Firm curation of the connector gallery (WS8 PR E). A ticked connector is
+// visible to members; the stored `enabledConnectorIds` empty array is the
+// canonical "all visible" state, so an empty curation renders as everything
+// ticked. When the admin ticks the whole list we save [] again (canonical).
+function ConnectorsCurationCard() {
+    const mfa = useMfaGuardedAction();
+    const [registry, setRegistry] = useState<ConnectorRegistryAdminEntry[] | null>(
+        null,
+    );
+    const [visible, setVisible] = useState<Set<string>>(new Set());
+    const [busyId, setBusyId] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        let active = true;
+        (async () => {
+            try {
+                const { registry: entries, enabledConnectorIds } =
+                    await getConnectorGalleryCuration();
+                if (!active) return;
+                setRegistry(entries);
+                // Empty curation ⇒ all visible.
+                setVisible(
+                    new Set(
+                        enabledConnectorIds.length === 0
+                            ? entries.map((e) => e.id)
+                            : enabledConnectorIds,
+                    ),
+                );
+                setError(null);
+            } catch {
+                if (active) {
+                    setRegistry([]);
+                    setError("Could not load the connector list.");
+                }
+            }
+        })();
+        return () => {
+            active = false;
+        };
+    }, []);
+
+    const allVisible = !!registry && visible.size === registry.length;
+
+    const toggle = (id: string, next: boolean) => {
+        if (!registry) return;
+        const previous = new Set(visible);
+        const optimistic = new Set(visible);
+        if (next) optimistic.add(id);
+        else optimistic.delete(id);
+        // Canonical form: a full tick-list is stored as [] ("all visible").
+        const payload =
+            optimistic.size === registry.length ? [] : [...optimistic];
+        setError(null);
+        void mfa.run(async () => {
+            setBusyId(id);
+            setVisible(optimistic);
+            try {
+                const saved = await updateConnectorGalleryCuration(payload);
+                setVisible(
+                    new Set(
+                        saved.length === 0
+                            ? registry.map((e) => e.id)
+                            : saved,
+                    ),
+                );
+            } catch (err) {
+                setVisible(previous);
+                if (isMfaRequiredError(err)) throw err;
+                if (err instanceof MikeApiError && err.message) {
+                    setError(err.message);
+                } else {
+                    setError("Could not update the connector list.");
+                }
+            } finally {
+                setBusyId(null);
+            }
+        });
+    };
+
+    return (
+        <>
+            <SectionCard
+                title="Connectors"
+                description="Choose which connectors members can see and connect in their account settings."
+            >
+                {error && (
+                    <p className="px-5 py-3 text-xs text-red-600">{error}</p>
+                )}
+                {registry === null ? (
+                    <div className="space-y-2 px-5 py-4">
+                        {[0, 1, 2].map((i) => (
+                            <div
+                                key={i}
+                                className="h-6 w-full animate-pulse rounded bg-gray-100"
+                            />
+                        ))}
+                    </div>
+                ) : registry.length === 0 ? (
+                    <p className="px-5 py-6 text-sm text-gray-500">
+                        No connectors to show.
+                    </p>
+                ) : (
+                    <ul className="divide-y divide-gray-100">
+                        {registry.map((entry) => (
+                            <li
+                                key={entry.id}
+                                className="flex items-start gap-3 px-5 py-3.5"
+                            >
+                                <input
+                                    id={`connector-${entry.id}`}
+                                    type="checkbox"
+                                    checked={visible.has(entry.id)}
+                                    disabled={busyId === entry.id}
+                                    onChange={(e) =>
+                                        toggle(entry.id, e.target.checked)
+                                    }
+                                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 accent-gray-900"
+                                />
+                                <label
+                                    htmlFor={`connector-${entry.id}`}
+                                    className="min-w-0 flex-1 cursor-pointer"
+                                >
+                                    <span className="flex items-center gap-2 text-sm font-medium text-gray-900">
+                                        {entry.name}
+                                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
+                                            {entry.category}
+                                        </span>
+                                        {entry.availability === "custom" && (
+                                            <span className="inline-flex items-center rounded-full border border-amber-600/20 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+                                                Custom connector
+                                            </span>
+                                        )}
+                                    </span>
+                                    <span className="mt-0.5 block text-xs leading-relaxed text-gray-500">
+                                        {entry.description}
+                                    </span>
+                                </label>
+                                {busyId === entry.id && (
+                                    <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-gray-400" />
+                                )}
+                            </li>
+                        ))}
+                    </ul>
+                )}
+                <div className="flex items-start gap-2.5 border-t border-gray-100 bg-gray-50 px-5 py-3.5">
+                    <Info className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                    <p className="text-xs leading-relaxed text-gray-600">
+                        {allVisible
+                            ? "All connectors are visible to members. Untick any you want to hide from their gallery."
+                            : "Only the ticked connectors appear in members' gallery. Tick them all to show the full list."}{" "}
+                        Members still need permission to add connectors (see the
+                        policy above).
                     </p>
                 </div>
             </SectionCard>
