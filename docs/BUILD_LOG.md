@@ -7,6 +7,24 @@
 
 ---
 
+## 2026-07-23 — Session handover refresh (branch `ws8-handover-refresh`)
+
+**Scope:** docs-only, closing out the 21–23 July session for a fresh one.
+`docs/HANDOVER.md` §3a rewritten to the live WS8 state (A/C/B/D merged +
+deployed + firm seeded; PR E in flight; composed-range review, deploy, and
+PRs F/G with their bundled-migration authorisation as the exact pickup steps),
+§4a records the owner's 22/07 F/G decisions, and the two approved mock-up
+artifact URLs are recorded (session scratchpads do not survive). `CLAUDE.md`
+Current status updated to match, plus a new architectural rule (owner decision
+22/07): new capability in self-contained modules with clean seams to upstream,
+for licensing optionality (owner copyright in solely-authored modules).
+
+**Verification:** docs-only diff; PR numbers/states checked against `gh pr
+list`; artifact URLs are the published pages from this session; CI green on
+the PR.
+
+---
+
 ## 2026-07-22 — WS8 PR D: admin usage dashboard (branch `ws8-usage-dashboard`)
 
 **Scope:** a read-only firm usage overview for organisation admins. One new
