@@ -99,6 +99,97 @@ expect only trivial conflicts (firm-admin sidebar, CLAUDE.md, BUILD_LOG) at merg
 
 ---
 
+## 2026-07-23 — Session handover refresh (branch `ws8-handover-refresh`)
+
+**Scope:** docs-only, closing out the 21–23 July session for a fresh one.
+`docs/HANDOVER.md` §3a rewritten to the live WS8 state (A/C/B/D merged +
+deployed + firm seeded; PR E in flight; composed-range review, deploy, and
+PRs F/G with their bundled-migration authorisation as the exact pickup steps),
+§4a records the owner's 22/07 F/G decisions, and the two approved mock-up
+artifact URLs are recorded (session scratchpads do not survive). `CLAUDE.md`
+Current status updated to match, plus a new architectural rule (owner decision
+22/07): new capability in self-contained modules with clean seams to upstream,
+for licensing optionality (owner copyright in solely-authored modules).
+
+**Verification:** docs-only diff; PR numbers/states checked against `gh pr
+list`; artifact URLs are the published pages from this session; CI green on
+the PR.
+
+---
+
+## 2026-07-22 — WS8 PR D: admin usage dashboard (branch `ws8-usage-dashboard`)
+
+**Scope:** a read-only firm usage overview for organisation admins. One new
+admin endpoint aggregates existing activity (chats, tabular reviews as workflow
+runs, documents) into period totals, per-member activity, per-workflow-template
+runs and a per-day chat trend; a new `(pages)/admin/dashboard` page renders it
+per the approved mock-up (screen 1). **No migration, no new event capture, no
+new env vars** — everything is derived from tables that already exist.
+
+**Backend.**
+- New `lib/usageStats.ts` — `getOrganisationUsage(db, orgId, {days, now})`
+  composes the whole payload. **Watertight org-scoping:** member uuids come
+  solely from `user_profiles` filtered by `organisation_id` (via the existing
+  `listOrganisationMembers`, which also supplies name + email); every event
+  query is then filtered to that id set, so another firm's rows can never be
+  counted. **uuid→text gotcha handled:** `user_profiles.user_id` is uuid but
+  `chats`/`tabular_reviews`/`documents.user_id` are TEXT — the ids are resolved
+  first and the text columns filtered by those string ids (`.in()`), never a
+  cross-type join. Narrow selects (`created_at, user_id[, workflow_id]`) floored
+  at 30 days; all windowing/bucketing done in code (fine at pilot scale). `now`
+  is injectable for deterministic tests. Empty-member orgs short-circuit (no
+  `IN ()`). Decision: the workflow-template table always reports both a 7d and a
+  30d column and last-active spans the 30d fetch, so the fetch floor is 30 days
+  regardless of the `?days` toggle (still a cap, never an all-time scan); the
+  toggle governs the tiles, member activity columns and the daily trend.
+- `routes/admin.ts` adds `GET /admin/usage` (`requireAdmin` router-level,
+  `asyncHandler`): `?days=7|30` (clamped by `normaliseUsageDays`, default 7),
+  org resolved from the caller, fixed 403 detail when orgless. No mutation, so
+  no MFA step-up (mirrors the other admin GETs).
+
+**Frontend.**
+- New `(pages)/admin/dashboard/page.tsx`: four stat tiles, a restrained SVG
+  daily bar chart (single grey-900 accent, one faint baseline, DD/MM labels,
+  tabular figures, per-bar values only in the 7d view — dataviz skill),
+  a per-member activity table and a per-workflow-template table (both reuse the
+  firm-settings light-grid pattern). 7d/30d period switch, loading skeletons and
+  an error+retry state (incident discipline: never a bare spinner). Admin-gated
+  on `profile.isAdmin` with a redirect, mirroring Firm settings. The data fetch
+  runs in an `AbortController`-scoped effect with **no synchronous setState**
+  (skeleton reset lives in the period/retry handlers) to satisfy the
+  `react-hooks/set-state-in-effect` lint.
+- `mikeApi.ts`: `getFirmUsage(days, signal)` + `FirmUsage*` types.
+- `AppSidebar.tsx`: a **Dashboard** item (BarChart3) added above Firm settings in
+  the existing isAdmin-gated Firm admin group.
+
+**Tests.** `lib/usageStats.test.ts` (10 tests, fake chainable db supporting
+`.in()`/`.gte()`): the watertight another-org-excluded case; uuid-string →
+TEXT matching; multi-member totals + per-member counts with emails; empty org
+(zeros + full zero-filled series); single member with null last-active; 7d
+window edges (day −6 IN, day −7 OUT) + daily bucketing; last-active surfacing a
+beyond-window-but-within-30d event; workflow 7d/30d split + last run + null
+workflow_id handling; 30d period. `normaliseUsageDays` clamping.
+
+**Verification.** Backend `tsc --noEmit` clean; `vitest run` **234 passed (20
+files)**, incl. the 10 new. Frontend `tsc --noEmit` clean; ESLint on the three
+changed files introduces **no new errors** (the one reported is the pre-existing
+`AppSidebar` `setShouldAnimate` baseline error on an untouched line). `npm run
+evals:smoke` from the main checkout: **4 passed, 0 failed**. Terminology: DD/MM/
+YYYY dates, "Matters"/"solicitor"-consistent copy, UK English throughout.
+**Deviation from the definition of done (UI screenshots):** the chart and tables
+were NOT screenshotted in a running app — geometry was validated by reasoning
+(7d shows per-bar values; 30d suppresses them and thins date labels to ~6 ticks)
+and by parity with the approved mock-up (screen 1), not a live render.
+
+**Deferred / decisions.** No usage-event table introduced — counts are proxies
+from existing tables (a chat row = a chat; a tabular_reviews row = a workflow
+run; a documents row = a document). If richer usage analytics are wanted later,
+that is a separate migration-bearing PR. Workflow-template rows with an
+unresolved/`null` `workflow_id` are excluded from the template table but still
+counted in the workflow-runs total.
+
+---
+
 ## 2026-07-22 — WS8 PR B: firm policy enforcement (keys + connectors) (branch `ws8-policy-enforcement`)
 
 **Scope:** make the two firm policies from PR C real. When a caller belongs to a
