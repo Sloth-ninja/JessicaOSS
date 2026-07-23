@@ -26,6 +26,10 @@
 - 2026-07-19 — Correction: bun.lock also hijacked deploy (wrangler autoconfig) — deleted
 - 2026-07-19 — Express 4 async handlers + Node 22: one unwrapped rejection kills the server
 - 2026-07-21 — log-don't-die turns unwrapped handlers into hanging requests
+- 2026-07-22 — Angle-bracket placeholders in runnable snippets get pasted literally
+- 2026-07-22 — Supabase SQL editor: UPDATE without RETURNING reports "Success. No rows returned" either way
+- 2026-07-22 — user_profiles.user_id is uuid; event tables' user_id is text — never cross-join raw
+- 2026-07-23 — Relative `cd` in chained/background shell commands: use absolute paths
 
 ## Lessons
 
@@ -198,3 +202,44 @@ re-`GRANT` the needed privileges to `service_role`. Note `schema.sql`'s revokes
 (≈792–823) only touch `anon`/`authenticated` (the browser-facing roles) — they
 never revoke from `service_role`, so a lost `service_role` grant is external
 drift, not something the schema did.
+
+### 2026-07-22 — Angle-bracket placeholders in runnable snippets get pasted literally
+
+Trigger: the owner pasted `<ORG_ID>` from FIRM_SETUP.md into the Supabase SQL
+editor (Postgres `22P02: invalid input syntax for type uuid`), then into zsh —
+where `<uuid>` is a *redirection*, failing with `zsh: no such file or
+directory`. Rule: docs and chat instructions never use angle-bracket
+placeholders inside runnable snippets. Prefer self-resolving SQL (CTE that
+looks the value up); where hand-substitution is unavoidable, show a realistic
+dummy value ("your value replaces this whole string") and say brackets must
+not survive. Debugging signature: `22P02` on a quoted `<...>` literal, or
+zsh "no such file or directory" naming your value = a placeholder survived.
+
+### 2026-07-22 — Supabase SQL editor: UPDATE without RETURNING is ambiguous
+
+Trigger: the admin-promotion UPDATE printed "Success. No rows returned",
+indistinguishable from matching zero rows; the owner reasonably read it as
+failure. Rule: every mutation snippet destined for the Supabase SQL editor
+ends with `returning <columns that prove the change>` so success is visible
+and countable.
+
+### 2026-07-22 — user_profiles.user_id is uuid; event tables' user_id is text
+
+Upstream schema: `user_profiles.user_id` is `uuid`, but `chats`,
+`tabular_reviews`, `documents`, `workflows` carry `user_id` as `text`. Any
+org-scoped aggregation or membership filter must resolve member uuids from
+`user_profiles` first, then compare as lowercase uuid *strings* against the
+event tables (PostgREST `.in()` on text). Never SQL-join across the types raw.
+This was the WS8 plan's flagged "sharpest trap"; pinned by the usage-stats
+cross-org exclusion tests.
+
+### 2026-07-23 — Relative `cd` in chained/background shell commands
+
+Trigger (twice): `cd backend && …` inside a compound/background command ran
+from a cwd that was already `backend/`, failing with "no such file or
+directory" — once silently skipping a verification step, once skipping a
+deploy while the chain half-continued. Rule: in any chained, backgrounded, or
+notification-driven shell command, `cd` only to ABSOLUTE paths (or prefix
+tools with the absolute path); never assume the session cwd. Related, already
+recorded 19/07: never pipe a command through `tail`/`grep` when its exit code
+matters.
