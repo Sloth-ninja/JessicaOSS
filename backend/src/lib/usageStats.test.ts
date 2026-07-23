@@ -294,6 +294,24 @@ describe("getOrganisationUsage — window edges & daily bucketing", () => {
         // But last-active still surfaces the older activity.
         expect(usage.members[0].lastActive).toBe(dayAt(-10));
     });
+
+    it("ignores a future-dated event everywhere (tiles AND trend)", async () => {
+        const seed: Seed = {
+            profiles: [profile({ user_id: "u1" })],
+            chats: [
+                { id: "now", user_id: "u1", created_at: dayAt(0) },
+                // Tomorrow (clock skew / bad data): must not count anywhere.
+                { id: "future", user_id: "u1", created_at: dayAt(1) },
+            ],
+        };
+        const usage = await run(seed, 7);
+        expect(usage.totals.chats).toBe(1); // only the in-window "now" chat
+        expect(usage.members[0].chats).toBe(1);
+        // Last-active is the real event, never the future timestamp.
+        expect(usage.members[0].lastActive).toBe(dayAt(0));
+        // The daily series (7 days ending today) sums to exactly the one chat.
+        expect(usage.daily.reduce((n, d) => n + d.chats, 0)).toBe(1);
+    });
 });
 
 describe("getOrganisationUsage — workflow-template 7d/30d columns", () => {

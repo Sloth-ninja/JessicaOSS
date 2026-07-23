@@ -34,13 +34,15 @@ import {
 
 type Period = 7 | 30;
 
-/** DD/MM/YYYY — never US order. */
+/** DD/MM/YYYY — never US order. Rendered in UTC to match the UTC-bucketed
+ *  daily trend, so a late-night UK viewer never sees a last-active/last-run
+ *  date drift a day from the chart. */
 function formatUkDate(value: string | null): string {
     if (!value) return "—";
     const parsed = new Date(value);
     return Number.isNaN(parsed.getTime())
         ? "—"
-        : parsed.toLocaleDateString("en-GB");
+        : parsed.toLocaleDateString("en-GB", { timeZone: "UTC" });
 }
 
 /** YYYY-MM-DD → DD/MM, parsed by parts to avoid any timezone shift. */

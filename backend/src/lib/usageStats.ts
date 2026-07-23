@@ -155,6 +155,14 @@ export async function getOrganisationUsage(
     const fetchSinceIso = windowSinceIso(now, FETCH_WINDOW_DAYS);
     const windowSince = Date.parse(windowSinceIso(now, days));
     const window7 = Date.parse(windowSinceIso(now, 7));
+    // Upper bound: a future-dated created_at (clock skew / bad data) must never
+    // count in the tiles while falling outside the daily series' day range —
+    // treat anything after `now` as no timestamp at all, everywhere.
+    const nowMs = now.getTime();
+    const eventTime = (value: string | null): number | null => {
+        const t = parseTime(value);
+        return t === null || t > nowMs ? null : t;
+    };
 
     // Identity (name + email) reuses the member machinery; activity is layered
     // on top so the email pagination lives in exactly one place.
@@ -230,7 +238,7 @@ export async function getOrganisationUsage(
     let workflowRunsInWindow = 0;
 
     for (const row of chatRows) {
-        const t = parseTime(row.created_at);
+        const t = eventTime(row.created_at);
         bumpLastActive(row.user_id, t);
         if (t === null || t < windowSince) continue;
         chatsInWindow++;
@@ -244,7 +252,7 @@ export async function getOrganisationUsage(
     }
 
     for (const row of documentRows) {
-        const t = parseTime(row.created_at);
+        const t = eventTime(row.created_at);
         bumpLastActive(row.user_id, t);
         if (t === null || t < windowSince) continue;
         documentsInWindow++;
@@ -257,7 +265,7 @@ export async function getOrganisationUsage(
         { runs7d: number; runs30d: number; lastRun: number | null }
     >();
     for (const row of reviewRows) {
-        const t = parseTime(row.created_at);
+        const t = eventTime(row.created_at);
         bumpLastActive(row.user_id, t);
         if (t !== null && t >= windowSince) {
             workflowRunsInWindow++;
@@ -309,6 +317,9 @@ export async function getOrganisationUsage(
         perWorkflow.entries(),
     ).map(([workflowId, acc]) => ({
         workflowId,
+        // Defensive fallback only: a workflow enters perWorkflow only after
+        // `titleById.has(wid)` passed above, and workflows.title is NOT NULL,
+        // so titleById.get() is always a string here in practice.
         title: titleById.get(workflowId) ?? "Untitled workflow",
         runs7d: acc.runs7d,
         runs30d: acc.runs30d,

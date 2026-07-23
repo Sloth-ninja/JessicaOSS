@@ -66,6 +66,10 @@ changed files introduces **no new errors** (the one reported is the pre-existing
 `AppSidebar` `setShouldAnimate` baseline error on an untouched line). `npm run
 evals:smoke` from the main checkout: **4 passed, 0 failed**. Terminology: DD/MM/
 YYYY dates, "Matters"/"solicitor"-consistent copy, UK English throughout.
+**Deviation from the definition of done (UI screenshots):** the chart and tables
+were NOT screenshotted in a running app — geometry was validated by reasoning
+(7d shows per-bar values; 30d suppresses them and thins date labels to ~6 ticks)
+and by parity with the approved mock-up (screen 1), not a live render.
 
 **Deferred / decisions.** No usage-event table introduced — counts are proxies
 from existing tables (a chat row = a chat; a tabular_reviews row = a workflow
