@@ -28,7 +28,12 @@ import {
 } from "../lib/organisationApiKeys";
 import { normalizeApiKeyProvider } from "../lib/userApiKeys";
 import { getOrganisationUsage, normaliseUsageDays } from "../lib/usageStats";
-import { isModelProvider, isSelectableModelId } from "../lib/llm";
+import {
+    isModelProvider,
+    isSelectableModelId,
+    safeProviderForModel,
+} from "../lib/llm";
+import { isLocalModelId } from "../lib/llm/localConfig";
 
 export const adminRouter = Router();
 
@@ -424,6 +429,25 @@ adminRouter.patch(
                     ? parsed.patch.offeredProviders
                     : current.offeredProviders,
         };
+
+        // Coherence: the MERGED config (not just this patch) must keep a cloud
+        // default model's provider within a non-empty offered set, so the
+        // chat-model clamp can treat the firm default as an in-set substitute
+        // (WS8 PR F). A local default is exempt — local models are a
+        // data-sovereignty path, never filtered by offeredProviders.
+        if (
+            next.defaultModel &&
+            !isLocalModelId(next.defaultModel) &&
+            next.offeredProviders.length > 0
+        ) {
+            const provider = safeProviderForModel(next.defaultModel);
+            if (!provider || !next.offeredProviders.includes(provider)) {
+                return void res.status(400).json({
+                    detail: "The default model's provider must be one of the offered providers.",
+                });
+            }
+        }
+
         const modelConfig = await setOrganisationModelConfig(db, orgId, next);
         res.json({ modelConfig });
     }),

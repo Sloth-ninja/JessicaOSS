@@ -18,6 +18,7 @@ import {
 } from "../lib/chatTools";
 import {
     getUserModelSettings,
+    resolveOrgChatModel,
 } from "../lib/userSettings";
 import { checkProjectAccess } from "../lib/access";
 import { safeErrorLog, safeErrorMessage } from "../lib/safeError";
@@ -57,6 +58,11 @@ projectChatRouter.post("/", requireAuth, asyncHandler(async (req, res) => {
     );
     if (!projectAccess.ok)
         return void res.status(404).json({ detail: "Matter not found" });
+
+    // Enforce the caller's firm model policy on the CLIENT-SUPPLIED model, as on
+    // POST /chat (WS8 PR F; gate the routes, not just the tabs). Local
+    // passthrough + fail-open live in resolveOrgChatModel.
+    const effectiveModel = await resolveOrgChatModel(userId, model, db);
 
     let chatId = chat_id ?? null;
     let chatTitle: string | null = null;
@@ -191,7 +197,7 @@ projectChatRouter.post("/", requireAuth, asyncHandler(async (req, res) => {
             workflowStore,
             includeResearchTools,
             researchSources,
-            model,
+            model: effectiveModel,
             apiKeys,
             signal: streamAbort.signal,
             projectId,

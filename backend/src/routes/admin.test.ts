@@ -423,17 +423,18 @@ describe("PATCH /admin/model-config (WS8 PR F)", () => {
 
   it("merges the patch over the firm's current config and persists it", async () => {
     // Current firm config has an offered-provider restriction; patching only
-    // the default model must preserve the providers (merge, not replace).
+    // the default model must preserve the providers (merge, not replace). The
+    // default stays within the offered set (gemini) so the merge is coherent.
     state.modelConfig = {
       defaultModel: null,
       offeredProviders: ["gemini"],
     };
-    const res = await patchConfig({ defaultModel: "gpt-5.4" });
+    const res = await patchConfig({ defaultModel: "gemini-3.5-flash" });
     expect(res.status).toBe(200);
     expect(setOrganisationModelConfig).toHaveBeenCalledWith(
       expect.anything(),
       "org-1",
-      { defaultModel: "gpt-5.4", offeredProviders: ["gemini"] },
+      { defaultModel: "gemini-3.5-flash", offeredProviders: ["gemini"] },
     );
   });
 
@@ -451,6 +452,39 @@ describe("PATCH /admin/model-config (WS8 PR F)", () => {
       expect.anything(),
       "org-1",
       { defaultModel: null, offeredProviders: ["claude", "gemini"] },
+    );
+  });
+
+  it("rejects a MERGED config whose default provider is outside the offered set (400)", async () => {
+    // Current default is an OpenAI model; restricting to gemini only would
+    // leave an incoherent merged config → 400, nothing persisted.
+    state.modelConfig = { defaultModel: "gpt-5.5", offeredProviders: [] };
+    const res = await patchConfig({ offeredProviders: ["gemini"] });
+    expect(res.status).toBe(400);
+    expect(setOrganisationModelConfig).not.toHaveBeenCalled();
+  });
+
+  it("rejects patching a default whose provider is outside the existing offered set (400)", async () => {
+    state.modelConfig = { defaultModel: null, offeredProviders: ["gemini"] };
+    const res = await patchConfig({ defaultModel: "gpt-5.5" });
+    expect(res.status).toBe(400);
+    expect(setOrganisationModelConfig).not.toHaveBeenCalled();
+  });
+
+  it("accepts a coherent default within the offered set", async () => {
+    state.modelConfig = { defaultModel: null, offeredProviders: [] };
+    const res = await patchConfig({
+      defaultModel: "gemini-3-flash-preview",
+      offeredProviders: ["gemini"],
+    });
+    expect(res.status).toBe(200);
+    expect(setOrganisationModelConfig).toHaveBeenCalledWith(
+      expect.anything(),
+      "org-1",
+      {
+        defaultModel: "gemini-3-flash-preview",
+        offeredProviders: ["gemini"],
+      },
     );
   });
 });

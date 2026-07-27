@@ -91,3 +91,23 @@ export function isSelectableModelId(id: string): boolean {
     if (ALL_MODELS.has(id)) return true;
     return isLocalModelId(id) && !!getLocalLlmConfig();
 }
+
+/** providerForModel that returns null instead of throwing on an unknown id. */
+export function safeProviderForModel(model: string): Provider | null {
+    try {
+        return providerForModel(model);
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Default main-tier model for a cloud provider — the substitution target when a
+ * member's requested chat model sits outside the firm's offered providers
+ * (WS8 PR F firm model policy enforcement).
+ */
+export function defaultMainModelForProvider(provider: ModelProviderId): string {
+    if (provider === "claude") return CLAUDE_MAIN_MODELS[0];
+    if (provider === "openai") return OPENAI_MAIN_MODELS[0];
+    return DEFAULT_MAIN_MODEL; // gemini
+}

@@ -26,8 +26,13 @@ no new dependencies. All new columns read 42703-tolerantly.
   coercion), `getUserOrganisationModelContext` (single-join id + policy + config,
   fail-open on throw — mirrors `getUserOrganisationKeyContext`), and
   `get/setOrganisationModelConfig`.
-- `llm/models.ts`: `MODEL_PROVIDERS` + `isModelProvider`, and `isSelectableModelId`
-  (registry model or configured local id — mirrors `resolveModel` acceptance).
+- `llm/models.ts`: `MODEL_PROVIDERS` + `isModelProvider`, `isSelectableModelId`
+  (registry model or configured local id — mirrors `resolveModel` acceptance),
+  plus `safeProviderForModel` (throw→null) and `defaultMainModelForProvider`
+  (per-provider substitution target for the chat-model clamp).
+- `userSettings.ts` `resolveOrgChatModel` + `routes/chat.ts` & `routes/projectChat.ts`:
+  the CLIENT-SUPPLIED chat `model` is clamped against the firm policy right after
+  model resolution on both streaming chat routes (see the decision note below).
 - `userSettings.ts` (`getUserModelSettings`): firm-aware — under policy OFF the
   personal title/tabular prefs are inert; tabular resolves to the firm default
   (else `DEFAULT_TABULAR_MODEL`), title stays on the provider-appropriate
@@ -67,10 +72,27 @@ no new dependencies. All new columns read 42703-tolerantly.
   behaviour); the firm default is applied where a member-choosable main-ish model
   flows server-side (tabular). Personal title AND tabular prefs are both inert
   under policy OFF (never deleted — the inert-personal precedent from PR B).
-- *Main chat model is per-message (client-selected).* Server-side resolution
-  covers the stored personal prefs (title/tabular); the main chat picker is
-  filtered to offered providers on the client. No change to `chat.ts` request
-  validation (out of scope; the per-message model is a client choice).
+- *Main chat model is enforced server-side, not only in the UI (review fix).*
+  The initial cut filtered the pickers client-side but left `POST /chat` and
+  `POST /projects/:id/chat` accepting a raw `model` in the body — a policy-OFF
+  member (or a policy-ON member under a provider restriction) could bypass the
+  firm policy with a crafted request ("gate the routes, not the tabs" — the PR B
+  precedent). Fixed by clamping the client model through a new
+  `resolveOrgChatModel(userId, requested, db)` (in `userSettings.ts`) right after
+  model resolution on both chat routes: local ids pass through untouched
+  (data-sovereignty); fail-open on any org-lookup error / orgless; policy-OFF +
+  firm default → forced to the firm default; a requested provider outside a
+  non-empty `offeredProviders` → substituted (firm default → default main model
+  → first offered provider's default). Provenance: the original decision to treat
+  the per-message model as a pure client choice was wrong — the route is the
+  security boundary. *Tabular / workflows checked and need no clamp:* tabular
+  resolves its model through `getUserModelSettings` (already firm-aware here), and
+  workflows accepts no client model id.
+- *Firm-default coherence is validated at write time.* `PATCH /admin/model-config`
+  now rejects (400) a MERGED config whose (cloud) default model's provider sits
+  outside a non-empty `offeredProviders` — so the clamp can always treat a set
+  firm default as an in-set substitute. A local default is exempt (never filtered
+  by offeredProviders).
 - *offeredProviders empty = no restriction* (all providers), mirroring the
   connector-curation empty=all encoding; the admin UI blocks unticking the last
   provider and points at the policy instead.
@@ -78,15 +100,20 @@ no new dependencies. All new columns read 42703-tolerantly.
   env-configured data-sovereignty path, not a firm BYO-provider choice.
 
 **Verification.**
-- Backend `npx tsc --noEmit` clean; `npx vitest run` **295 passed (24 files)** —
+- Backend `npx tsc --noEmit` clean; `npx vitest run` **309 passed (24 files)** —
   new/extended: `auth.policy.test.ts` (memberModelPrefs gate: OFF+model-body→403,
   display-name-only→pass, ON→pass, admin-not-exempt→403, orgless→pass,
   fail-open→pass), `organisations.test.ts` (`normaliseModelConfig` coercion,
   `getUserOrganisationModelContext` resolve/null/42703, membership shape),
-  `userSettings.test.ts` (new — firm-managed resolution: firm default / fallback
-  / policy-on-personal / orgless / fail-open), `user.serialize.test.ts`
+  `userSettings.test.ts` (new — firm-managed *resolution*: firm default /
+  fallback / policy-on-personal / orgless / fail-open; and the `resolveOrgChatModel`
+  *clamp*: out-of-catalogue id under policy-OFF → firm default, policy-ON +
+  offered-providers disallowed-provider substitution incl. no-default and
+  not-offered-default cases, local passthrough, org-lookup error fail-open,
+  orgless unchanged, undefined-model handling), `user.serialize.test.ts`
   (firm-managed title/tabular), `admin.test.ts` (policies memberModelPrefs;
-  GET/PATCH model-config authz + MFA + validation 400s + merge/de-dupe/clear).
+  GET/PATCH model-config authz + MFA + validation 400s + merge/de-dupe/clear +
+  merged-config default/provider coherence 400).
 - Frontend `npx tsc --noEmit` clean; `npx eslint` on the seven changed files
   introduces **no new problems** (the one error + warnings in `TRChatPanel.tsx`
   are the pre-existing baseline, byte-identical count on `main`).
