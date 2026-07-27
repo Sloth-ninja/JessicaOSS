@@ -7,6 +7,42 @@
 
 ---
 
+## 2026-07-27 — WS8 F/G bundled migration + schema mirror (branch `firm-models-deletion-migration`)
+
+**Scope:** the single owner-authorised migration shared by PR F (firm model
+preferences) and PR G (deletion governance), plus its `schema.sql` mirror.
+No application code — additive, defaulted columns only; zero behaviour change
+until F/G land. Owner authorisation recorded 27/07/2026: the owner added
+`20260727_01_firm_models_and_deletion_governance.sql` to
+`.claude/hooks/authorized-migrations.json` themselves (the pretool guard
+blocks agents from both the allowlist and unauthorised migration paths —
+verified working during this session).
+
+**Contents.** `organisations` gains `allow_member_model_prefs` (default
+false), `model_config` jsonb (PR F: default model + offered providers) and
+`retention_days` (default 30, PR G); `deleted_at timestamptz` + `deleted_by
+uuid` tombstones + `*_pending_purge_idx` partial indexes on `projects`,
+`documents`, `chats`, `tabular_reviews`, `workflows` (the `document_versions`
+soft-delete precedent); append-only `deletion_audit_logs` (org-scoped, action
+check `requested/restored/expedited/purged/exported`, RLS enabled, browser
+roles revoked — mirrors `user_mcp_tool_audit_logs`).
+
+**Owner decisions taken at this gate (27/07):** (1) member account deletion
+under a firm is BLOCKED in v1 with ask-your-firm-administrator copy (orgless
+unchanged; admin off-boarding is a later PR); (2) `retention_days` is
+admin-editable in Firm settings, server-clamped to 1–365; (3) bulk deletes
+write ONE audit row per action with counts in `detail`. Full mini-spec lands
+with PR G.
+
+**Verification:** migration applies cleanly on an empty schema mentally
+mirrored against `schema.sql` (same statements, same order); backend
+`npx tsc --noEmit` + `vitest` unaffected (no code changes). NOTE for deploy:
+the owner must run this migration in production Supabase before PR G's
+enforcement code ships; PR F/G code is written 42703-tolerant per the WS8
+pattern regardless.
+
+---
+
 ## 2026-07-27 — WS8 composed-range review: minor fixes (branch `ws8-review-minors`)
 
 **Scope:** fix wave from the mandated composed-range multi-lens review of the
