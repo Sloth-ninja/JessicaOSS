@@ -8,11 +8,14 @@ import { asyncHandler } from "../lib/asyncHandler";
 import { createServerSupabase } from "../lib/supabase";
 import {
     getOrganisationEnabledConnectorIds,
+    getOrganisationModelConfig,
     getUserOrganisationId,
     listOrganisationMembers,
     setMemberRole,
     setOrganisationEnabledConnectorIds,
+    setOrganisationModelConfig,
     updateOrganisationPolicies,
+    type OrganisationModelConfig,
     type OrganisationPolicies,
 } from "../lib/organisations";
 import {
@@ -25,6 +28,7 @@ import {
 } from "../lib/organisationApiKeys";
 import { normalizeApiKeyProvider } from "../lib/userApiKeys";
 import { getOrganisationUsage, normaliseUsageDays } from "../lib/usageStats";
+import { isModelProvider, isSelectableModelId } from "../lib/llm";
 
 export const adminRouter = Router();
 
@@ -157,8 +161,9 @@ adminRouter.patch(
     }),
 );
 
-// Parse a PATCH /admin/policies body: {memberApiKeys?, memberMcpConnectors?}.
-// Only these two boolean fields are accepted; at least one must be present.
+// Parse a PATCH /admin/policies body: {memberApiKeys?, memberMcpConnectors?,
+// memberModelPrefs?}. Only these boolean fields are accepted; at least one must
+// be present.
 function parsePolicyPatch(body: unknown):
     | { ok: true; patch: Partial<OrganisationPolicies> }
     | { ok: false; detail: string } {
@@ -166,7 +171,11 @@ function parsePolicyPatch(body: unknown):
         return { ok: false, detail: "Expected a JSON object" };
     }
     const raw = body as Record<string, unknown>;
-    const allowed = ["memberApiKeys", "memberMcpConnectors"] as const;
+    const allowed = [
+        "memberApiKeys",
+        "memberMcpConnectors",
+        "memberModelPrefs",
+    ] as const;
     const invalid = Object.keys(raw).find(
         (key) => !(allowed as readonly string[]).includes(key),
     );
@@ -184,7 +193,8 @@ function parsePolicyPatch(body: unknown):
     }
     if (
         patch.memberApiKeys === undefined &&
-        patch.memberMcpConnectors === undefined
+        patch.memberMcpConnectors === undefined &&
+        patch.memberModelPrefs === undefined
     ) {
         return { ok: false, detail: "No policy fields to update." };
     }
@@ -298,5 +308,123 @@ adminRouter.patch(
             parsed.ids,
         );
         res.json({ enabledConnectorIds });
+    }),
+);
+
+// Parse a PATCH /admin/model-config body: {defaultModel?, offeredProviders?}
+// (WS8 PR F). Both fields are optional; `null` clears a field, a value replaces
+// it. `defaultModel` must be a selectable model id; every offered provider must
+// be a known provider — an unknown value is rejected 400 (never silently
+// dropped). The parser returns the fields to APPLY over the firm's current
+// config (the route merges), so an absent field is left unchanged.
+function parseModelConfigPatch(body: unknown):
+    | {
+          ok: true;
+          patch: { defaultModel?: string | null; offeredProviders?: string[] };
+      }
+    | { ok: false; detail: string } {
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return { ok: false, detail: "Expected a JSON object" };
+    }
+    const raw = body as Record<string, unknown>;
+    const allowed = ["defaultModel", "offeredProviders"];
+    const invalid = Object.keys(raw).find((key) => !allowed.includes(key));
+    if (invalid) {
+        return { ok: false, detail: `Unsupported field: ${invalid}` };
+    }
+
+    const patch: { defaultModel?: string | null; offeredProviders?: string[] } =
+        {};
+
+    if ("defaultModel" in raw) {
+        const value = raw.defaultModel;
+        if (value === null || (typeof value === "string" && !value.trim())) {
+            patch.defaultModel = null;
+        } else if (typeof value === "string" && isSelectableModelId(value)) {
+            patch.defaultModel = value;
+        } else {
+            return { ok: false, detail: "Unknown default model" };
+        }
+    }
+
+    if ("offeredProviders" in raw) {
+        const value = raw.offeredProviders;
+        if (value === null) {
+            patch.offeredProviders = [];
+        } else if (Array.isArray(value)) {
+            const providers = new Set<string>();
+            for (const entry of value) {
+                if (!isModelProvider(entry)) {
+                    return { ok: false, detail: "Unknown provider" };
+                }
+                providers.add(entry);
+            }
+            patch.offeredProviders = [...providers];
+        } else {
+            return {
+                ok: false,
+                detail: "offeredProviders must be an array",
+            };
+        }
+    }
+
+    if (
+        patch.defaultModel === undefined &&
+        patch.offeredProviders === undefined
+    ) {
+        return { ok: false, detail: "No model-config fields to update." };
+    }
+    return { ok: true, patch };
+}
+
+// GET /admin/model-config — the firm's current model configuration (default
+// model + offered providers). Read-only; scoped to the caller's own firm.
+adminRouter.get(
+    "/model-config",
+    asyncHandler(async (_req, res) => {
+        const db = createServerSupabase();
+        const orgId = await callerOrganisationId(
+            db,
+            res.locals.userId as string,
+        );
+        if (!orgId) return void res.status(403).json({ detail: ADMIN_REQUIRED });
+        const modelConfig = await getOrganisationModelConfig(db, orgId);
+        res.json({ modelConfig });
+    }),
+);
+
+// PATCH /admin/model-config — update the firm's model configuration. Scoped to
+// the caller's own firm; MFA stepped up like the other mutating admin routes.
+// Merges the provided fields over the firm's current config and returns the
+// resulting (normalised) config.
+adminRouter.patch(
+    "/model-config",
+    requireMfaIfEnrolled,
+    asyncHandler(async (req, res) => {
+        const parsed = parseModelConfigPatch(req.body);
+        if (!parsed.ok) {
+            return void res.status(400).json({ detail: parsed.detail });
+        }
+
+        const db = createServerSupabase();
+        const orgId = await callerOrganisationId(
+            db,
+            res.locals.userId as string,
+        );
+        if (!orgId) return void res.status(403).json({ detail: ADMIN_REQUIRED });
+
+        const current = await getOrganisationModelConfig(db, orgId);
+        const next: OrganisationModelConfig = {
+            defaultModel:
+                parsed.patch.defaultModel !== undefined
+                    ? parsed.patch.defaultModel
+                    : current.defaultModel,
+            offeredProviders:
+                parsed.patch.offeredProviders !== undefined
+                    ? parsed.patch.offeredProviders
+                    : current.offeredProviders,
+        };
+        const modelConfig = await setOrganisationModelConfig(db, orgId, next);
+        res.json({ modelConfig });
     }),
 );

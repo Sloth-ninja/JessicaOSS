@@ -35,12 +35,24 @@ import { requireMemberPolicy } from "./auth";
 
 const KEYS_DETAIL = "Personal API keys are managed by your firm.";
 const CONNECTORS_DETAIL = "Connectors are managed by your firm.";
+const MODEL_PREFS_DETAIL = "Model preferences are managed by your firm.";
 
 function membership(
-  policies: OrganisationMembership["policies"],
+  policies: Partial<OrganisationMembership["policies"]>,
   role: OrganisationMembership["role"] = "member",
 ): OrganisationMembership {
-  return { id: "org-1", name: "Aria Grace Law", role, policies };
+  return {
+    id: "org-1",
+    name: "Aria Grace Law",
+    role,
+    policies: {
+      memberApiKeys: false,
+      memberMcpConnectors: false,
+      memberModelPrefs: false,
+      ...policies,
+    },
+    modelConfig: { defaultModel: null, offeredProviders: [] },
+  };
 }
 
 let server: Server;
@@ -81,6 +93,22 @@ beforeAll(async () => {
       (req) =>
         typeof req.body?.api_key === "string" &&
         req.body.api_key.trim().length > 0,
+    ),
+    (_req, res) => res.json({ ok: true }),
+  );
+  // Mirrors PATCH /user/profile (WS8 PR F): the memberModelPrefs gate applies
+  // ONLY when the body touches a model-preference field; a display-name-only
+  // edit skips the gate.
+  app.patch(
+    "/profile-model",
+    fakeAuth,
+    requireMemberPolicy(
+      "memberModelPrefs",
+      MODEL_PREFS_DETAIL,
+      (req) =>
+        !!req.body &&
+        typeof req.body === "object" &&
+        ("titleModel" in req.body || "tabularModel" in req.body),
     ),
     (_req, res) => res.json({ ok: true }),
   );
@@ -212,6 +240,54 @@ describe("requireMemberPolicy — shouldGate predicate (save-only gate)", () => 
       memberMcpConnectors: true,
     });
     const res = await putKeysSave({ api_key: "   " });
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("requireMemberPolicy — memberModelPrefs (WS8 PR F)", () => {
+  const patchModel = (body: unknown) =>
+    fetch(`${baseUrl}/profile-model`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  it("blocks a model-pref write with a fixed 403 when the policy is OFF", async () => {
+    state.resolve = membership({ memberModelPrefs: false });
+    const res = await patchModel({ tabularModel: "gpt-5.4" });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ detail: MODEL_PREFS_DETAIL });
+  });
+
+  it("lets a display-name-only edit through even when the policy is OFF", async () => {
+    state.resolve = membership({ memberModelPrefs: false });
+    const res = await patchModel({ displayName: "Jane Solicitor" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+
+  it("allows a model-pref write when the policy is ON", async () => {
+    state.resolve = membership({ memberModelPrefs: true });
+    const res = await patchModel({ titleModel: "gpt-5.4-lite" });
+    expect(res.status).toBe(200);
+  });
+
+  it("does not exempt an admin (blocked under policy OFF)", async () => {
+    state.resolve = membership({ memberModelPrefs: false }, "admin");
+    const res = await patchModel({ tabularModel: "gpt-5.4" });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ detail: MODEL_PREFS_DETAIL });
+  });
+
+  it("allows an orgless caller", async () => {
+    state.resolve = null;
+    const res = await patchModel({ tabularModel: "gpt-5.4" });
+    expect(res.status).toBe(200);
+  });
+
+  it("fails open (allows) when the org lookup throws", async () => {
+    state.throws = true;
+    const res = await patchModel({ tabularModel: "gpt-5.4" });
     expect(res.status).toBe(200);
   });
 });

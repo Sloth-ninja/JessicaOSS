@@ -7,6 +7,8 @@ import {
     type UserApiKeys,
 } from "./llm";
 import { getUserApiKeys as getStoredUserApiKeys } from "./userApiKeys";
+import { getUserOrganisationModelContext } from "./organisations";
+import { safeErrorLog } from "./safeError";
 
 export type UserModelSettings = {
     title_model: string;
@@ -36,6 +38,31 @@ export async function getUserModelSettings(
         .eq("user_id", userId)
         .single();
     const api_keys = await getStoredUserApiKeys(userId, client);
+
+    // Firm model policy (WS8 PR F): when the member's firm manages model access
+    // (`memberModelPrefs` off), the member's personal title/tabular prefs are
+    // INERT — the firm's default model governs the review tier, and the title
+    // tier stays on the provider-appropriate lightweight default (personal
+    // ignored, never deleted). FAIL OPEN: any org-lookup error → personal prefs
+    // apply (availability over a brief policy gap; mirrors userApiKeys.ts).
+    try {
+        const orgContext = await getUserOrganisationModelContext(client, userId);
+        if (orgContext && !orgContext.allowMemberModelPrefs) {
+            const firmDefault = orgContext.config.defaultModel;
+            return {
+                title_model: resolveTitleModel(api_keys),
+                tabular_model: firmDefault
+                    ? resolveModel(firmDefault, DEFAULT_TABULAR_MODEL)
+                    : DEFAULT_TABULAR_MODEL,
+                api_keys,
+            };
+        }
+    } catch (err) {
+        console.error(
+            "[user-settings] firm model policy read failed; using personal prefs",
+            { userId, error: safeErrorLog(err) },
+        );
+    }
 
     return {
         title_model: resolveModel(data?.title_model, resolveTitleModel(api_keys)),

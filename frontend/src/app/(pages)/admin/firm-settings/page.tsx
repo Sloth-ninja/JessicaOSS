@@ -22,20 +22,24 @@ import {
     getConnectorGalleryCuration,
     getFirmApiKeyStatus,
     getFirmMembers,
+    getFirmModelConfig,
     isMfaRequiredError,
     MikeApiError,
     saveFirmApiKey,
     updateConnectorGalleryCuration,
     updateFirmMemberRole,
+    updateFirmModelConfig,
     updateFirmPolicies,
     type ApiKeyProvider,
     type ConnectorRegistryAdminEntry,
     type FirmApiKeyStatus,
     type FirmMember,
+    type OrganisationModelConfig,
     type OrganisationPolicies,
     type OrganisationRole,
 } from "@/app/lib/mikeApi";
 import { AccountToggle } from "@/app/(pages)/account/AccountToggle";
+import { MODELS } from "@/app/components/assistant/ModelToggle";
 
 const FIRM_API_KEY_FIELDS: {
     provider: ApiKeyProvider;
@@ -146,6 +150,7 @@ export default function FirmSettingsPage() {
                 <MembersSection />
                 <FirmApiKeysSection />
                 <PoliciesCard />
+                <ModelConfigCard />
                 <ConnectorsCurationCard />
             </div>
         </div>
@@ -589,6 +594,11 @@ const POLICY_ROWS: {
         title: "Members may add custom connectors",
         desc: "When off, the Connectors tab is hidden from members' account settings. Firm-managed connectors remain available to everyone in chat.",
     },
+    {
+        key: "memberModelPrefs",
+        title: "Members may set their own model preferences",
+        desc: "When off, the Model Preferences pickers are hidden from members' account settings and your firm's default model below is used instead.",
+    },
 ];
 
 function PoliciesCard() {
@@ -598,6 +608,7 @@ function PoliciesCard() {
         profile?.firm?.policies ?? {
             memberApiKeys: false,
             memberMcpConnectors: false,
+            memberModelPrefs: false,
         },
     );
     const [busyKey, setBusyKey] = useState<
@@ -677,6 +688,262 @@ function PoliciesCard() {
                         Changes take effect immediately. Turning a policy off
                         hides the matching tab from members&apos; account
                         settings — it is removed, not shown disabled.
+                    </p>
+                </div>
+            </SectionCard>
+            {mfa.popup}
+        </>
+    );
+}
+
+// Firm model configuration (WS8 PR F). The firm's default model (used for
+// members when "Members may set their own model preferences" is off) and the
+// providers members are offered in the picker. Empty offered-providers ⇒ no
+// restriction (members may pick any provider), mirroring the connector-curation
+// empty=all encoding.
+const MODEL_CONFIG_PROVIDERS: { provider: string; label: string }[] = [
+    { provider: "claude", label: "Anthropic (Claude)" },
+    { provider: "gemini", label: "Google (Gemini)" },
+    { provider: "openai", label: "OpenAI" },
+];
+
+const MODEL_CONFIG_GROUPS: {
+    group: (typeof MODELS)[number]["group"];
+    label: string;
+}[] = [
+    { group: "Anthropic", label: "Anthropic" },
+    { group: "Google", label: "Google" },
+    { group: "OpenAI", label: "OpenAI" },
+];
+
+function ModelConfigCard() {
+    const mfa = useMfaGuardedAction();
+    const { reloadProfile } = useUserProfile();
+    const [config, setConfig] = useState<OrganisationModelConfig | null>(null);
+    const [defaultModel, setDefaultModel] = useState("");
+    const [providers, setProviders] = useState<Set<string>>(new Set());
+    const [loadError, setLoadError] = useState(false);
+    const [reloadKey, setReloadKey] = useState(0);
+    const [busy, setBusy] = useState(false);
+    const [saved, setSaved] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        let active = true;
+        (async () => {
+            try {
+                const next = await getFirmModelConfig();
+                if (!active) return;
+                setConfig(next);
+                setDefaultModel(next.defaultModel ?? "");
+                // Empty offered list ⇒ no restriction ⇒ all providers ticked.
+                setProviders(
+                    new Set(
+                        next.offeredProviders.length === 0
+                            ? MODEL_CONFIG_PROVIDERS.map((p) => p.provider)
+                            : next.offeredProviders,
+                    ),
+                );
+                setLoadError(false);
+            } catch {
+                if (active) setLoadError(true);
+            }
+        })();
+        return () => {
+            active = false;
+        };
+    }, [reloadKey]);
+
+    // State reset lives in the handler, not the effect (set-state-in-effect).
+    const retryLoad = () => {
+        setLoadError(false);
+        setConfig(null);
+        setReloadKey((k) => k + 1);
+    };
+
+    const toggleProvider = (provider: string, next: boolean) => {
+        setProviders((current) => {
+            const updated = new Set(current);
+            if (next) updated.add(provider);
+            else updated.delete(provider);
+            return updated;
+        });
+        setSaved(false);
+    };
+
+    const allProviders = providers.size === MODEL_CONFIG_PROVIDERS.length;
+
+    const save = () => {
+        // An empty offered list canonically means "no restriction", so unticking
+        // every provider would silently offer everything — block it and point at
+        // the real control (the policy above).
+        if (providers.size === 0) {
+            setError(
+                "At least one provider must stay ticked. To stop members choosing their own model, turn off “Members may set their own model preferences” above.",
+            );
+            return;
+        }
+        setError(null);
+        void mfa.run(async () => {
+            setBusy(true);
+            try {
+                const next = await updateFirmModelConfig({
+                    defaultModel: defaultModel || null,
+                    // Canonical form: all providers ticked ⇒ [] (no restriction).
+                    offeredProviders: allProviders ? [] : [...providers],
+                });
+                setConfig(next);
+                setDefaultModel(next.defaultModel ?? "");
+                setProviders(
+                    new Set(
+                        next.offeredProviders.length === 0
+                            ? MODEL_CONFIG_PROVIDERS.map((p) => p.provider)
+                            : next.offeredProviders,
+                    ),
+                );
+                setSaved(true);
+                setTimeout(() => setSaved(false), 2000);
+                // Refresh the admin's own profile so their pickers reflect the
+                // new offered providers / default immediately.
+                await reloadProfile();
+            } catch (err) {
+                if (isMfaRequiredError(err)) throw err;
+                if (err instanceof MikeApiError && err.message) {
+                    setError(err.message);
+                } else {
+                    setError("Could not update the model configuration.");
+                }
+            } finally {
+                setBusy(false);
+            }
+        });
+    };
+
+    const dirty =
+        !!config &&
+        (defaultModel !== (config.defaultModel ?? "") ||
+            (allProviders
+                ? config.offeredProviders.length !== 0
+                : config.offeredProviders.length !== providers.size ||
+                  [...providers].some(
+                      (p) => !config.offeredProviders.includes(p),
+                  )));
+
+    return (
+        <>
+            <SectionCard
+                title="Model configuration"
+                description="Your firm's default model and which providers members are offered."
+            >
+                {error && (
+                    <p className="px-5 py-3 text-xs text-red-600">{error}</p>
+                )}
+                {loadError ? (
+                    <LoadErrorRow
+                        message="Could not load the model configuration."
+                        onRetry={retryLoad}
+                    />
+                ) : config === null ? (
+                    <div className="space-y-4 px-5 py-4">
+                        <div className="h-4 w-40 animate-pulse rounded bg-gray-100" />
+                        <div className="h-9 w-full animate-pulse rounded bg-gray-100" />
+                        <div className="h-4 w-56 animate-pulse rounded bg-gray-100" />
+                    </div>
+                ) : (
+                    <div className="space-y-5 px-5 py-4">
+                        <div>
+                            <label
+                                htmlFor="firm-default-model"
+                                className="mb-1 block text-sm font-medium text-gray-700"
+                            >
+                                Default model
+                            </label>
+                            <p className="mb-2 text-xs text-gray-500">
+                                Used for members when they cannot set their own
+                                model preferences.
+                            </p>
+                            <select
+                                id="firm-default-model"
+                                value={defaultModel}
+                                onChange={(e) => {
+                                    setDefaultModel(e.target.value);
+                                    setSaved(false);
+                                }}
+                                className="h-9 w-full max-w-sm rounded-lg border border-gray-200 bg-gray-50 px-2 text-sm text-gray-900"
+                            >
+                                <option value="">
+                                    System default (recommended)
+                                </option>
+                                {MODEL_CONFIG_GROUPS.map((g) => {
+                                    const items = MODELS.filter(
+                                        (m) => m.group === g.group,
+                                    );
+                                    if (items.length === 0) return null;
+                                    return (
+                                        <optgroup
+                                            key={g.group}
+                                            label={g.label}
+                                        >
+                                            {items.map((m) => (
+                                                <option key={m.id} value={m.id}>
+                                                    {m.label}
+                                                </option>
+                                            ))}
+                                        </optgroup>
+                                    );
+                                })}
+                            </select>
+                        </div>
+                        <div>
+                            <p className="mb-1 text-sm font-medium text-gray-700">
+                                Providers offered to members
+                            </p>
+                            <p className="mb-2 text-xs text-gray-500">
+                                {allProviders
+                                    ? "All providers are offered. Untick any you want to hide from members' model picker."
+                                    : "Only the ticked providers appear in members' model picker. Tick them all to offer everything."}
+                            </p>
+                            <div className="space-y-2">
+                                {MODEL_CONFIG_PROVIDERS.map((p) => (
+                                    <label
+                                        key={p.provider}
+                                        className="flex items-center gap-2 text-sm text-gray-800"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={providers.has(p.provider)}
+                                            onChange={(e) =>
+                                                toggleProvider(
+                                                    p.provider,
+                                                    e.target.checked,
+                                                )
+                                            }
+                                            className="h-4 w-4 rounded border-gray-300 accent-gray-900"
+                                        />
+                                        {p.label}
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <button
+                                type="button"
+                                onClick={save}
+                                disabled={busy || saved || !dirty}
+                                className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300"
+                            >
+                                {busy ? "Saving..." : saved ? "Saved" : "Save"}
+                            </button>
+                        </div>
+                    </div>
+                )}
+                <div className="flex items-start gap-2.5 border-t border-gray-100 bg-gray-50 px-5 py-3.5">
+                    <Info className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                    <p className="text-xs leading-relaxed text-gray-600">
+                        Provider restrictions apply to every member&apos;s model
+                        picker. The default model only takes effect for members
+                        whose model preferences are managed by the firm (the
+                        policy above).
                     </p>
                 </div>
             </SectionCard>
