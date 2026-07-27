@@ -19,23 +19,30 @@ import {
     needsMfaVerification,
 } from "@/app/components/shared/MfaVerificationPopup";
 import {
+    expeditePendingDeletion,
     getConnectorGalleryCuration,
     getFirmApiKeyStatus,
     getFirmMembers,
+    getPendingDeletions,
     isMfaRequiredError,
     MikeApiError,
+    restorePendingDeletion,
     saveFirmApiKey,
     updateConnectorGalleryCuration,
     updateFirmMemberRole,
     updateFirmPolicies,
+    updateFirmRetention,
     type ApiKeyProvider,
     type ConnectorRegistryAdminEntry,
     type FirmApiKeyStatus,
     type FirmMember,
+    type GovernedResourceType,
     type OrganisationPolicies,
     type OrganisationRole,
+    type PendingDeletion,
 } from "@/app/lib/mikeApi";
 import { AccountToggle } from "@/app/(pages)/account/AccountToggle";
+import { ConfirmPopup } from "@/app/components/shared/ConfirmPopup";
 
 const FIRM_API_KEY_FIELDS: {
     provider: ApiKeyProvider;
@@ -146,6 +153,8 @@ export default function FirmSettingsPage() {
                 <MembersSection />
                 <FirmApiKeysSection />
                 <PoliciesCard />
+                <RetentionCard />
+                <PendingDeletionsSection />
                 <ConnectorsCurationCard />
             </div>
         </div>
@@ -681,6 +690,394 @@ function PoliciesCard() {
                 </div>
             </SectionCard>
             {mfa.popup}
+        </>
+    );
+}
+
+// Firm-configurable retention window for deletion governance (WS8 PR G) — how
+// long a member's tombstoned item is held before permanent purge. Seeded from
+// profile.firm.retentionDays; MFA-guarded save via PATCH /admin/retention.
+function RetentionCard() {
+    const mfa = useMfaGuardedAction();
+    const { profile, reloadProfile } = useUserProfile();
+    const currentRetention = profile?.firm?.retentionDays ?? 30;
+    const [value, setValue] = useState(String(currentRetention));
+    const [saved, setSaved] = useState(false);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        setValue(String(currentRetention));
+    }, [currentRetention]);
+
+    const parsed = Number(value);
+    const isValid =
+        value.trim() !== "" &&
+        Number.isInteger(parsed) &&
+        parsed >= 1 &&
+        parsed <= 365;
+    const dirty = isValid && parsed !== currentRetention;
+
+    const save = () => {
+        if (!isValid) {
+            setError("Enter a whole number of days between 1 and 365.");
+            return;
+        }
+        setError(null);
+        // The whole save (busy + network + reconcile) is the guarded action so
+        // it replays intact after an MFA step-up.
+        void mfa.run(async () => {
+            setBusy(true);
+            try {
+                const stored = await updateFirmRetention(parsed);
+                setValue(String(stored));
+                await reloadProfile();
+                setSaved(true);
+                setTimeout(() => setSaved(false), 2000);
+            } catch (err) {
+                if (isMfaRequiredError(err)) throw err;
+                if (err instanceof MikeApiError && err.message) {
+                    setError(err.message);
+                } else {
+                    setError("Could not update the retention period.");
+                }
+            } finally {
+                setBusy(false);
+            }
+        });
+    };
+
+    return (
+        <>
+            <SectionCard
+                title="Deletion retention"
+                description="How long a member's deleted item is held before it is permanently removed."
+            >
+                <div className="px-5 py-4">
+                    <label
+                        htmlFor="retention-days"
+                        className="mb-2 block text-sm font-medium text-gray-700"
+                    >
+                        Retention period (days)
+                    </label>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Input
+                            id="retention-days"
+                            type="number"
+                            min={1}
+                            max={365}
+                            step={1}
+                            value={value}
+                            onChange={(e) => {
+                                setValue(e.target.value);
+                                setSaved(false);
+                                setError(null);
+                            }}
+                            className="w-28 border-gray-200 bg-gray-50"
+                        />
+                        <button
+                            type="button"
+                            onClick={save}
+                            disabled={busy || !dirty || saved}
+                            className="text-xs font-medium text-gray-700 transition-colors hover:text-gray-950 disabled:cursor-not-allowed disabled:text-gray-400"
+                        >
+                            {busy ? "Saving..." : saved ? "Saved" : "Save"}
+                        </button>
+                    </div>
+                    {error && (
+                        <p className="mt-2 text-xs text-red-600">{error}</p>
+                    )}
+                </div>
+            </SectionCard>
+            {mfa.popup}
+        </>
+    );
+}
+
+const RESOURCE_TYPE_LABELS: Record<GovernedResourceType, string> = {
+    project: "Matter",
+    document: "Document",
+    chat: "Chat",
+    "tabular-review": "Tabular review",
+    workflow: "Workflow",
+};
+
+function pendingDeletionKey(item: PendingDeletion): string {
+    return `${item.resourceType}:${item.id}`;
+}
+
+// Pending deletions (WS8 PR G) — the firm's tombstoned items, awaiting either
+// admin restore, admin expedite (immediate permanent delete), or the retention
+// window elapsing. Restore/expedite are MFA-stepped-up server-side; the MFA
+// handoff follows the manual needsMfaVerification()/isMfaRequiredError pattern
+// used on privacy-data (not the generic useMfaGuardedAction hook), so the
+// ConfirmPopup can hand off cleanly to the MfaVerificationPopup.
+function PendingDeletionsSection() {
+    const [items, setItems] = useState<PendingDeletion[] | null>(null);
+    const [membersById, setMembersById] = useState<Record<string, string>>(
+        {},
+    );
+    const [loadError, setLoadError] = useState(false);
+    const [reloadKey, setReloadKey] = useState(0);
+    const [error, setError] = useState<string | null>(null);
+    const [confirmTarget, setConfirmTarget] = useState<{
+        item: PendingDeletion;
+        kind: "restore" | "expedite";
+    } | null>(null);
+    const [mfaPending, setMfaPending] = useState<{
+        item: PendingDeletion;
+        kind: "restore" | "expedite";
+    } | null>(null);
+    const [busyKey, setBusyKey] = useState<string | null>(null);
+
+    useEffect(() => {
+        let active = true;
+        (async () => {
+            try {
+                const [list, members] = await Promise.all([
+                    getPendingDeletions(),
+                    getFirmMembers().catch(() => [] as FirmMember[]),
+                ]);
+                if (!active) return;
+                setItems(list);
+                setMembersById(
+                    Object.fromEntries(
+                        members.map((m) => [
+                            m.userId,
+                            m.displayName || m.email || m.userId,
+                        ]),
+                    ),
+                );
+                setLoadError(false);
+            } catch {
+                if (!active) return;
+                setLoadError(true);
+            }
+        })();
+        return () => {
+            active = false;
+        };
+    }, [reloadKey]);
+
+    // State reset lives in the handler, not the effect (set-state-in-effect).
+    const retryLoad = () => {
+        setLoadError(false);
+        setItems(null);
+        setReloadKey((k) => k + 1);
+    };
+
+    const requestAction = (
+        item: PendingDeletion,
+        kind: "restore" | "expedite",
+    ) => {
+        setError(null);
+        setConfirmTarget({ item, kind });
+    };
+
+    // The whole mutation (MFA check + network + list update) lives here so it
+    // can be called both from the confirm popup and replayed after MFA
+    // verification, mirroring privacy-data's handleDeleteData.
+    const performAction = async (
+        item: PendingDeletion,
+        kind: "restore" | "expedite",
+    ) => {
+        setBusyKey(pendingDeletionKey(item));
+        try {
+            if (await needsMfaVerification()) {
+                setConfirmTarget(null);
+                setMfaPending({ item, kind });
+                return;
+            }
+            if (kind === "restore") {
+                await restorePendingDeletion(item.resourceType, item.id);
+            } else {
+                await expeditePendingDeletion(item.resourceType, item.id);
+            }
+            setItems((prev) =>
+                (prev ?? []).filter(
+                    (i) => pendingDeletionKey(i) !== pendingDeletionKey(item),
+                ),
+            );
+            setConfirmTarget(null);
+        } catch (err) {
+            if (isMfaRequiredError(err)) {
+                setConfirmTarget(null);
+                setMfaPending({ item, kind });
+                return;
+            }
+            setConfirmTarget(null);
+            if (err instanceof MikeApiError && err.message) {
+                setError(err.message);
+            } else {
+                setError(
+                    kind === "restore"
+                        ? "Could not restore that item."
+                        : "Could not delete that item.",
+                );
+            }
+        } finally {
+            setBusyKey(null);
+        }
+    };
+
+    const confirmBusy =
+        !!confirmTarget && busyKey === pendingDeletionKey(confirmTarget.item);
+
+    return (
+        <>
+            <SectionCard
+                title="Pending deletions"
+                description="Items your firm's members have deleted. They are held for the retention window above before permanent removal."
+            >
+                {error && (
+                    <p className="px-5 py-3 text-xs text-red-600">{error}</p>
+                )}
+                {loadError ? (
+                    <LoadErrorRow
+                        message="Could not load pending deletions."
+                        onRetry={retryLoad}
+                    />
+                ) : items === null ? (
+                    <div className="space-y-2 px-5 py-4">
+                        {[0, 1, 2].map((i) => (
+                            <div
+                                key={i}
+                                className="h-6 w-full animate-pulse rounded bg-gray-100"
+                            />
+                        ))}
+                    </div>
+                ) : items.length === 0 ? (
+                    <p className="px-5 py-6 text-sm text-gray-500">
+                        No items awaiting deletion.
+                    </p>
+                ) : (
+                    <ul className="divide-y divide-gray-100">
+                        {items.map((item) => {
+                            const rowBusy =
+                                busyKey === pendingDeletionKey(item);
+                            const requesterLabel = item.deletedBy
+                                ? membersById[item.deletedBy] ||
+                                  item.deletedBy
+                                : "Unknown";
+                            const typeLabel =
+                                RESOURCE_TYPE_LABELS[item.resourceType];
+                            return (
+                                <li
+                                    key={pendingDeletionKey(item)}
+                                    className="flex flex-wrap items-center gap-3 px-5 py-3.5"
+                                >
+                                    <span className="inline-flex shrink-0 items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-700">
+                                        {typeLabel}
+                                    </span>
+                                    <span className="min-w-0 flex-1">
+                                        <span className="block truncate text-sm text-gray-900">
+                                            {item.displayName ||
+                                                `Untitled ${typeLabel.toLowerCase()}`}
+                                        </span>
+                                        <span className="block truncate text-xs text-gray-400">
+                                            Deleted by {requesterLabel}
+                                        </span>
+                                    </span>
+                                    <span className="hidden w-24 text-right text-xs tabular-nums text-gray-500 sm:block">
+                                        {formatUkDate(item.deletedAt)}
+                                    </span>
+                                    <span className="w-20 shrink-0 text-right text-xs tabular-nums text-gray-500">
+                                        {item.daysRemaining}{" "}
+                                        {item.daysRemaining === 1
+                                            ? "day"
+                                            : "days"}{" "}
+                                        left
+                                    </span>
+                                    <span className="flex w-32 shrink-0 items-center justify-end gap-3">
+                                        {rowBusy ? (
+                                            <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
+                                        ) : (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                        requestAction(
+                                                            item,
+                                                            "restore",
+                                                        )
+                                                    }
+                                                    className="text-xs font-medium text-gray-700 transition-colors hover:text-gray-950"
+                                                >
+                                                    Restore
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                        requestAction(
+                                                            item,
+                                                            "expedite",
+                                                        )
+                                                    }
+                                                    className="text-xs font-medium text-red-600 transition-colors hover:text-red-700"
+                                                >
+                                                    Expedite
+                                                </button>
+                                            </>
+                                        )}
+                                    </span>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                )}
+                <div className="flex items-start gap-2.5 border-t border-gray-100 bg-gray-50 px-5 py-3.5">
+                    <Info className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                    <p className="text-xs leading-relaxed text-gray-600">
+                        Restore returns an item to its owner. Expedite
+                        permanently deletes it now, ahead of the retention
+                        window — that cannot be undone.
+                    </p>
+                </div>
+            </SectionCard>
+            <ConfirmPopup
+                open={!!confirmTarget}
+                title={
+                    confirmTarget?.kind === "restore"
+                        ? "Restore this item?"
+                        : "Delete this item permanently?"
+                }
+                message={
+                    confirmTarget?.kind === "restore"
+                        ? "This returns the item to its owner — it will reappear in their account."
+                        : "This permanently deletes the item now, ahead of the retention window. This cannot be undone."
+                }
+                confirmLabel={
+                    confirmTarget?.kind === "restore" ? "Restore" : "Delete"
+                }
+                confirmStatus={confirmBusy ? "loading" : "idle"}
+                cancelLabel="Cancel"
+                onCancel={() => {
+                    if (confirmBusy) return;
+                    setConfirmTarget(null);
+                }}
+                onConfirm={() => {
+                    if (!confirmTarget) return;
+                    void performAction(confirmTarget.item, confirmTarget.kind);
+                }}
+            />
+            <MfaVerificationPopup
+                open={!!mfaPending}
+                onCancel={() => {
+                    setMfaPending(null);
+                    setBusyKey(null);
+                }}
+                onVerified={() => {
+                    const target = mfaPending;
+                    setMfaPending(null);
+                    if (target) void performAction(target.item, target.kind);
+                }}
+                title="Two-factor verification required"
+                message={
+                    mfaPending?.kind === "expedite"
+                        ? "Permanent deletion is sensitive. Enter a code from your authenticator app to continue."
+                        : "This action is sensitive. Enter a code from your authenticator app to continue."
+                }
+            />
         </>
     );
 }

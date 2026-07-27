@@ -173,6 +173,18 @@ export async function deleteAllUserTabularReviews(db: Db, userId: string) {
     const reviewIds = uniqueStrings(
         ((reviews ?? []) as { id: string | null }[]).map((row) => row.id),
     );
+    return purgeTabularReviewsByIds(db, reviewIds);
+}
+
+/**
+ * Hard-delete a set of tabular reviews by id, cascading review chats + messages
+ * and cells. Not user-scoped (see purgeProjectsByIds). Returns the count removed.
+ */
+export async function purgeTabularReviewsByIds(
+    db: Db,
+    reviewIdsInput: string[],
+): Promise<number> {
+    const reviewIds = uniqueStrings(reviewIdsInput);
     if (reviewIds.length === 0) return 0;
 
     const { data: reviewChats, error: reviewChatsError } = await db
@@ -198,6 +210,54 @@ export async function deleteAllUserTabularReviews(db: Db, userId: string) {
     return reviewIds.length;
 }
 
+/**
+ * Hard-delete a set of assistant chats by id (cascading chat_messages). Not
+ * user-scoped (see purgeProjectsByIds). Returns the count removed.
+ */
+export async function purgeChatsByIds(
+    db: Db,
+    chatIdsInput: string[],
+): Promise<number> {
+    const chatIds = uniqueStrings(chatIdsInput);
+    if (chatIds.length === 0) return 0;
+    await deleteWhereIn(db, "chat_messages", "chat_id", chatIds);
+    await deleteByIds(db, "chats", chatIds);
+    return chatIds.length;
+}
+
+/**
+ * Hard-delete a set of documents by id, removing their version storage bytes
+ * first (source + PDF renditions) before dropping the rows (versions cascade).
+ * Not user-scoped (see purgeProjectsByIds). Returns the count removed.
+ */
+export async function purgeDocumentsByIds(
+    db: Db,
+    documentIdsInput: string[],
+): Promise<number> {
+    const documentIds = uniqueStrings(documentIdsInput);
+    if (documentIds.length === 0) return 0;
+    await deleteDocumentVersionFiles(db, documentIds);
+    await deleteByIds(db, "documents", documentIds);
+    return documentIds.length;
+}
+
+/**
+ * Hard-delete a set of workflows by id, cascading their shares and any per-user
+ * "hidden" markers. Not user-scoped (see purgeProjectsByIds). Returns the count
+ * removed.
+ */
+export async function purgeWorkflowsByIds(
+    db: Db,
+    workflowIdsInput: string[],
+): Promise<number> {
+    const workflowIds = uniqueStrings(workflowIdsInput);
+    if (workflowIds.length === 0) return 0;
+    await deleteWhereIn(db, "workflow_shares", "workflow_id", workflowIds);
+    await deleteWhereIn(db, "hidden_workflows", "workflow_id", workflowIds);
+    await deleteByIds(db, "workflows", workflowIds);
+    return workflowIds.length;
+}
+
 export async function deleteUserProjects(
     db: Db,
     userId: string,
@@ -217,6 +277,21 @@ export async function deleteUserProjects(
     const ownedProjectIds = uniqueStrings(
         ((projects ?? []) as { id: string | null }[]).map((row) => row.id),
     );
+    return purgeProjectsByIds(db, ownedProjectIds);
+}
+
+/**
+ * Hard-delete a set of projects by id, cascading their child rows (documents +
+ * version files, chats + messages, tabular reviews + cells + review chats,
+ * subfolders) and storage bytes. Not user-scoped: the caller (deleteUserProjects,
+ * or the deletion-governance purge sweep) is responsible for having resolved the
+ * ids to delete. Returns the number of projects removed.
+ */
+export async function purgeProjectsByIds(
+    db: Db,
+    projectIds: string[],
+): Promise<number> {
+    const ownedProjectIds = uniqueStrings(projectIds);
     if (ownedProjectIds.length === 0) return 0;
 
     const [projectDocs, projectChats, projectReviews, projectFolders] =

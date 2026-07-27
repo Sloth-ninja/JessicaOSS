@@ -16,7 +16,18 @@ export interface OrganisationMembership {
     name: string;
     role: OrganisationRole;
     policies: OrganisationPolicies;
+    /**
+     * Firm retention window for soft-deleted items, in days (WS8 PR G). Exposed
+     * so the member privacy-data copy can honestly say how long the firm holds a
+     * deleted item before permanent removal. Defaults to 30 when the column is
+     * absent/unmigrated.
+     */
+    retentionDays: number;
 }
+
+// Default retention window (days) when a firm has no explicit value / the column
+// is missing. Mirrors organisations.retention_days DEFAULT 30 (migration 20260727_01).
+export const DEFAULT_RETENTION_DAYS = 30;
 
 // Columns embedded from the joined organisations row.
 type OrganisationEmbed = {
@@ -24,6 +35,7 @@ type OrganisationEmbed = {
     name: string | null;
     allow_member_api_keys: boolean | null;
     allow_member_mcp_connectors: boolean | null;
+    retention_days: number | null;
 };
 
 type MembershipRow = {
@@ -36,7 +48,7 @@ type MembershipRow = {
 
 // One round-trip: the profile's membership columns plus the joined firm row.
 const MEMBERSHIP_SELECT =
-    "organisation_id, role, organisation:organisations(id, name, allow_member_api_keys, allow_member_mcp_connectors)";
+    "organisation_id, role, organisation:organisations(id, name, allow_member_api_keys, allow_member_mcp_connectors, retention_days)";
 
 // Postgres "undefined_column" — raised when the organisation_id / role columns
 // (or the organisations table) do not exist yet on an unmigrated database. We
@@ -76,6 +88,10 @@ function toMembership(row: MembershipRow | null): OrganisationMembership | null 
             memberApiKeys: org.allow_member_api_keys === true,
             memberMcpConnectors: org.allow_member_mcp_connectors === true,
         },
+        retentionDays:
+            typeof org.retention_days === "number" && org.retention_days > 0
+                ? org.retention_days
+                : DEFAULT_RETENTION_DAYS,
     };
 }
 

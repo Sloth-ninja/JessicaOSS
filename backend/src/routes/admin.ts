@@ -25,6 +25,16 @@ import {
 } from "../lib/organisationApiKeys";
 import { normalizeApiKeyProvider } from "../lib/userApiKeys";
 import { getOrganisationUsage, normaliseUsageDays } from "../lib/usageStats";
+import {
+    listPendingDeletions,
+    restoreResource,
+    expediteResource,
+    getOrganisationMemberIds,
+    updateOrganisationRetention,
+    insertDeletionAudit,
+    clampRetentionDays,
+    isGovernedResourceType,
+} from "../lib/deletionGovernance";
 
 export const adminRouter = Router();
 
@@ -298,5 +308,124 @@ adminRouter.patch(
             parsed.ids,
         );
         res.json({ enabledConnectorIds });
+    }),
+);
+
+// ── Deletion governance (WS8 PR G) ───────────────────────────────────────────
+
+// GET /admin/pending-deletions — the firm's tombstoned items awaiting purge:
+// resource type, display name, requester (deleted_by), when, days remaining.
+adminRouter.get(
+    "/pending-deletions",
+    asyncHandler(async (_req, res) => {
+        const db = createServerSupabase();
+        const orgId = await callerOrganisationId(
+            db,
+            res.locals.userId as string,
+        );
+        if (!orgId) return void res.status(403).json({ detail: ADMIN_REQUIRED });
+        res.json({ items: await listPendingDeletions(db, orgId) });
+    }),
+);
+
+// POST /admin/pending-deletions/:resourceType/:id/restore — clear the tombstone.
+adminRouter.post(
+    "/pending-deletions/:resourceType/:id/restore",
+    requireMfaIfEnrolled,
+    asyncHandler(async (req, res) => {
+        const { resourceType, id } = req.params;
+        if (!isGovernedResourceType(resourceType)) {
+            return void res
+                .status(404)
+                .json({ detail: "That item is not available." });
+        }
+        const db = createServerSupabase();
+        const orgId = await callerOrganisationId(
+            db,
+            res.locals.userId as string,
+        );
+        if (!orgId) return void res.status(403).json({ detail: ADMIN_REQUIRED });
+
+        const memberIds = await getOrganisationMemberIds(db, orgId);
+        const outcome = await restoreResource(db, resourceType, id, memberIds);
+        if (outcome !== "ok") {
+            return void res
+                .status(404)
+                .json({ detail: "That item is not available." });
+        }
+        await insertDeletionAudit(db, {
+            organisationId: orgId,
+            actorUserId: res.locals.userId as string,
+            action: "restored",
+            resourceType,
+            resourceId: id,
+        });
+        res.status(204).send();
+    }),
+);
+
+// POST /admin/pending-deletions/:resourceType/:id/expedite — hard-delete now.
+adminRouter.post(
+    "/pending-deletions/:resourceType/:id/expedite",
+    requireMfaIfEnrolled,
+    asyncHandler(async (req, res) => {
+        const { resourceType, id } = req.params;
+        if (!isGovernedResourceType(resourceType)) {
+            return void res
+                .status(404)
+                .json({ detail: "That item is not available." });
+        }
+        const db = createServerSupabase();
+        const orgId = await callerOrganisationId(
+            db,
+            res.locals.userId as string,
+        );
+        if (!orgId) return void res.status(403).json({ detail: ADMIN_REQUIRED });
+
+        const memberIds = await getOrganisationMemberIds(db, orgId);
+        const outcome = await expediteResource(db, resourceType, id, memberIds);
+        if (outcome !== "ok") {
+            return void res
+                .status(404)
+                .json({ detail: "That item is not available." });
+        }
+        await insertDeletionAudit(db, {
+            organisationId: orgId,
+            actorUserId: res.locals.userId as string,
+            action: "expedited",
+            resourceType,
+            resourceId: id,
+        });
+        res.status(204).send();
+    }),
+);
+
+// PATCH /admin/retention — set the firm's soft-delete retention window (days),
+// server-clamped to 1–365.
+adminRouter.patch(
+    "/retention",
+    requireMfaIfEnrolled,
+    asyncHandler(async (req, res) => {
+        const raw = (req.body as { retentionDays?: unknown } | null)
+            ?.retentionDays;
+        const retentionDays = clampRetentionDays(raw);
+        if (retentionDays === null) {
+            return void res
+                .status(400)
+                .json({ detail: "retentionDays must be a number." });
+        }
+        const db = createServerSupabase();
+        const orgId = await callerOrganisationId(
+            db,
+            res.locals.userId as string,
+        );
+        if (!orgId) return void res.status(403).json({ detail: ADMIN_REQUIRED });
+
+        const stored = await updateOrganisationRetention(
+            db,
+            orgId,
+            retentionDays,
+        );
+        res.json({ retentionDays: stored });
     }),
 );

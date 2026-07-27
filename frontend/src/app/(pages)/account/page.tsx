@@ -13,7 +13,7 @@ import {
     needsMfaVerification,
 } from "@/app/components/shared/MfaVerificationPopup";
 import { WarningPopup } from "@/app/components/shared/WarningPopup";
-import { deleteAccount, isMfaRequiredError } from "@/app/lib/mikeApi";
+import { deleteAccount, isMfaRequiredError, MikeApiError } from "@/app/lib/mikeApi";
 import {
     accountGlassDangerOutlineButtonClassName,
     accountGlassInputClassName,
@@ -91,7 +91,13 @@ export default function AccountPage() {
                 return;
             }
             setDeleteConfirm(false);
-            alert("Failed to delete account. Please try again.");
+            // Surface the server's explanation when there is one — e.g. a
+            // firm member whose account is managed by their firm (WS8 PR G).
+            const message =
+                error instanceof MikeApiError && error.message
+                    ? error.message
+                    : "Failed to delete account. Please try again.";
+            alert(message);
         }
     };
 
@@ -345,26 +351,42 @@ export default function AccountPage() {
                 <h2 className="text-2xl font-medium font-serif text-red-600">
                     Danger Zone
                 </h2>
-                <AccountSection className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="space-y-1">
-                        <p className="text-sm font-medium text-gray-900">
+                {profile?.firm ? (
+                    // Firm members: account off-boarding is firm-managed, not
+                    // self-service (WS8 PR G) — no destructive action here.
+                    <AccountSection className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="space-y-1">
+                            <p className="text-sm font-medium text-gray-900">
+                                Delete account
+                            </p>
+                            <p className="text-sm text-gray-500">
+                                Account deletion is managed by your firm. Ask
+                                your firm administrator.
+                            </p>
+                        </div>
+                    </AccountSection>
+                ) : (
+                    <AccountSection className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="space-y-1">
+                            <p className="text-sm font-medium text-gray-900">
+                                Delete account
+                            </p>
+                            <p className="text-sm text-gray-500">
+                                Permanently delete your account and all
+                                associated data. This action cannot be undone.
+                            </p>
+                        </div>
+                        <Button
+                            variant="outline"
+                            onClick={() => setDeleteConfirm(true)}
+                            disabled={isDeleting}
+                            className={`w-full shrink-0 gap-1.5 sm:w-auto ${accountGlassDangerOutlineButtonClassName}`}
+                        >
+                            <Trash2 className="h-4 w-4 shrink-0" />
                             Delete account
-                        </p>
-                        <p className="text-sm text-gray-500">
-                            Permanently delete your account and all associated
-                            data. This action cannot be undone.
-                        </p>
-                    </div>
-                    <Button
-                        variant="outline"
-                        onClick={() => setDeleteConfirm(true)}
-                        disabled={isDeleting}
-                        className={`w-full shrink-0 gap-1.5 sm:w-auto ${accountGlassDangerOutlineButtonClassName}`}
-                    >
-                        <Trash2 className="h-4 w-4 shrink-0" />
-                        Delete account
-                    </Button>
-                </AccountSection>
+                        </Button>
+                    </AccountSection>
+                )}
             </section>
             <ConfirmPopup
                 open={deleteConfirm}

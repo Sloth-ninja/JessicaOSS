@@ -59,8 +59,17 @@ import {
     buildUserTabularReviewsExport,
     userExportFilename,
 } from "../lib/userDataExport";
+import {
+    resolveDeletionMode,
+    tombstoneAllForUser,
+    insertDeletionAudit,
+} from "../lib/deletionGovernance";
 
 export const userRouter = Router();
+
+// Fixed 403 detail for member account deletion under a firm (WS8 PR G).
+const ACCOUNT_MANAGED_BY_FIRM_DETAIL =
+    "Account deletion is managed by your firm. Ask your firm administrator.";
 
 const MONTHLY_CREDIT_LIMIT = 999999;
 
@@ -1100,6 +1109,14 @@ userRouter.delete(
         const userEmail = res.locals.userEmail as string | undefined;
         const db = createServerSupabase();
         try {
+            // Member (or fail-safe) account deletion under a firm is blocked in
+            // v1 — the firm manages off-boarding (WS8 PR G). Orgless unchanged.
+            const mode = await resolveDeletionMode(db, userId);
+            if (mode.tombstone) {
+                return void res
+                    .status(403)
+                    .json({ detail: ACCOUNT_MANAGED_BY_FIRM_DETAIL });
+            }
             await deleteUserAccountData(db, userId, userEmail);
             const { error } = await db.auth.admin.deleteUser(userId);
             if (error)
@@ -1125,6 +1142,24 @@ userRouter.delete(
         const userId = res.locals.userId as string;
         const db = createServerSupabase();
         try {
+            // Org members tombstone their assistant chats (one audit row per
+            // bulk action); orgless self-hosters hard-delete (unchanged). WS8 PR G.
+            const mode = await resolveDeletionMode(db, userId);
+            if (mode.tombstone) {
+                const n = await tombstoneAllForUser(db, "chat", userId);
+                if (n !== "unsupported") {
+                    if (n > 0) {
+                        await insertDeletionAudit(db, {
+                            organisationId: mode.organisationId,
+                            actorUserId: userId,
+                            action: "requested",
+                            resourceType: "chat",
+                            detail: { count: n, bulk: true },
+                        });
+                    }
+                    return void res.status(204).send();
+                }
+            }
             await deleteAllUserChats(db, userId);
             res.status(204).send();
         } catch (err) {
@@ -1147,6 +1182,24 @@ userRouter.delete(
         const userId = res.locals.userId as string;
         const db = createServerSupabase();
         try {
+            // Org members tombstone their matters (one audit row per bulk
+            // action); orgless self-hosters hard-delete (unchanged). WS8 PR G.
+            const mode = await resolveDeletionMode(db, userId);
+            if (mode.tombstone) {
+                const n = await tombstoneAllForUser(db, "project", userId);
+                if (n !== "unsupported") {
+                    if (n > 0) {
+                        await insertDeletionAudit(db, {
+                            organisationId: mode.organisationId,
+                            actorUserId: userId,
+                            action: "requested",
+                            resourceType: "project",
+                            detail: { count: n, bulk: true },
+                        });
+                    }
+                    return void res.status(204).send();
+                }
+            }
             await deleteUserProjects(db, userId);
             res.status(204).send();
         } catch (err) {
@@ -1169,6 +1222,28 @@ userRouter.delete(
         const userId = res.locals.userId as string;
         const db = createServerSupabase();
         try {
+            // Org members tombstone their reviews (one audit row per bulk
+            // action); orgless self-hosters hard-delete (unchanged). WS8 PR G.
+            const mode = await resolveDeletionMode(db, userId);
+            if (mode.tombstone) {
+                const n = await tombstoneAllForUser(
+                    db,
+                    "tabular-review",
+                    userId,
+                );
+                if (n !== "unsupported") {
+                    if (n > 0) {
+                        await insertDeletionAudit(db, {
+                            organisationId: mode.organisationId,
+                            actorUserId: userId,
+                            action: "requested",
+                            resourceType: "tabular-review",
+                            detail: { count: n, bulk: true },
+                        });
+                    }
+                    return void res.status(204).send();
+                }
+            }
             await deleteAllUserTabularReviews(db, userId);
             res.status(204).send();
         } catch (err) {
@@ -1193,6 +1268,15 @@ userRouter.get(
         const db = createServerSupabase();
         try {
             const data = await buildUserAccountExport(db, userId, userEmail);
+            // Audit org-affiliated exports (orgless exports are not audited —
+            // insertDeletionAudit no-ops without an org id). WS8 PR G.
+            const mode = await resolveDeletionMode(db, userId);
+            await insertDeletionAudit(db, {
+                organisationId: mode.organisationId,
+                actorUserId: userId,
+                action: "exported",
+                resourceType: "account",
+            });
             res.setHeader("Content-Type", "application/json; charset=utf-8");
             res.setHeader(
                 "Content-Disposition",
@@ -1218,6 +1302,13 @@ userRouter.get(
         const db = createServerSupabase();
         try {
             const data = await buildUserChatsExport(db, userId, userEmail);
+            const mode = await resolveDeletionMode(db, userId);
+            await insertDeletionAudit(db, {
+                organisationId: mode.organisationId,
+                actorUserId: userId,
+                action: "exported",
+                resourceType: "chats",
+            });
             res.setHeader("Content-Type", "application/json; charset=utf-8");
             res.setHeader(
                 "Content-Disposition",
@@ -1250,6 +1341,13 @@ userRouter.get(
                 userId,
                 userEmail,
             );
+            const mode = await resolveDeletionMode(db, userId);
+            await insertDeletionAudit(db, {
+                organisationId: mode.organisationId,
+                actorUserId: userId,
+                action: "exported",
+                resourceType: "tabular-reviews",
+            });
             res.setHeader("Content-Type", "application/json; charset=utf-8");
             res.setHeader(
                 "Content-Disposition",

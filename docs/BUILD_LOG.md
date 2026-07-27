@@ -7,6 +7,119 @@
 
 ---
 
+## 2026-07-27 — WS8 PR G: deletion governance (branch `ws8-deletion-governance`)
+
+**Scope:** firm members' destructive deletes become reversible **tombstones**
+held for a firm-configurable retention window then hard-purged; orgless
+self-hosters keep today's immediate hard delete (zero behaviour change). Rides
+the already-merged migration `20260727_01` (#44) — **no new migration**, all code
+42703/42P01-tolerant so it degrades to hard-delete/no-op if an environment has
+not run it. Full design: `docs/DELETION_GOVERNANCE_SPEC.md` (new). Owner scope
+gates 22/07 + 27/07.
+
+**New backend module `lib/deletionGovernance.ts`** (self-contained seam, owner
+architectural rule 22/07):
+- `resolveDeletionMode` — org member → tombstone; orgless → hard delete; **on
+  any org-lookup error FAILS SAFE to tombstone** (deliberate inversion of PR B's
+  fail-open — a tombstone is reversible, a hard delete is not; recorded in the
+  spec + DURABLE_LESSONS 2026-07-27).
+- `tombstoneResource` / `tombstoneAllForUser` — state transition encoded in the
+  UPDATE predicate (`.eq(id)[+scope].is("deleted_at", null)` + select-back; zero
+  rows ⇒ `not_found`; 42703 ⇒ `unsupported` so the route falls back to hard
+  delete). `deleted_by` is uuid.
+- `getTombstonedIds` / `isResourceTombstoned` — read-exclusion; degrades to an
+  empty set on 42703 or any error (never breaks the underlying read).
+- `runDeletionPurge` — sweeps every governed table for rows past their **owner's
+  firm** retention (`retention_days`, default 30 for orgless / unresolved
+  owners; owner→org resolved by uuid-string, respecting the uuid-vs-text trap),
+  runs the existing per-id hard-delete helpers (incl. storage cleanup), and
+  writes one `purged` audit row per org per sweep with per-type counts. `now`
+  injectable; boundary-exclusive window.
+- `listPendingDeletions` / `restoreResource` / `expediteResource` — admin
+  surface, scoped to the firm's member ids; restore/expedite predicate-encoded.
+- `insertDeletionAudit` — best-effort append to `deletion_audit_logs` (mirrors
+  `insertMcpAuditLog`; no-ops without an org id; never throws).
+- `clampRetentionDays` — parse + clamp to [1, 365].
+
+**Routes (tombstone-or-hard-delete decision + read exclusion + audit).**
+- `DELETE /projects/:projectId`, `DELETE /single-documents/:documentId`,
+  `DELETE /chat/:chatId`, `DELETE /tabular-review/:reviewId`,
+  `DELETE /workflows/:workflowId`, and bulk `DELETE /user/{chats,projects,
+  tabular-reviews}` — member tombstones (audit `requested`; **one** row per bulk
+  action with counts), orgless hard-deletes. Bulk-delete inline handlers kept
+  their try/catch shape; single-resource handlers now go through `asyncHandler`
+  where they didn't (projects delete previously leaked `err.message`).
+- Read exclusion: the four overview RPCs are **owner-frozen and unchanged**
+  (hard rule 1); their results are post-filtered by `getTombstonedIds` on
+  `GET /projects`, `GET /chat`, `GET /workflows`, `GET /tabular-review`,
+  `GET /single-documents`, and the project chat list. Fetch-by-id returns a
+  generic 404 for a tombstoned project/chat/review/workflow; tombstoned single
+  documents are hidden through the shared `ensureDocAccess` choke point (covers
+  display/url/docx/versions).
+- `DELETE /user/account` — **blocked (403, fixed copy)** for members and on the
+  fail-safe path; not audited. Orgless unchanged.
+- Exports (`GET /user/export`, `/user/chats/export`, `/user/tabular-reviews/
+  export`) audit `exported` when the caller is org-affiliated (orgless not
+  audited).
+- Admin (`routes/admin.ts`, router-level `requireAdmin`; mutations MFA-stepped):
+  `GET /admin/pending-deletions`, `POST .../:resourceType/:id/restore`,
+  `POST .../:resourceType/:id/expedite`, `PATCH /admin/retention` (clamped
+  1–365). Unknown `resourceType` → 404 before touching the lib.
+- Purge sweep scheduled in `index.ts`: on boot + every 6h via `setInterval`
+  (`.unref()`), best-effort, self-logging, never blocks a request.
+- `organisations.ts`: membership now carries `retentionDays` (default 30;
+  `DEFAULT_RETENTION_DAYS` exported). `userDataCleanup.ts` refactored to expose
+  per-id purge helpers (`purge{Projects,Documents,Chats,TabularReviews,
+  Workflows}ByIds`) that `deleteUserProjects`/`deleteAllUserTabularReviews` now
+  delegate to (no behaviour change) and the purge sweep + expedite reuse.
+
+**Frontend.**
+- `mikeApi.ts`: `retentionDays` on `OrganisationMembership`; `PendingDeletion`
+  type + `getPendingDeletions`, `restorePendingDeletion`,
+  `expeditePendingDeletion`, `updateFirmRetention`.
+- `admin/firm-settings/page.tsx`: a **Retention** card (numeric 1–365, MFA-
+  guarded save, `reloadProfile`) and a **Pending deletions** section (resource
+  pill, display name / "Untitled {type}" fallback, "Deleted by …" resolved via
+  the member list, DD/MM/YYYY UTC-pinned dates, "N days left"; Restore/Expedite
+  via `ConfirmPopup` + the manual MFA step-up pattern; `LoadErrorRow` retry for
+  the fetch, separate mutation-error banner; empty state).
+- `account/privacy-data/page.tsx`: for firm members the three bulk-delete
+  confirmations now tell the honest truth (hidden immediately, held by the firm
+  for N days, then permanent) instead of "cannot be undone"; orgless copy
+  unchanged.
+- `account/page.tsx`: for firm members the Danger Zone "Delete account" is
+  replaced with neutral copy ("managed by your firm — ask your administrator"),
+  no destructive button; a stray 403 surfaces the backend's real detail.
+
+**Decisions / deviations.**
+- *Fail-SAFE inversion* (the headline decision — see spec + DURABLE_LESSONS):
+  destructive ops fail toward the reversible outcome on infra error, the
+  opposite of PR B's fail-open availability gate.
+- *`tabular_review_chats` and project children are not independently tombstoned*
+  — they follow their parent at purge (lossless restore); a tombstoned parent's
+  detail route 404s so children are unreachable in the UI. Documented v1
+  exclusions in the spec.
+- *RPCs untouched* — hiding is backend post-filtering, not RPC edits (hard rule 1).
+- Adding new exports to `userDataCleanup` broke two route suites' `vi.mock`
+  factories at import time; the new names were added to those mocks (lesson
+  recorded).
+
+**Verification.**
+- Backend `npx tsc --noEmit` clean; `npx vitest run` **326 passed (24 files)** —
+  48 new in `deletionGovernance.test.ts` (the full matrix: mode decision incl.
+  fail-safe-on-throw, predicate atomicity + zero-row + 42703 degradation, read
+  exclusion, purge window edges + per-owner retention + per-org audit, restore/
+  expedite member-scoping authz, retention clamp, audit no-op-without-org) and
+  17 added to `routes/admin.test.ts` (pending-deletions authz, restore/expedite
+  404 + audit + MFA, retention 400/clamp/MFA).
+- Frontend `npx tsc --noEmit` clean; `eslint` on the four changed files: 0
+  errors, one pre-existing baseline warning (`account/page.tsx` unused import,
+  predates this PR).
+- No migration, no new env vars, no new dependencies. Evals not run from the
+  worktree (per instructions).
+
+---
+
 ## 2026-07-27 — WS8 F/G bundled migration + schema mirror (branch `firm-models-deletion-migration`)
 
 **Scope:** the single owner-authorised migration shared by PR F (firm model

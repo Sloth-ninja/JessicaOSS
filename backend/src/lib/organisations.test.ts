@@ -125,6 +125,7 @@ describe("resolveUserOrganisation", () => {
       name: "Aria Grace Law CIC",
       role: "member",
       policies: { memberApiKeys: true, memberMcpConnectors: false },
+      retentionDays: 30,
     });
   });
 

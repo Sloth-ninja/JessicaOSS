@@ -230,6 +230,9 @@ export interface OrganisationMembership {
     name: string;
     role: OrganisationRole;
     policies: OrganisationPolicies;
+    /** Deletion governance (WS8 PR G): days a member's tombstoned item is held
+     *  before permanent purge. Admin-editable, server-clamped 1–365. */
+    retentionDays: number;
 }
 
 export interface UserProfile {
@@ -391,6 +394,70 @@ export async function updateFirmPolicies(
         },
     );
     return data.policies;
+}
+
+// ── Deletion governance (WS8 PR G) ──────────────────────────────────────────
+// Firm members' destructive deletes become reversible tombstones held for the
+// firm's retention window; these admin-only endpoints list, restore, and
+// expedite them, and set the retention window. Restore/expedite/retention are
+// MFA-stepped-up server-side. See docs/DELETION_GOVERNANCE_SPEC.md.
+
+export type GovernedResourceType =
+    | "project"
+    | "document"
+    | "chat"
+    | "tabular-review"
+    | "workflow";
+
+export interface PendingDeletion {
+    resourceType: GovernedResourceType;
+    id: string;
+    displayName: string | null;
+    deletedBy: string | null;
+    deletedAt: string | null;
+    daysRemaining: number;
+}
+
+export async function getPendingDeletions(): Promise<PendingDeletion[]> {
+    const data = await apiRequest<{ items: PendingDeletion[] }>(
+        "/admin/pending-deletions",
+    );
+    return data.items;
+}
+
+export async function restorePendingDeletion(
+    resourceType: GovernedResourceType,
+    id: string,
+): Promise<void> {
+    await apiRequest<void>(
+        `/admin/pending-deletions/${resourceType}/${id}/restore`,
+        { method: "POST" },
+    );
+}
+
+export async function expeditePendingDeletion(
+    resourceType: GovernedResourceType,
+    id: string,
+): Promise<void> {
+    await apiRequest<void>(
+        `/admin/pending-deletions/${resourceType}/${id}/expedite`,
+        { method: "POST" },
+    );
+}
+
+/** Set the firm's soft-delete retention window (days). Server-clamped 1–365. */
+export async function updateFirmRetention(
+    retentionDays: number,
+): Promise<number> {
+    const data = await apiRequest<{ retentionDays: number }>(
+        "/admin/retention",
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ retentionDays }),
+        },
+    );
+    return data.retentionDays;
 }
 
 // ── Firm usage dashboard (WS8 PR D) ─────────────────────────────────────────

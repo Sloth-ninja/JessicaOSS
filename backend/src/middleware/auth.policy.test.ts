@@ -40,7 +40,7 @@ function membership(
   policies: OrganisationMembership["policies"],
   role: OrganisationMembership["role"] = "member",
 ): OrganisationMembership {
-  return { id: "org-1", name: "Aria Grace Law", role, policies };
+  return { id: "org-1", name: "Aria Grace Law", role, policies, retentionDays: 30 };
 }
 
 let server: Server;

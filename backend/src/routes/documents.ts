@@ -24,6 +24,13 @@ import {
 } from "../lib/documentVersions";
 import { ensureDocAccess } from "../lib/access";
 import { singleFileUpload } from "../lib/upload";
+import {
+  resolveDeletionMode,
+  tombstoneResource,
+  insertDeletionAudit,
+  getTombstonedIds,
+  isResourceTombstoned,
+} from "../lib/deletionGovernance";
 
 export const documentsRouter = Router();
 const ALLOWED_TYPES = new Set(["pdf", "docx", "doc"]);
@@ -63,10 +70,15 @@ documentsRouter.get("/", requireAuth, asyncHandler(async (req, res) => {
     .is("project_id", null)
     .order("created_at", { ascending: false });
   if (error) return void res.status(500).json({ detail: error.message });
-  const docs = (data ?? []) as unknown as {
+  let docs = (data ?? []) as unknown as {
     id: string;
     current_version_id?: string | null;
   }[];
+  // Exclude tombstoned documents (WS8 PR G, docs/DELETION_GOVERNANCE_SPEC.md).
+  const tombstoned = await getTombstonedIds(db, "document", {
+    ids: docs.map((doc) => doc.id),
+  });
+  docs = docs.filter((doc) => !tombstoned.has(doc.id));
   await attachLatestVersionNumbers(db, docs);
   await attachActiveVersionPaths(db, docs);
   res.json(docs);
@@ -98,6 +110,28 @@ documentsRouter.delete("/:documentId", requireAuth, asyncHandler(async (req, res
     .single();
   if (error || !doc)
     return void res.status(404).json({ detail: "Document not found" });
+
+  // Org members tombstone (reversible, purged after the firm's retention
+  // window); orgless self-hosters hard-delete (unchanged). WS8 PR G.
+  const mode = await resolveDeletionMode(db, userId);
+  if (mode.tombstone) {
+    const outcome = await tombstoneResource(db, "document", documentId, userId, {
+      user_id: userId,
+    });
+    if (outcome === "tombstoned") {
+      await insertDeletionAudit(db, {
+        organisationId: mode.organisationId,
+        actorUserId: userId,
+        action: "requested",
+        resourceType: "document",
+        resourceId: documentId,
+      });
+      return void res.status(204).send();
+    }
+    if (outcome === "not_found")
+      return void res.status(404).json({ detail: "Document not found" });
+    // "unsupported" (unmigrated) → fall through to hard delete.
+  }
 
   await deleteDocumentAndVersionFiles(db, documentId);
   res.status(204).send();

@@ -98,6 +98,11 @@ vi.mock("../lib/userDataCleanup", () => ({
     deleteAllUserTabularReviews: vi.fn(),
     deleteUserAccountData: vi.fn(),
     deleteUserProjects: vi.fn(),
+    purgeProjectsByIds: vi.fn(),
+    purgeDocumentsByIds: vi.fn(),
+    purgeChatsByIds: vi.fn(),
+    purgeTabularReviewsByIds: vi.fn(),
+    purgeWorkflowsByIds: vi.fn(),
 }));
 vi.mock("../lib/userDataExport", () => ({
     buildUserAccountExport: vi.fn(),

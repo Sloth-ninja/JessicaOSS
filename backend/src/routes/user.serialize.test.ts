@@ -30,6 +30,7 @@ const ARIA: OrganisationMembership = {
   name: "Aria Grace Law CIC",
   role: "member",
   policies: { memberApiKeys: true, memberMcpConnectors: false },
+  retentionDays: 30,
 };
 
 describe("serializeProfile — organisation payload shape", () => {

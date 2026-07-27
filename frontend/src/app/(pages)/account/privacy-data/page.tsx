@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Download, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useChatHistoryContext } from "@/app/contexts/ChatHistoryContext";
+import { useUserProfile } from "@/contexts/UserProfileContext";
 import { ConfirmPopup } from "@/app/components/shared/ConfirmPopup";
 import {
     MfaVerificationPopup,
@@ -33,7 +34,8 @@ const devLog = (...args: Parameters<typeof console.log>) => {
     if (isDev) console.log(...args);
 };
 
-const DELETE_DATA_COPY: Record<
+// Orgless self-hosters: unchanged — an immediate, irreversible hard delete.
+const ORGLESS_DELETE_DATA_COPY: Record<
     DeleteDataAction,
     {
         title: string;
@@ -57,8 +59,44 @@ const DELETE_DATA_COPY: Record<
     },
 };
 
+// Firm members (WS8 PR G / deletion governance): the delete is a reversible
+// tombstone, not an immediate hard delete — never claim it "cannot be undone".
+const FIRM_DELETE_DATA_SUBJECT: Record<DeleteDataAction, string> = {
+    chats: "your assistant and tabular review chat history",
+    "tabular-reviews":
+        "all tabular reviews you own, including their cells and review chats",
+    projects:
+        "all matters you own, including their documents, chats, and tabular reviews",
+};
+
+const DELETE_DATA_TITLE: Record<DeleteDataAction, string> = {
+    chats: "Delete all chats?",
+    "tabular-reviews": "Delete all tabular reviews?",
+    projects: "Delete all matters?",
+};
+
+function firmRetentionPhrase(retentionDays: number | null | undefined) {
+    return typeof retentionDays === "number" && retentionDays > 0
+        ? `${retentionDays} day${retentionDays === 1 ? "" : "s"}`
+        : "your firm's retention period";
+}
+
+function deleteDataCopy(
+    action: DeleteDataAction,
+    retentionDays: number | null | undefined,
+): { title: string; message: string } {
+    return {
+        title: DELETE_DATA_TITLE[action],
+        message: `This will hide ${FIRM_DELETE_DATA_SUBJECT[action]} immediately. Your firm holds deleted items for ${firmRetentionPhrase(
+            retentionDays,
+        )} before they are permanently removed.`,
+    };
+}
+
 export default function PrivacyDataPage() {
     const { loadChats, setCurrentChatId } = useChatHistoryContext();
+    const { profile } = useUserProfile();
+    const firm = profile?.firm ?? null;
     const [pendingDeleteAction, setPendingDeleteAction] =
         useState<DeleteDataAction | null>(null);
     const [deletingAction, setDeletingAction] =
@@ -212,7 +250,9 @@ export default function PrivacyDataPage() {
     };
 
     const pendingDeleteCopy = pendingDeleteAction
-        ? DELETE_DATA_COPY[pendingDeleteAction]
+        ? firm
+            ? deleteDataCopy(pendingDeleteAction, firm.retentionDays)
+            : ORGLESS_DELETE_DATA_COPY[pendingDeleteAction]
         : null;
 
     return (

@@ -32,6 +32,12 @@ import {
     filterAccessibleDocumentIds,
 } from "../lib/access";
 import { safeErrorLog, safeErrorMessage } from "../lib/safeError";
+import {
+    resolveDeletionMode,
+    tombstoneResource,
+    insertDeletionAudit,
+    getTombstonedIds,
+} from "../lib/deletionGovernance";
 
 function formatPromptSuffix(format?: string, tags?: string[]): string {
     switch (format) {
@@ -98,7 +104,13 @@ tabularRouter.get("/", requireAuth, asyncHandler(async (req, res) => {
     });
     if (error) return void res.status(500).json({ detail: error.message });
 
-    res.json(data ?? []);
+    // The overview RPC does not filter deleted_at (owner-frozen for v1); exclude
+    // tombstoned reviews here (WS8 PR G, docs/DELETION_GOVERNANCE_SPEC.md).
+    const rows = (data ?? []) as { id: string }[];
+    const tombstoned = await getTombstonedIds(db, "tabular-review", {
+        ids: rows.map((row) => row.id),
+    });
+    res.json(rows.filter((row) => !tombstoned.has(row.id)));
 }));
 
 // POST /tabular-review
@@ -250,6 +262,13 @@ tabularRouter.get("/:reviewId", requireAuth, asyncHandler(async (req, res) => {
         return void res.status(404).json({ detail: "Review not found" });
     const access = await ensureReviewAccess(review, userId, userEmail, db);
     if (!access.ok)
+        return void res.status(404).json({ detail: "Review not found" });
+
+    // A tombstoned review is hidden immediately (WS8 PR G) — 404 while awaiting purge.
+    const tombstoned = await getTombstonedIds(db, "tabular-review", {
+        ids: [reviewId],
+    });
+    if (tombstoned.has(reviewId))
         return void res.status(404).json({ detail: "Review not found" });
 
     const { data: cells } = await db
@@ -590,6 +609,33 @@ tabularRouter.delete("/:reviewId", requireAuth, asyncHandler(async (req, res) =>
     const userId = res.locals.userId as string;
     const { reviewId } = req.params;
     const db = createServerSupabase();
+
+    // Org members tombstone (reversible); orgless self-hosters hard-delete
+    // (unchanged). WS8 PR G. Idempotent like the prior hard delete.
+    const mode = await resolveDeletionMode(db, userId);
+    if (mode.tombstone) {
+        const outcome = await tombstoneResource(
+            db,
+            "tabular-review",
+            reviewId,
+            userId,
+            { user_id: userId },
+        );
+        if (outcome !== "unsupported") {
+            if (outcome === "tombstoned") {
+                await insertDeletionAudit(db, {
+                    organisationId: mode.organisationId,
+                    actorUserId: userId,
+                    action: "requested",
+                    resourceType: "tabular-review",
+                    resourceId: reviewId,
+                });
+            }
+            return void res.status(204).send();
+        }
+        // "unsupported" (unmigrated) → fall through to hard delete.
+    }
+
     const { error } = await db
         .from("tabular_reviews")
         .delete()
