@@ -18,7 +18,12 @@ create table if not exists public.organisations (
   name text not null,
   allow_member_api_keys boolean not null default false,
   allow_member_mcp_connectors boolean not null default false,
+  allow_member_model_prefs boolean not null default false,
+  -- Firm model configuration (WS8 PR F): default model + offered providers.
+  model_config jsonb not null default '{}'::jsonb,
   enabled_connector_ids jsonb not null default '[]'::jsonb,
+  -- Days a member's soft-deleted items are held before purge (WS8 PR G).
+  retention_days integer not null default 30,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -112,6 +117,25 @@ create index if not exists idx_organisation_api_keys_organisation
   on public.organisation_api_keys(organisation_id);
 
 alter table public.organisation_api_keys enable row level security;
+
+-- Append-only deletion-governance audit trail (WS8 PR G) — the seed of a
+-- general admin audit log. Service-role writes only, best-effort inserts;
+-- no update/delete path exists in the application.
+create table if not exists public.deletion_audit_logs (
+  id uuid primary key default gen_random_uuid(),
+  organisation_id uuid not null references public.organisations(id) on delete cascade,
+  actor_user_id uuid not null,
+  action text not null check (action in ('requested', 'restored', 'expedited', 'purged', 'exported')),
+  resource_type text not null,
+  resource_id uuid,
+  detail jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists deletion_audit_logs_org_created_idx
+  on public.deletion_audit_logs(organisation_id, created_at desc);
+
+alter table public.deletion_audit_logs enable row level security;
 
 create table if not exists public.user_mcp_connectors (
   id uuid primary key default gen_random_uuid(),
@@ -233,12 +257,19 @@ create table if not exists public.projects (
   cm_number text,
   visibility text not null default 'private',
   shared_with jsonb not null default '[]'::jsonb,
+  -- Deletion governance (WS8 PR G): org members' deletes tombstone here and
+  -- are purged after the firm's retention window. Orgless deletes stay hard.
+  deleted_at timestamptz,
+  deleted_by uuid,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 create index if not exists idx_projects_user
   on public.projects(user_id);
+
+create index if not exists projects_pending_purge_idx
+  on public.projects(deleted_at) where deleted_at is not null;
 
 create index if not exists projects_shared_with_idx
   on public.projects using gin (shared_with);
@@ -262,12 +293,18 @@ create table if not exists public.documents (
   user_id text not null,
   status text not null default 'pending',
   folder_id uuid references public.project_subfolders(id) on delete set null,
+  -- Deletion governance (WS8 PR G) — see projects.deleted_at.
+  deleted_at timestamptz,
+  deleted_by uuid,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 create index if not exists idx_documents_user_project
   on public.documents(user_id, project_id);
+
+create index if not exists documents_pending_purge_idx
+  on public.documents(deleted_at) where deleted_at is not null;
 
 create index if not exists idx_documents_project_folder
   on public.documents(project_id, folder_id);
@@ -370,11 +407,17 @@ create table if not exists public.workflows (
   columns_config jsonb,
   practice text,
   is_system boolean not null default false,
+  -- Deletion governance (WS8 PR G) — see projects.deleted_at.
+  deleted_at timestamptz,
+  deleted_by uuid,
   created_at timestamptz not null default now()
 );
 
 create index if not exists idx_workflows_user
   on public.workflows(user_id);
+
+create index if not exists workflows_pending_purge_idx
+  on public.workflows(deleted_at) where deleted_at is not null;
 
 create table if not exists public.hidden_workflows (
   id uuid primary key default gen_random_uuid(),
@@ -484,11 +527,17 @@ create table if not exists public.chats (
   project_id uuid references public.projects(id) on delete cascade,
   user_id text not null,
   title text,
+  -- Deletion governance (WS8 PR G) — see projects.deleted_at.
+  deleted_at timestamptz,
+  deleted_by uuid,
   created_at timestamptz not null default now()
 );
 
 create index if not exists idx_chats_user
   on public.chats(user_id);
+
+create index if not exists chats_pending_purge_idx
+  on public.chats(deleted_at) where deleted_at is not null;
 
 create index if not exists idx_chats_project
   on public.chats(project_id);
@@ -572,12 +621,18 @@ create table if not exists public.tabular_reviews (
   workflow_id uuid references public.workflows(id) on delete set null,
   practice text,
   shared_with jsonb not null default '[]'::jsonb,
+  -- Deletion governance (WS8 PR G) — see projects.deleted_at.
+  deleted_at timestamptz,
+  deleted_by uuid,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 create index if not exists idx_tabular_reviews_user
   on public.tabular_reviews(user_id);
+
+create index if not exists tabular_reviews_pending_purge_idx
+  on public.tabular_reviews(deleted_at) where deleted_at is not null;
 
 create index if not exists idx_tabular_reviews_project
   on public.tabular_reviews(project_id);
@@ -805,6 +860,7 @@ create index if not exists tabular_review_chat_messages_chat_idx
 
 revoke all on public.organisations from anon, authenticated;
 revoke all on public.organisation_api_keys from anon, authenticated;
+revoke all on public.deletion_audit_logs from anon, authenticated;
 revoke all on public.user_profiles from anon, authenticated;
 revoke all on public.projects from anon, authenticated;
 revoke all on public.project_subfolders from anon, authenticated;
