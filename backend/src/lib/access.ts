@@ -155,11 +155,20 @@ export async function filterAccessibleDocumentIds(
     }[];
     if (rows.length === 0) return [];
 
+    // Tombstoned documents are hidden immediately (WS8 PR G): the single choke
+    // point for every tabular doc-context path (create / update / generate /
+    // regenerate cell) — a soft-deleted single document must not be extractable
+    // into cells. 42703-tolerant. See docs/DELETION_GOVERNANCE_SPEC.md.
+    const tombstoned = await getTombstonedIds(db, "document", {
+        ids: documentIds,
+    });
+
     const accessibleProjectIds = new Set(
         await listAccessibleProjectIds(userId, userEmail, db),
     );
     const allowed: string[] = [];
     for (const doc of rows) {
+        if (tombstoned.has(doc.id)) continue;
         if (doc.user_id === userId) {
             allowed.push(doc.id);
         } else if (

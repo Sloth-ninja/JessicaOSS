@@ -71,6 +71,15 @@ tombstoned:
   tombstoned ids for the table are fetched and excluded (cheap at pilot scale).
 - **Fetch-by-id**: a tombstoned project / chat / review / workflow / single-document
   returns a generic 404 so a tombstoned parent cannot resurface via a child route.
+- **Model doc-context (read + edit)**: a tombstoned single document must never be
+  reloaded into the assistant's context, where `read_document` / `edit_document`
+  would keep it both readable and editable (new versions) after "deletion". Excluded
+  at every doc-context entry point: `buildDocContext` (assistant chat — filters the
+  ids resolved from message files + prior `doc_created`/`doc_edited` events),
+  `buildProjectDocContext` (project chat — defensive; project docs are not
+  tombstoned in v1), and `filterAccessibleDocumentIds` (the single choke point for
+  every tabular extraction path — create / update / generate / regenerate cell), so
+  a tombstoned single document can no longer be extracted into cells either.
 
 All read-exclusion is 42703/42P01-tolerant: if the migration has not run, the
 tombstoned-id lookup returns empty and reads behave exactly as today.

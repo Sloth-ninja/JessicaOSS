@@ -143,6 +143,9 @@ function makeDb(
         notFilters.push([col, op, val]);
         return b;
       },
+      limit(_n: number) {
+        return b;
+      },
       maybeSingle() {
         if (mode === "update") {
           const err = errFor("update");

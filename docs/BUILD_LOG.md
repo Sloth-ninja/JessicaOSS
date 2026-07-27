@@ -104,8 +104,26 @@ architectural rule 22/07):
   factories at import time; the new names were added to those mocks (lesson
   recorded).
 
+**Review fix (independent review, REQUEST_CHANGES → resolved).** One should-fix:
+`buildDocContext` (`lib/chatTools.ts`) reloaded a tombstoned single document
+still referenced by a chat's message files / prior `doc_created`/`doc_edited`
+events, leaving a "deleted" document both readable AND editable
+(`read_document`/`edit_document` creating new versions) via chat — a
+hidden-immediately breach. Fixed by intersecting the resolved ids against
+`getTombstonedIds` (42703-tolerant) before the model ever sees them. Covered
+**every** doc-context entry point: `buildDocContext` (assistant chat),
+`buildProjectDocContext` (project chat — defensive), and — via the single choke
+point `filterAccessibleDocumentIds` — every tabular extraction path (create /
+update / generate / regenerate cell), so a tombstoned single document can no
+longer be extracted into cells either. New `chatTools.docContext.test.ts` proves
+the exclusion + the 42703 degradation path. Review nits also done: explicit
+`.limit(1000)` on the purge + pending-deletions scans (pilot-scale cap comment;
+6-hourly re-run self-heals the tail) and a comment on the harmless
+overlapping-sweep audit double-count in `index.ts`.
+
 **Verification.**
-- Backend `npx tsc --noEmit` clean; `npx vitest run` **326 passed (24 files)** —
+- Backend `npx tsc --noEmit` clean; `npx vitest run` **328 passed (25 files)** —
+  incl. 2 new `chatTools.docContext.test.ts`;
   48 new in `deletionGovernance.test.ts` (the full matrix: mode decision incl.
   fail-safe-on-throw, predicate atomicity + zero-row + 42703 degradation, read
   exclusion, purge window edges + per-owner retention + per-org audit, restore/

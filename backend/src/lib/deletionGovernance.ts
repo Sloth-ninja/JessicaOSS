@@ -446,10 +446,15 @@ export async function runDeletionPurge(
             deleted_at: string | null;
         }>;
         try {
+            // Explicit cap at Supabase's default 1000-row ceiling: at pilot
+            // scale a sweep never hits it, and if it ever did the 6-hourly
+            // re-run drains the tail batch-by-batch (self-healing). Revisit with
+            // proper batching if a firm's backlog ever approaches this.
             const { data, error } = await (db as any)
                 .from(table)
                 .select("id, user_id, deleted_at")
-                .not("deleted_at", "is", null);
+                .not("deleted_at", "is", null)
+                .limit(1000);
             if (error) {
                 if (isMissingColumnOrTable(error)) continue;
                 throw error;
@@ -597,11 +602,15 @@ export async function listPendingDeletions(
         if (displayColumn) columns.push(displayColumn);
         let rows: Array<Record<string, unknown>>;
         try {
+            // Cap at Supabase's default 1000-row ceiling (pilot-scale; a firm's
+            // pending list never approaches this, and the purge sweep drains old
+            // tombstones regardless).
             const { data, error } = await (db as any)
                 .from(table)
                 .select(columns.join(", "))
                 .in("user_id", memberIds)
-                .not("deleted_at", "is", null);
+                .not("deleted_at", "is", null)
+                .limit(1000);
             if (error) {
                 if (isMissingColumnOrTable(error)) continue;
                 throw error;

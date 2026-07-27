@@ -205,7 +205,11 @@ app.listen(PORT, () => {
 // Deletion governance purge sweep (WS8 PR G): hard-delete tombstoned rows past
 // their firm's retention window. Best-effort — runs on boot and every 6 hours,
 // never blocks a request, and swallows/logs its own errors so a sweep can never
-// crash the process. See docs/DELETION_GOVERNANCE_SPEC.md.
+// crash the process. Scheduling is in-process: if a boot sweep and the interval
+// ever overlapped they could each write a `purged` audit row for the same batch
+// (harmless double-count in the audit trail, not double deletion — the second
+// sweep finds the rows already gone); revisit if sweep scheduling moves to a
+// durable out-of-process job. See docs/DELETION_GOVERNANCE_SPEC.md.
 const DELETION_PURGE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 function scheduleDeletionPurge() {
   const runOnce = () => {
