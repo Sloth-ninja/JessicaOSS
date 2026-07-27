@@ -7,6 +7,41 @@
 
 ---
 
+## 2026-07-27 — WS8 composed-range review: minor fixes (branch `ws8-review-minors`)
+
+**Scope:** fix wave from the mandated composed-range multi-lens review of the
+WS8 train (`0646edf...main`, ~8k insertions / 43 files). Four independent
+review lenses (security/admin-authz, policy-matrix off/on/orgless, UI drift,
+UK terminology) each ran over the full merged diff; every non-Minor finding
+was adversarially verified by an independent agent instructed to refute it.
+**Result: zero Critical or Important findings survived** — security, authz and
+the policy matrix came back clean. Four Minor findings, all in
+`frontend/src/app/(pages)/admin/firm-settings/page.tsx`, fixed here:
+
+1. **Firm API keys perpetual skeleton** (confirmed by verifier; downgraded
+   Important→Minor): a failed `getFirmApiKeyStatus()` left `status` null, so
+   the error banner sat on top of forever-pulsing skeleton rows ("never an
+   unbounded spinner" rule). Now resolves to an error state with retry.
+2. **No in-place retry on Firm settings fetches** (drift vs the Dashboard's
+   `ErrorState`): all three section fetches (members, firm keys, connector
+   curation) now render a shared `LoadErrorRow` with a "Try again" button.
+   Load errors are tracked separately from mutation errors so a failed role
+   change or curation save keeps its inline banner without nuking the list.
+3. **Curation untick-all inversion**: unticking the last connector produced
+   `[]`, which the backend canonically reads as "all visible" — the opposite
+   of intent. The UI now blocks removing the final tick with copy pointing at
+   the real control (the "Members may add custom connectors" policy). The
+   stored empty=all encoding is unchanged (deliberate PR E decision).
+4. **Date drift between admin pages**: `formatUkDate` now pins
+   `timeZone: "UTC"` to match the Dashboard, so the same timestamp cannot
+   render a day apart across the two admin surfaces near local midnight.
+
+**Verification:** frontend `npx tsc --noEmit` clean; `npx eslint` on the
+changed file clean. Single-file frontend diff; no backend, API, or behaviour
+changes outside the admin Firm settings page.
+
+---
+
 ## 2026-07-23 — WS8 PR E: connectors gallery (branch `ws8-connectors-gallery`)
 
 **Scope:** turn the personal MCP-connector page into a curated gallery — a Popular

@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Info, Loader2, ShieldCheck } from "lucide-react";
+import { Info, Loader2, RefreshCw, ShieldCheck } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useUserProfile } from "@/contexts/UserProfileContext";
 import { PageHeader } from "@/app/components/shared/PageHeader";
@@ -58,13 +58,17 @@ function initials(member: FirmMember): string {
     return source.trim().charAt(0).toUpperCase() || "?";
 }
 
-/** DD/MM/YYYY — never US order. */
+/**
+ * DD/MM/YYYY — never US order. Pinned to UTC to match the Dashboard's date
+ * rendering, so the same timestamp never shows different days across the two
+ * admin pages for a viewer near local midnight.
+ */
 function formatUkDate(value: string | null): string {
     if (!value) return "—";
     const parsed = new Date(value);
     return Number.isNaN(parsed.getTime())
         ? "—"
-        : parsed.toLocaleDateString("en-GB");
+        : parsed.toLocaleDateString("en-GB", { timeZone: "UTC" });
 }
 
 // MFA step-up for a single mutation. `run(action)` runs the WHOLE action (which
@@ -179,6 +183,31 @@ function SectionCard({
     );
 }
 
+// In-card load failure with in-place recovery (the Dashboard's ErrorState
+// pattern, sized for a SectionCard row). Load errors use this; mutation
+// errors keep their inline banners.
+function LoadErrorRow({
+    message,
+    onRetry,
+}: {
+    message: string;
+    onRetry: () => void;
+}) {
+    return (
+        <div className="flex flex-col items-start gap-2.5 px-5 py-6">
+            <p className="text-sm text-gray-600">{message}</p>
+            <button
+                type="button"
+                onClick={onRetry}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50"
+            >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Try again
+            </button>
+        </div>
+    );
+}
+
 function RoleBadge({ role }: { role: OrganisationRole }) {
     return role === "admin" ? (
         <span className="inline-flex items-center rounded-full bg-gray-900 px-2.5 py-0.5 text-[11px] font-medium text-white">
@@ -194,6 +223,8 @@ function RoleBadge({ role }: { role: OrganisationRole }) {
 function MembersSection() {
     const mfa = useMfaGuardedAction();
     const [members, setMembers] = useState<FirmMember[] | null>(null);
+    const [loadError, setLoadError] = useState(false);
+    const [reloadKey, setReloadKey] = useState(0);
     const [error, setError] = useState<string | null>(null);
     const [busyUserId, setBusyUserId] = useState<string | null>(null);
 
@@ -204,17 +235,23 @@ function MembersSection() {
                 const list = await getFirmMembers();
                 if (!active) return;
                 setMembers(list);
-                setError(null);
+                setLoadError(false);
             } catch {
                 if (!active) return;
-                setMembers([]);
-                setError("Could not load the firm's members.");
+                setLoadError(true);
             }
         })();
         return () => {
             active = false;
         };
-    }, []);
+    }, [reloadKey]);
+
+    // State reset lives in the handler, not the effect (set-state-in-effect).
+    const retryLoad = () => {
+        setLoadError(false);
+        setMembers(null);
+        setReloadKey((k) => k + 1);
+    };
 
     const adminCount = (members ?? []).filter(
         (m) => m.role === "admin",
@@ -263,7 +300,12 @@ function MembersSection() {
             {error && (
                 <p className="px-5 py-3 text-xs text-red-600">{error}</p>
             )}
-            {members === null ? (
+            {loadError ? (
+                <LoadErrorRow
+                    message="Could not load the firm's members."
+                    onRetry={retryLoad}
+                />
+            ) : members === null ? (
                 <div className="space-y-2 px-5 py-4">
                     {[0, 1, 2].map((i) => (
                         <div
@@ -361,7 +403,8 @@ function MembersSection() {
 function FirmApiKeysSection() {
     const mfa = useMfaGuardedAction();
     const [status, setStatus] = useState<FirmApiKeyStatus | null>(null);
-    const [error, setError] = useState<string | null>(null);
+    const [loadError, setLoadError] = useState(false);
+    const [reloadKey, setReloadKey] = useState(0);
 
     useEffect(() => {
         let active = true;
@@ -370,16 +413,23 @@ function FirmApiKeysSection() {
                 const next = await getFirmApiKeyStatus();
                 if (active) {
                     setStatus(next);
-                    setError(null);
+                    setLoadError(false);
                 }
             } catch {
-                if (active) setError("Could not load the firm's API keys.");
+                if (active) setLoadError(true);
             }
         })();
         return () => {
             active = false;
         };
-    }, []);
+    }, [reloadKey]);
+
+    // State reset lives in the handler, not the effect (set-state-in-effect).
+    const retryLoad = () => {
+        setLoadError(false);
+        setStatus(null);
+        setReloadKey((k) => k + 1);
+    };
 
     // Plain network mutation; the MFA step-up + busy/success UI are owned by the
     // row, which wraps this in mfa.run.
@@ -393,10 +443,14 @@ function FirmApiKeysSection() {
                 title="Firm API keys"
                 description="Used by all members — a member's own key always takes priority over the firm key."
             >
-                {error && (
-                    <p className="px-5 py-3 text-xs text-red-600">{error}</p>
-                )}
-                {status === null ? (
+                {loadError ? (
+                    // Resolve the skeleton on failure — an error over pulsing
+                    // rows reads as "still loading" and never recovers.
+                    <LoadErrorRow
+                        message="Could not load the firm's API keys."
+                        onRetry={retryLoad}
+                    />
+                ) : status === null ? (
                     // Skeleton while status loads, so a real "Not set" badge
                     // never flashes before the firm's keys are known.
                     <div className="space-y-4 px-5 py-4">
@@ -642,6 +696,8 @@ function ConnectorsCurationCard() {
     );
     const [visible, setVisible] = useState<Set<string>>(new Set());
     const [busyId, setBusyId] = useState<string | null>(null);
+    const [loadError, setLoadError] = useState(false);
+    const [reloadKey, setReloadKey] = useState(0);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
@@ -660,18 +716,22 @@ function ConnectorsCurationCard() {
                             : enabledConnectorIds,
                     ),
                 );
-                setError(null);
+                setLoadError(false);
             } catch {
-                if (active) {
-                    setRegistry([]);
-                    setError("Could not load the connector list.");
-                }
+                if (active) setLoadError(true);
             }
         })();
         return () => {
             active = false;
         };
-    }, []);
+    }, [reloadKey]);
+
+    // State reset lives in the handler, not the effect (set-state-in-effect).
+    const retryLoad = () => {
+        setLoadError(false);
+        setRegistry(null);
+        setReloadKey((k) => k + 1);
+    };
 
     const allVisible = !!registry && visible.size === registry.length;
 
@@ -681,6 +741,15 @@ function ConnectorsCurationCard() {
         const optimistic = new Set(visible);
         if (next) optimistic.add(id);
         else optimistic.delete(id);
+        // An empty tick-list cannot be saved: the stored [] canonically means
+        // "all visible", so unticking the last connector would silently invert
+        // to showing everything. Block it and point at the real control.
+        if (optimistic.size === 0) {
+            setError(
+                "At least one connector must stay ticked. To stop members adding connectors, turn off “Members may add custom connectors” in Policies above.",
+            );
+            return;
+        }
         // Canonical form: a full tick-list is stored as [] ("all visible").
         const payload =
             optimistic.size === registry.length ? [] : [...optimistic];
@@ -720,7 +789,12 @@ function ConnectorsCurationCard() {
                 {error && (
                     <p className="px-5 py-3 text-xs text-red-600">{error}</p>
                 )}
-                {registry === null ? (
+                {loadError ? (
+                    <LoadErrorRow
+                        message="Could not load the connector list."
+                        onRetry={retryLoad}
+                    />
+                ) : registry === null ? (
                     <div className="space-y-2 px-5 py-4">
                         {[0, 1, 2].map((i) => (
                             <div
