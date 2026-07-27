@@ -28,6 +28,7 @@ import { ModelToggle } from "../assistant/ModelToggle";
 import { ApiKeyMissingModal } from "../shared/ApiKeyMissingModal";
 import { PreResponseWrapper } from "../shared/PreResponseWrapper";
 import { useUserProfile } from "@/contexts/UserProfileContext";
+import { firmOfferedProviders } from "@/app/(pages)/account/firmPolicy";
 import {
     getModelProvider,
     isModelAvailable,
@@ -515,6 +516,7 @@ function TRChatInput({
     onModelChange,
     apiKeys,
     localModels,
+    offeredProviders,
     onHeightChange,
 }: {
     isLoading: boolean;
@@ -524,6 +526,7 @@ function TRChatInput({
     onModelChange: (id: string) => void;
     apiKeys?: ApiKeyState;
     localModels?: string[];
+    offeredProviders?: string[] | null;
     onHeightChange: (height: number) => void;
 }) {
     const [value, setValue] = useState("");
@@ -609,6 +612,7 @@ function TRChatInput({
                         onChange={onModelChange}
                         apiKeys={apiKeys}
                         localModels={localModels}
+                        offeredProviders={offeredProviders}
                     />
                     <button
                         type="button"
@@ -725,6 +729,9 @@ export function TRChatPanel({
     const { profile, updateModelPreference } = useUserProfile();
     const apiKeys = profile?.apiKeys;
     const localModels = profile?.localModels ?? [];
+    // Firm-offered providers (WS8 PR F): restrict the picker when the member's
+    // firm limits providers; null ⇒ no restriction.
+    const offeredProviders = firmOfferedProviders(profile?.firm);
     const currentModel = profile?.tabularModel ?? "gemini-3-flash-preview";
     const [apiKeyModalProvider, setApiKeyModalProvider] =
         useState<ModelProvider | null>(null);
@@ -1578,6 +1585,7 @@ export function TRChatPanel({
                 }
                 apiKeys={apiKeys}
                 localModels={localModels}
+                offeredProviders={offeredProviders}
                 onHeightChange={setInputHeight}
             />
 

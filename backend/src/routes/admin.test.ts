@@ -18,6 +18,7 @@ const state = vi.hoisted(() => ({
   mfaOk: true,
   orgId: "org-1" as string | null,
   enabledConnectorIds: [] as string[],
+  modelConfig: { defaultModel: null as string | null, offeredProviders: [] as string[] },
   setMemberRoleResult: { ok: true, member: {} } as
     | { ok: true; member: unknown }
     | { ok: false; reason: "not_found" | "last_admin" },
@@ -70,6 +71,7 @@ const listOrganisationMembers = vi.fn();
 const setMemberRole = vi.fn();
 const updateOrganisationPolicies = vi.fn();
 const setOrganisationEnabledConnectorIds = vi.fn();
+const setOrganisationModelConfig = vi.fn();
 vi.mock("../lib/organisations", () => ({
   getUserOrganisationId: () => Promise.resolve(state.orgId),
   listOrganisationMembers: (...args: unknown[]) =>
@@ -81,6 +83,9 @@ vi.mock("../lib/organisations", () => ({
     Promise.resolve(state.enabledConnectorIds),
   setOrganisationEnabledConnectorIds: (...args: unknown[]) =>
     setOrganisationEnabledConnectorIds(...args),
+  getOrganisationModelConfig: () => Promise.resolve(state.modelConfig),
+  setOrganisationModelConfig: (...args: unknown[]) =>
+    setOrganisationModelConfig(...args),
 }));
 
 const saveOrganisationApiKey = vi.fn();
@@ -133,12 +138,18 @@ beforeEach(() => {
   state.mfaOk = true;
   state.orgId = "org-1";
   state.enabledConnectorIds = [];
+  state.modelConfig = { defaultModel: null, offeredProviders: [] };
   state.setMemberRoleResult = { ok: true, member: { userId: "u2" } };
   listOrganisationMembers.mockReset();
   setMemberRole.mockReset();
   saveOrganisationApiKey.mockReset();
   updateOrganisationPolicies.mockReset();
   setOrganisationEnabledConnectorIds.mockReset();
+  setOrganisationModelConfig.mockReset();
+  setOrganisationModelConfig.mockImplementation(
+    (_db: unknown, _orgId: unknown, config: unknown) =>
+      Promise.resolve(config),
+  );
   setOrganisationEnabledConnectorIds.mockImplementation(
     (_db: unknown, _orgId: unknown, ids: string[]) => Promise.resolve(ids),
   );
@@ -322,6 +333,158 @@ describe("PATCH /admin/policies", () => {
       expect.anything(),
       "org-1",
       { memberApiKeys: false, memberMcpConnectors: true },
+    );
+  });
+
+  it("accepts and persists the memberModelPrefs policy (WS8 PR F)", async () => {
+    updateOrganisationPolicies.mockResolvedValue({
+      memberApiKeys: true,
+      memberMcpConnectors: true,
+      memberModelPrefs: false,
+    });
+    const res = await patchPolicies({ memberModelPrefs: false });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      policies: {
+        memberApiKeys: true,
+        memberMcpConnectors: true,
+        memberModelPrefs: false,
+      },
+    });
+    expect(updateOrganisationPolicies).toHaveBeenCalledWith(
+      expect.anything(),
+      "org-1",
+      { memberModelPrefs: false },
+    );
+  });
+});
+
+describe("GET /admin/model-config (WS8 PR F)", () => {
+  it("returns the firm's model configuration to an admin", async () => {
+    state.modelConfig = {
+      defaultModel: "claude-opus-4-8",
+      offeredProviders: ["claude"],
+    };
+    const res = await fetch(`${baseUrl}/admin/model-config`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      modelConfig: {
+        defaultModel: "claude-opus-4-8",
+        offeredProviders: ["claude"],
+      },
+    });
+  });
+
+  it("returns 403 for a non-admin", async () => {
+    state.isAdmin = false;
+    const res = await fetch(`${baseUrl}/admin/model-config`);
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("PATCH /admin/model-config (WS8 PR F)", () => {
+  const patchConfig = (body: unknown) =>
+    fetch(`${baseUrl}/admin/model-config`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  it("rejects an unknown default model with 400", async () => {
+    const res = await patchConfig({ defaultModel: "not-a-model" });
+    expect(res.status).toBe(400);
+    expect(setOrganisationModelConfig).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown provider with 400", async () => {
+    const res = await patchConfig({ offeredProviders: ["claude", "wat"] });
+    expect(res.status).toBe(400);
+    expect(setOrganisationModelConfig).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unsupported field with 400", async () => {
+    const res = await patchConfig({ nope: true });
+    expect(res.status).toBe(400);
+    expect(setOrganisationModelConfig).not.toHaveBeenCalled();
+  });
+
+  it("rejects an empty patch with 400", async () => {
+    const res = await patchConfig({});
+    expect(res.status).toBe(400);
+    expect(setOrganisationModelConfig).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 without MFA step-up", async () => {
+    state.mfaOk = false;
+    const res = await patchConfig({ defaultModel: "gpt-5.4" });
+    expect(res.status).toBe(403);
+    expect(setOrganisationModelConfig).not.toHaveBeenCalled();
+  });
+
+  it("merges the patch over the firm's current config and persists it", async () => {
+    // Current firm config has an offered-provider restriction; patching only
+    // the default model must preserve the providers (merge, not replace). The
+    // default stays within the offered set (gemini) so the merge is coherent.
+    state.modelConfig = {
+      defaultModel: null,
+      offeredProviders: ["gemini"],
+    };
+    const res = await patchConfig({ defaultModel: "gemini-3.5-flash" });
+    expect(res.status).toBe(200);
+    expect(setOrganisationModelConfig).toHaveBeenCalledWith(
+      expect.anything(),
+      "org-1",
+      { defaultModel: "gemini-3.5-flash", offeredProviders: ["gemini"] },
+    );
+  });
+
+  it("de-duplicates providers and clears a field with null", async () => {
+    state.modelConfig = {
+      defaultModel: "gpt-5.4",
+      offeredProviders: ["openai"],
+    };
+    const res = await patchConfig({
+      defaultModel: null,
+      offeredProviders: ["claude", "claude", "gemini"],
+    });
+    expect(res.status).toBe(200);
+    expect(setOrganisationModelConfig).toHaveBeenCalledWith(
+      expect.anything(),
+      "org-1",
+      { defaultModel: null, offeredProviders: ["claude", "gemini"] },
+    );
+  });
+
+  it("rejects a MERGED config whose default provider is outside the offered set (400)", async () => {
+    // Current default is an OpenAI model; restricting to gemini only would
+    // leave an incoherent merged config → 400, nothing persisted.
+    state.modelConfig = { defaultModel: "gpt-5.5", offeredProviders: [] };
+    const res = await patchConfig({ offeredProviders: ["gemini"] });
+    expect(res.status).toBe(400);
+    expect(setOrganisationModelConfig).not.toHaveBeenCalled();
+  });
+
+  it("rejects patching a default whose provider is outside the existing offered set (400)", async () => {
+    state.modelConfig = { defaultModel: null, offeredProviders: ["gemini"] };
+    const res = await patchConfig({ defaultModel: "gpt-5.5" });
+    expect(res.status).toBe(400);
+    expect(setOrganisationModelConfig).not.toHaveBeenCalled();
+  });
+
+  it("accepts a coherent default within the offered set", async () => {
+    state.modelConfig = { defaultModel: null, offeredProviders: [] };
+    const res = await patchConfig({
+      defaultModel: "gemini-3-flash-preview",
+      offeredProviders: ["gemini"],
+    });
+    expect(res.status).toBe(200);
+    expect(setOrganisationModelConfig).toHaveBeenCalledWith(
+      expect.anything(),
+      "org-1",
+      {
+        defaultModel: "gemini-3-flash-preview",
+        offeredProviders: ["gemini"],
+      },
     );
   });
 });

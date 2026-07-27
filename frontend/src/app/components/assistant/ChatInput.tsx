@@ -25,6 +25,7 @@ import { ApiKeyMissingModal } from "../shared/ApiKeyMissingModal";
 import { ModelToggle } from "./ModelToggle";
 import { useSelectedModel } from "@/app/hooks/useSelectedModel";
 import { useUserProfile } from "@/contexts/UserProfileContext";
+import { firmOfferedProviders } from "@/app/(pages)/account/firmPolicy";
 import {
     getModelProvider,
     isModelAvailable,
@@ -77,6 +78,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
     const localModels = profile?.localModels ?? [];
     const [model, setModel] = useSelectedModel(localModels);
     const apiKeys = profile?.apiKeys;
+    // Firm-offered providers (WS8 PR F): restrict the model picker when the
+    // member's firm limits providers; null ⇒ no restriction.
+    const offeredProviders = firmOfferedProviders(profile?.firm);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const controlsRef = useRef<HTMLDivElement>(null);
     const [compactControls, setCompactControls] = useState(false);
@@ -315,6 +319,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
                                 onChange={setModel}
                                 apiKeys={apiKeys}
                                 localModels={localModels}
+                                offeredProviders={offeredProviders}
                             />
                             <button
                                 type="button"

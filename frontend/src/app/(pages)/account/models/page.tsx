@@ -29,7 +29,12 @@ import {
     accountGlassInputClassName,
 } from "../accountStyles";
 import { AccountSection } from "../AccountSection";
-import { personalApiKeysBlocked } from "../firmPolicy";
+import {
+    FirmManagedCard,
+    firmOfferedProviders,
+    personalApiKeysBlocked,
+    personalModelPrefsBlocked,
+} from "../firmPolicy";
 
 type ModelPreferenceField = "titleModel" | "tabularModel";
 
@@ -39,6 +44,11 @@ export default function ModelPreferencesPage() {
     // Firm policy (WS8 PR B): when a member's firm provides model access (personal
     // API keys off), surface an honest note — there is no key to add anywhere.
     const firmProvidesModels = personalApiKeysBlocked(profile?.firm);
+    // Firm policy (WS8 PR F): when the firm manages model preferences, hide the
+    // pickers entirely (the firm sets the default); otherwise restrict the picker
+    // options to the firm's offered providers when one is set.
+    const modelPrefsManaged = personalModelPrefsBlocked(profile?.firm);
+    const offeredProviders = firmOfferedProviders(profile?.firm);
     const [savingField, setSavingField] = useState<ModelPreferenceField | null>(
         null,
     );
@@ -80,6 +90,21 @@ export default function ModelPreferencesPage() {
         }
     };
 
+    // Firm manages model preferences: no pickers, a neutral card instead. The
+    // firm provides the model access and default (WS8 PR F). Reuses the shared
+    // FirmManagedCard so it reads like the API Keys / Connectors managed states.
+    if (modelPrefsManaged) {
+        return (
+            <FirmManagedCard
+                heading="Model Preferences"
+                title={`Model access is provided by ${
+                    profile?.firm?.name ?? "your firm"
+                }.`}
+                description="Your firm sets the models used for your work. Ask your firm admin if you need a different model."
+            />
+        );
+    }
+
     return (
         <div>
             <div className="flex items-center gap-2 mb-4">
@@ -104,6 +129,7 @@ export default function ModelPreferencesPage() {
                         options={SETTINGS_MODELS}
                         apiKeys={profile?.apiKeys}
                         localModels={localModels}
+                        offeredProviders={offeredProviders}
                         isSaving={savingField === "titleModel"}
                         isSaved={savedField === "titleModel"}
                         onChange={(id) => handleModelChange("titleModel", id)}
@@ -127,6 +153,7 @@ export default function ModelPreferencesPage() {
                         options={MODELS}
                         apiKeys={profile?.apiKeys}
                         localModels={localModels}
+                        offeredProviders={offeredProviders}
                         isSaving={savingField === "tabularModel"}
                         isSaved={savedField === "tabularModel"}
                         onChange={(id) => handleModelChange("tabularModel", id)}
@@ -156,6 +183,7 @@ function ModelPreferenceDropdown({
     apiKeys,
     options: baseOptions,
     localModels = [],
+    offeredProviders = null,
     isSaving,
     isSaved,
 }: {
@@ -164,6 +192,9 @@ function ModelPreferenceDropdown({
     apiKeys?: ApiKeyState;
     options: ModelOption[];
     localModels?: string[];
+    /** Firm-offered providers (WS8 PR F); null ⇒ no restriction. Local models
+     *  are an env-configured data-sovereignty path and are never filtered out. */
+    offeredProviders?: string[] | null;
     isSaving?: boolean;
     isSaved?: boolean;
 }) {
@@ -173,12 +204,21 @@ function ModelPreferenceDropdown({
     const selectedAvailable = apiKeys
         ? isModelAvailable(value, apiKeys, localModels)
         : true;
-    const groups: ModelOption["group"][] = [
+    const allGroups: ModelOption["group"][] = [
         "Anthropic",
         "Google",
         "OpenAI",
         "Local",
     ];
+    // Restrict the cloud provider groups to the firm's offered providers when
+    // set; the Local group is always retained.
+    const groups = offeredProviders
+        ? allGroups.filter(
+              (group) =>
+                  group === "Local" ||
+                  offeredProviders.includes(modelGroupToProvider(group)),
+          )
+        : allGroups;
 
     return (
         <DropdownMenu onOpenChange={setIsOpen}>

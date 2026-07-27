@@ -7,6 +7,128 @@
 
 ---
 
+## 2026-07-27 — WS8 PR F: firm model preferences (branch `ws8-firm-model-prefs`)
+
+**Scope:** make the firm model columns from the #44 migration real. A third firm
+policy (`memberModelPrefs`) plus a firm model configuration (`model_config`:
+default model + offered providers). When a firm turns the policy OFF, members'
+personal model-preference writes are gated, their stored prefs become inert and
+the firm default governs resolution, and the model pickers are filtered to the
+firm's offered providers. Orgless self-hosters and policy-ON firms are unchanged
+everywhere. **No migration** (columns already merged as #44); no new env vars;
+no new dependencies. All new columns read 42703-tolerantly.
+
+**Backend.**
+- `organisations.ts`: `OrganisationPolicies` gains `memberModelPrefs`; new
+  `OrganisationModelConfig` (`defaultModel` / `offeredProviders`) carried on
+  `OrganisationMembership.modelConfig`; `MEMBERSHIP_SELECT` +
+  `updateOrganisationPolicies` extended; `normaliseModelConfig` (defensive jsonb
+  coercion), `getUserOrganisationModelContext` (single-join id + policy + config,
+  fail-open on throw — mirrors `getUserOrganisationKeyContext`), and
+  `get/setOrganisationModelConfig`.
+- `llm/models.ts`: `MODEL_PROVIDERS` + `isModelProvider`, `isSelectableModelId`
+  (registry model or configured local id — mirrors `resolveModel` acceptance),
+  plus `safeProviderForModel` (throw→null) and `defaultMainModelForProvider`
+  (per-provider substitution target for the chat-model clamp).
+- `userSettings.ts` `resolveOrgChatModel` + `routes/chat.ts` & `routes/projectChat.ts`:
+  the CLIENT-SUPPLIED chat `model` is clamped against the firm policy right after
+  model resolution on both streaming chat routes (see the decision note below).
+- `userSettings.ts` (`getUserModelSettings`): firm-aware — under policy OFF the
+  personal title/tabular prefs are inert; tabular resolves to the firm default
+  (else `DEFAULT_TABULAR_MODEL`), title stays on the provider-appropriate
+  lightweight default. **Fail-open**: any org-lookup error → personal prefs apply.
+- `routes/user.ts`: `serializeProfile` computes the same firm-effective
+  title/tabular values so the account page shows what generation will use; the
+  `PATCH /user/profile` route is gated by
+  `requireMemberPolicy("memberModelPrefs", "Model preferences are managed by your firm.", shouldGate)`
+  where `shouldGate` fires only when the body touches `titleModel`/`tabularModel`
+  (a display-name / organisation-only edit is never blocked). **Admins are NOT
+  exempt** (PR B precedent).
+- `routes/admin.ts`: `PATCH /admin/policies` accepts `memberModelPrefs`; new
+  `GET /admin/model-config` + `PATCH /admin/model-config` (requireAdmin + MFA on
+  writes, `asyncHandler`, fixed generic details) — validates `defaultModel`
+  against the registry and every provider against the known set (**unknown ⇒
+  400**), merges the patch over the firm's current config, `null` clears a field.
+
+**Frontend.**
+- `mikeApi.ts`: `OrganisationPolicies.memberModelPrefs`, `OrganisationModelConfig`,
+  `OrganisationMembership.modelConfig`, `getFirmModelConfig` /
+  `updateFirmModelConfig`.
+- `account/firmPolicy.tsx`: `personalModelPrefsBlocked` + `firmOfferedProviders`.
+- `account/models/page.tsx`: under policy OFF the pickers are replaced by the
+  neutral `FirmManagedCard` ("Model access is provided by <firm>."); under
+  policy ON the picker options are filtered to the firm's offered providers.
+- `ModelToggle.tsx` (main chat + tabular via `ChatInput` / `TRChatPanel`): an
+  optional `offeredProviders` prop filters the provider groups; the Local group
+  is never filtered (env-configured data-sovereignty path).
+- `admin/firm-settings/page.tsx`: a third Policies toggle (memberModelPrefs) and a
+  new **Model configuration** card (default-model `select` + provider checkboxes,
+  MFA-guarded, load-error retry, empty=all-offered encoding mirroring connector
+  curation, `reloadProfile` on save).
+
+**Decisions.**
+- *Firm default governs the tabular/review tier, not the title tier.* Title
+  generation is always a lightweight, provider-appropriate model (its existing
+  behaviour); the firm default is applied where a member-choosable main-ish model
+  flows server-side (tabular). Personal title AND tabular prefs are both inert
+  under policy OFF (never deleted — the inert-personal precedent from PR B).
+- *Main chat model is enforced server-side, not only in the UI (review fix).*
+  The initial cut filtered the pickers client-side but left `POST /chat` and
+  `POST /projects/:id/chat` accepting a raw `model` in the body — a policy-OFF
+  member (or a policy-ON member under a provider restriction) could bypass the
+  firm policy with a crafted request ("gate the routes, not the tabs" — the PR B
+  precedent). Fixed by clamping the client model through a new
+  `resolveOrgChatModel(userId, requested, db)` (in `userSettings.ts`) right after
+  model resolution on both chat routes: local ids pass through untouched
+  (data-sovereignty); fail-open on any org-lookup error / orgless; policy-OFF +
+  firm default → forced to the firm default; a requested provider outside a
+  non-empty `offeredProviders` → substituted (firm default → default main model
+  → first offered provider's default). Provenance: the original decision to treat
+  the per-message model as a pure client choice was wrong — the route is the
+  security boundary. *Tabular / workflows checked and need no clamp:* tabular
+  resolves its model through `getUserModelSettings` (already firm-aware here), and
+  workflows accepts no client model id.
+- *Firm-default coherence is validated at write time.* `PATCH /admin/model-config`
+  now rejects (400) a MERGED config whose (cloud) default model's provider sits
+  outside a non-empty `offeredProviders` — so the clamp can always treat a set
+  firm default as an in-set substitute. A local default is exempt (never filtered
+  by offeredProviders).
+- *offeredProviders empty = no restriction* (all providers), mirroring the
+  connector-curation empty=all encoding; the admin UI blocks unticking the last
+  provider and points at the policy instead.
+- *Local models are never filtered by offeredProviders* — they are an
+  env-configured data-sovereignty path, not a firm BYO-provider choice.
+
+**Verification.**
+- Backend `npx tsc --noEmit` clean; `npx vitest run` **309 passed (24 files)** —
+  new/extended: `auth.policy.test.ts` (memberModelPrefs gate: OFF+model-body→403,
+  display-name-only→pass, ON→pass, admin-not-exempt→403, orgless→pass,
+  fail-open→pass), `organisations.test.ts` (`normaliseModelConfig` coercion,
+  `getUserOrganisationModelContext` resolve/null/42703, membership shape),
+  `userSettings.test.ts` (new — firm-managed *resolution*: firm default /
+  fallback / policy-on-personal / orgless / fail-open; and the `resolveOrgChatModel`
+  *clamp*: out-of-catalogue id under policy-OFF → firm default, policy-ON +
+  offered-providers disallowed-provider substitution incl. no-default and
+  not-offered-default cases, local passthrough, org-lookup error fail-open,
+  orgless unchanged, undefined-model handling), `user.serialize.test.ts`
+  (firm-managed title/tabular), `admin.test.ts` (policies memberModelPrefs;
+  GET/PATCH model-config authz + MFA + validation 400s + merge/de-dupe/clear +
+  merged-config default/provider coherence 400).
+- Frontend `npx tsc --noEmit` clean; `npx eslint` on the seven changed files
+  introduces **no new problems** (the one error + warnings in `TRChatPanel.tsx`
+  are the pre-existing baseline, byte-identical count on `main`).
+- Evals NOT run from the worktree (CI covers them; the worktree cannot run them
+  correctly — DURABLE_LESSONS 2026-07-08).
+- Backend changed src files match the existing 4-space, non-prettier-clean style
+  (no prettier config; `prettier --write` deliberately not run); new test files
+  are 2-space like their siblings.
+
+**Deferred.** Setting a *local* model as the firm default is not exposed in the
+admin UI (cloud catalog only); the backend still accepts a valid local id if one
+is ever sent. A future PR could surface the admin's own local models there.
+
+---
+
 ## 2026-07-27 — WS8 F/G bundled migration + schema mirror (branch `firm-models-deletion-migration`)
 
 **Scope:** the single owner-authorised migration shared by PR F (firm model
