@@ -1,9 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
+import {
+    ChevronLeft,
+    ChevronRight,
+    ExternalLink,
+    FileText,
+    Loader2,
+} from "lucide-react";
 import {
     chGetFilingHistory,
+    getFilingDocument,
     MikeApiError,
     type ChFilingHistoryItem,
 } from "@/app/lib/mikeApi";
@@ -45,6 +52,18 @@ function errorMessageFor(err: unknown): string {
     return "Could not load the filing history. Please try again later.";
 }
 
+function documentErrorMessage(err: unknown): string {
+    if (err instanceof MikeApiError) {
+        if (err.status === 429) {
+            return "Rate limit reached. Please try again shortly.";
+        }
+        if (err.status === 404) {
+            return "No document is available for this filing.";
+        }
+    }
+    return "Could not open this document. Please try again later.";
+}
+
 interface Props {
     companyNumber: string;
 }
@@ -66,8 +85,43 @@ export function FilingHistoryList({ companyNumber }: Props) {
         key: string;
         message: string;
     } | null>(null);
+    // Per-item document view state, keyed by transaction id.
+    const [docBusyId, setDocBusyId] = useState<string | null>(null);
+    const [docError, setDocError] = useState<{
+        id: string;
+        message: string;
+    } | null>(null);
 
     const fetchKey = `${companyNumber}:${page}`;
+
+    async function openDocument(transactionId: string) {
+        setDocError(null);
+        setDocBusyId(transactionId);
+        try {
+            const blob = await getFilingDocument(companyNumber, transactionId);
+            const url = URL.createObjectURL(blob);
+            const opened = window.open(url, "_blank", "noopener,noreferrer");
+            if (!opened) {
+                // Popup blocked — nothing will consume the blob URL, so revoke
+                // it immediately and surface the inline error.
+                URL.revokeObjectURL(url);
+                setDocError({
+                    id: transactionId,
+                    message: "Could not open this document. Please allow pop-ups and try again.",
+                });
+                return;
+            }
+            // Revoke once the new tab has had time to load the blob.
+            setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        } catch (err) {
+            setDocError({
+                id: transactionId,
+                message: documentErrorMessage(err),
+            });
+        } finally {
+            setDocBusyId(null);
+        }
+    }
 
     useEffect(() => {
         let cancelled = false;
@@ -137,24 +191,56 @@ export function FilingHistoryList({ companyNumber }: Props) {
                 </p>
             ) : (
                 <ul>
-                    {filings.map((item, i) => (
-                        <li
-                            key={`${item.date ?? "filing"}-${i}`}
-                            className="flex items-center gap-4 border-b border-gray-50 py-2.5 text-sm"
-                        >
-                            <span className="w-24 shrink-0 tabular-nums text-gray-500">
-                                {formatUkShortDate(item.date) ?? "—"}
-                            </span>
-                            <span className="min-w-0 flex-1 text-gray-900">
-                                {describeFiling(item)}
-                            </span>
-                            {item.type && (
-                                <span className="shrink-0 text-[11px] text-gray-400">
-                                    {item.type}
-                                </span>
-                            )}
-                        </li>
-                    ))}
+                    {filings.map((item, i) => {
+                        const txId = item.transaction_id;
+                        const hasDocument =
+                            !!txId && !!item.links?.document_metadata;
+                        const busy = !!txId && docBusyId === txId;
+                        const itemError =
+                            !!txId && docError?.id === txId
+                                ? docError.message
+                                : null;
+                        return (
+                            <li
+                                key={`${item.date ?? "filing"}-${i}`}
+                                className="flex flex-col gap-1 border-b border-gray-50 py-2.5 text-sm"
+                            >
+                                <div className="flex items-center gap-4">
+                                    <span className="w-24 shrink-0 tabular-nums text-gray-500">
+                                        {formatUkShortDate(item.date) ?? "—"}
+                                    </span>
+                                    <span className="min-w-0 flex-1 text-gray-900">
+                                        {describeFiling(item)}
+                                    </span>
+                                    {item.type && (
+                                        <span className="shrink-0 text-[11px] text-gray-400">
+                                            {item.type}
+                                        </span>
+                                    )}
+                                    {hasDocument && (
+                                        <button
+                                            type="button"
+                                            onClick={() => openDocument(txId)}
+                                            disabled={busy}
+                                            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 disabled:pointer-events-none disabled:opacity-50"
+                                        >
+                                            {busy ? (
+                                                <Loader2 className="h-3 w-3 animate-spin" />
+                                            ) : (
+                                                <FileText className="h-3 w-3" />
+                                            )}
+                                            View PDF
+                                        </button>
+                                    )}
+                                </div>
+                                {itemError && (
+                                    <p className="pl-28 text-[11px] text-gray-500">
+                                        {itemError}
+                                    </p>
+                                )}
+                            </li>
+                        );
+                    })}
                 </ul>
             )}
 

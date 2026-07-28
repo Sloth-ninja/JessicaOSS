@@ -17,6 +17,7 @@ import { createServerSupabase } from "../lib/supabase";
 import { getUserApiKeys } from "../lib/userApiKeys";
 import {
   CompaniesHouseError,
+  getFilingDocument,
   getFilingHistory,
   normalizeCompanyNumber,
   searchCompanies,
@@ -183,9 +184,18 @@ export function validateCompanyNumber(raw: string): string | null {
   return /^[A-Z0-9]+$/.test(normalized) ? normalized : null;
 }
 
-async function resolveCompaniesHouseKey(
-  userId: string,
-): Promise<string | null> {
+/**
+ * Validates a Companies House filing transaction id. Like the company number,
+ * this value is interpolated into an outgoing Companies House URL path, so it
+ * must be strictly `[A-Za-z0-9_-]` — anything with path/query metacharacters
+ * (".." / "/" / "?") is rejected. Exported for unit tests.
+ */
+export function validateTransactionId(raw: string): string | null {
+  const trimmed = raw.trim();
+  return /^[A-Za-z0-9_-]+$/.test(trimmed) ? trimmed : null;
+}
+
+async function resolveCompaniesHouseKey(userId: string): Promise<string | null> {
   const apiKeys = await getUserApiKeys(userId, createServerSupabase());
   const key = apiKeys.companies_house;
   return key && key.trim() ? key : null;
@@ -321,6 +331,49 @@ companiesRouter.get(
       res.json(result);
     } catch (err) {
       logAndRespond("filing-history", err, res);
+    }
+  },
+);
+
+// GET /companies/:companyNumber/filing-history/:transactionId/document
+// Streams the primary document (usually a PDF) for a single filing. Mirrors
+// the sibling routes' try/catch + logAndRespond discipline (not asyncHandler):
+// the catch GUARANTEES a response and maps Companies House errors onto fixed,
+// safe details via companiesHouseErrorResponse (404 when the filing has no
+// document, 409 when the key is missing, 502 otherwise) — which is exactly the
+// guarantee the asyncHandler rule exists to provide.
+companiesRouter.get(
+  "/:companyNumber/filing-history/:transactionId/document",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const userId = res.locals.userId as string;
+      const companyNumber = validateCompanyNumber(req.params.companyNumber);
+      if (!companyNumber) {
+        return void res.status(400).json({ detail: "Invalid company number." });
+      }
+      const transactionId = validateTransactionId(req.params.transactionId);
+      if (!transactionId) {
+        return void res
+          .status(400)
+          .json({ detail: "Invalid filing reference." });
+      }
+      const apiKey = await resolveCompaniesHouseKey(userId);
+      if (!apiKey) {
+        return void res
+          .status(KEY_MISSING_RESPONSE.status)
+          .json(KEY_MISSING_RESPONSE.body);
+      }
+      const { bytes, contentType, filename } = await getFilingDocument(
+        apiKey,
+        companyNumber,
+        transactionId,
+      );
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+      res.send(bytes);
+    } catch (err) {
+      logAndRespond("filing-document", err, res);
     }
   },
 );

@@ -15,6 +15,7 @@ import { downloadsRouter } from "./routes/downloads";
 import { companiesRouter } from "./routes/companies";
 import { citationsRouter } from "./routes/citations";
 import { legislationRouter } from "./routes/legislation";
+import { landRegistryRouter } from "./routes/landRegistry";
 import { runDeletionPurge } from "./lib/deletionGovernance";
 
 const app = express();
@@ -97,7 +98,7 @@ const dataDeleteLimiter = makeLimiter({
   message: "Too many data deletion requests. Please try again later.",
 });
 
-// Shared limiter for UK research routes (/companies now; /legislation later).
+// Shared limiter for UK research routes (/companies, /legislation, /land-registry).
 const researchLimiter = makeLimiter({
   windowMs: minutes(envInt("RATE_LIMIT_RESEARCH_WINDOW_MINUTES", 15)),
   max: envInt("RATE_LIMIT_RESEARCH_MAX", 120),
@@ -162,6 +163,7 @@ app.delete("/user/projects", dataDeleteLimiter);
 app.delete("/user/tabular-reviews", dataDeleteLimiter);
 app.use("/companies", researchLimiter);
 app.use("/legislation", researchLimiter);
+app.use("/land-registry", researchLimiter);
 app.post("/citations/check", citationsLimiter);
 
 app.use((req, res, next) =>
@@ -181,6 +183,7 @@ app.use("/download", downloadsRouter);
 app.use("/companies", companiesRouter);
 app.use("/citations", citationsRouter);
 app.use("/legislation", legislationRouter);
+app.use("/land-registry", landRegistryRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 

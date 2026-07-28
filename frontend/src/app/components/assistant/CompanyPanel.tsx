@@ -1,6 +1,7 @@
 "use client";
 
 import { ExternalLink } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 // ---------------------------------------------------------------------------
 // Loosely-typed Companies House response shapes. These mirror the public
@@ -100,6 +101,46 @@ function formatUkDate(value: string | null | undefined): string | null {
     });
 }
 
+/** DD/MM/YYYY (en-GB) — used for ceased/resigned status dates. */
+function formatUkShortDate(value: string | null | undefined): string | null {
+    if (!value) return null;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toLocaleDateString("en-GB");
+}
+
+/**
+ * Stable active-first partition: entries flagged inactive by `isInactive`
+ * (resigned officers / ceased PSCs) sort after active ones, preserving the
+ * original API order within each group. Companies House marks ceased PSCs
+ * (`ceased_on`) and resigned officers (`resigned_on`); surfacing that status
+ * is the whole point — never render a ceased entry as though it were current.
+ */
+function activeFirst<T>(items: T[], isInactive: (item: T) => boolean): T[] {
+    const active: T[] = [];
+    const inactive: T[] = [];
+    for (const item of items) {
+        (isInactive(item) ? inactive : active).push(item);
+    }
+    return [...active, ...inactive];
+}
+
+/**
+ * Neutral grey status pill for a ceased/resigned entry. Reuses the shared
+ * Badge (secondary variant) so it matches the company-type pill idiom used
+ * elsewhere on the Company Search page.
+ */
+function StatusPill({ children }: { children: React.ReactNode }) {
+    return (
+        <Badge
+            variant="secondary"
+            className="px-1.5 py-0 text-[10px] font-medium"
+        >
+            {children}
+        </Badge>
+    );
+}
+
 function formatAddress(address?: RegisteredOfficeAddress): string | null {
     if (!address) return null;
     const parts = [
@@ -164,13 +205,19 @@ export function CompanyPanel({
     const profileError = isErrorResult(data.profile)
         ? data.profile.error
         : null;
-    const officers = !isErrorResult(data.officers)
+    const officersRaw = !isErrorResult(data.officers)
         ? (data.officers?.items ?? [])
         : [];
+    const officers = activeFirst(officersRaw, (o) => !!o.resigned_on);
+    const resignedOfficerCount = officersRaw.filter(
+        (o) => !!o.resigned_on,
+    ).length;
     const officersError = isErrorResult(data.officers)
         ? data.officers.error
         : null;
-    const pscs = !isErrorResult(data.psc) ? (data.psc?.items ?? []) : [];
+    const pscsRaw = !isErrorResult(data.psc) ? (data.psc?.items ?? []) : [];
+    const pscs = activeFirst(pscsRaw, (p) => !!p.ceased_on);
+    const ceasedPscCount = pscsRaw.filter((p) => !!p.ceased_on).length;
     const pscError = isErrorResult(data.psc) ? data.psc.error : null;
 
     const displayName = profile?.company_name ?? companyName ?? companyNumber;
@@ -270,7 +317,14 @@ export function CompanyPanel({
 
                 {(!section || section === "officers") && (
                 <section className="flex flex-col gap-3 rounded-xl border border-gray-100 bg-white/60 p-3">
-                    <SectionLabel>Officers</SectionLabel>
+                    <SectionLabel>
+                        Officers
+                        {resignedOfficerCount > 0 && (
+                            <span className="ml-1 font-normal text-gray-400">
+                                · {resignedOfficerCount} resigned
+                            </span>
+                        )}
+                    </SectionLabel>
                     {officersError ? (
                         <p className="text-sm text-red-600">
                             {officersError}
@@ -281,36 +335,53 @@ export function CompanyPanel({
                         </p>
                     ) : (
                         <ul className="flex flex-col divide-y divide-gray-100">
-                            {officers.map((officer, i) => (
-                                <li
-                                    key={`${officer.name ?? "officer"}-${i}`}
-                                    className="py-2 flex flex-col gap-0.5"
-                                >
-                                    <span className="text-sm font-medium text-gray-800">
-                                        {officer.name ?? "Unnamed officer"}
-                                    </span>
-                                    <span className="text-xs text-gray-500">
-                                        {humaniseStatus(officer.officer_role)}
-                                        {officer.resigned_on ? (
-                                            <>
-                                                {" "}
-                                                · Resigned{" "}
-                                                {formatUkDate(
-                                                    officer.resigned_on,
-                                                )}
-                                            </>
-                                        ) : officer.appointed_on ? (
-                                            <>
-                                                {" "}
-                                                · Appointed{" "}
-                                                {formatUkDate(
-                                                    officer.appointed_on,
-                                                )}
-                                            </>
-                                        ) : null}
-                                    </span>
-                                </li>
-                            ))}
+                            {officers.map((officer, i) => {
+                                const resigned = !!officer.resigned_on;
+                                return (
+                                    <li
+                                        key={`${officer.name ?? "officer"}-${i}`}
+                                        className="py-2 flex flex-col gap-0.5"
+                                    >
+                                        <span className="flex items-center gap-1.5">
+                                            <span
+                                                className={`text-sm font-medium ${
+                                                    resigned
+                                                        ? "text-gray-400"
+                                                        : "text-gray-800"
+                                                }`}
+                                            >
+                                                {officer.name ??
+                                                    "Unnamed officer"}
+                                            </span>
+                                            {resigned && (
+                                                <StatusPill>Resigned</StatusPill>
+                                            )}
+                                        </span>
+                                        <span className="text-xs text-gray-500">
+                                            {humaniseStatus(
+                                                officer.officer_role,
+                                            )}
+                                            {resigned ? (
+                                                <>
+                                                    {" "}
+                                                    · Resigned{" "}
+                                                    {formatUkShortDate(
+                                                        officer.resigned_on,
+                                                    )}
+                                                </>
+                                            ) : officer.appointed_on ? (
+                                                <>
+                                                    {" "}
+                                                    · Appointed{" "}
+                                                    {formatUkDate(
+                                                        officer.appointed_on,
+                                                    )}
+                                                </>
+                                            ) : null}
+                                        </span>
+                                    </li>
+                                );
+                            })}
                         </ul>
                     )}
                 </section>
@@ -318,7 +389,14 @@ export function CompanyPanel({
 
                 {(!section || section === "pscs") && (
                 <section className="flex flex-col gap-3 rounded-xl border border-gray-100 bg-white/60 p-3">
-                    <SectionLabel>Persons with significant control</SectionLabel>
+                    <SectionLabel>
+                        Persons with significant control
+                        {ceasedPscCount > 0 && (
+                            <span className="ml-1 font-normal text-gray-400">
+                                · {ceasedPscCount} ceased
+                            </span>
+                        )}
+                    </SectionLabel>
                     {pscError ? (
                         <p className="text-sm text-red-600">{pscError}</p>
                     ) : pscs.length === 0 ? (
@@ -327,32 +405,56 @@ export function CompanyPanel({
                         </p>
                     ) : (
                         <ul className="flex flex-col divide-y divide-gray-100">
-                            {pscs.map((psc, i) => (
-                                <li
-                                    key={`${psc.name ?? "psc"}-${i}`}
-                                    className="py-2 flex flex-col gap-0.5"
-                                >
-                                    <span className="text-sm font-medium text-gray-800">
-                                        {psc.name ?? "Unnamed PSC"}
-                                    </span>
-                                    <span className="text-xs text-gray-500">
-                                        {humaniseStatus(psc.kind)}
-                                    </span>
-                                    {psc.natures_of_control &&
-                                        psc.natures_of_control.length > 0 && (
-                                            <span className="text-xs text-gray-400">
-                                                {psc.natures_of_control
-                                                    .map(
-                                                        (n) =>
-                                                            humaniseStatus(
-                                                                n,
-                                                            ) ?? n,
-                                                    )
-                                                    .join(", ")}
+                            {pscs.map((psc, i) => {
+                                const ceased = !!psc.ceased_on;
+                                return (
+                                    <li
+                                        key={`${psc.name ?? "psc"}-${i}`}
+                                        className="py-2 flex flex-col gap-0.5"
+                                    >
+                                        <span className="flex items-center gap-1.5">
+                                            <span
+                                                className={`text-sm font-medium ${
+                                                    ceased
+                                                        ? "text-gray-400"
+                                                        : "text-gray-800"
+                                                }`}
+                                            >
+                                                {psc.name ?? "Unnamed PSC"}
                                             </span>
-                                        )}
-                                </li>
-                            ))}
+                                            {ceased && (
+                                                <StatusPill>Ceased</StatusPill>
+                                            )}
+                                        </span>
+                                        <span className="text-xs text-gray-500">
+                                            {humaniseStatus(psc.kind)}
+                                            {ceased && (
+                                                <>
+                                                    {" "}
+                                                    · Ceased{" "}
+                                                    {formatUkShortDate(
+                                                        psc.ceased_on,
+                                                    )}
+                                                </>
+                                            )}
+                                        </span>
+                                        {psc.natures_of_control &&
+                                            psc.natures_of_control.length >
+                                                0 && (
+                                                <span className="text-xs text-gray-400">
+                                                    {psc.natures_of_control
+                                                        .map(
+                                                            (n) =>
+                                                                humaniseStatus(
+                                                                    n,
+                                                                ) ?? n,
+                                                        )
+                                                        .join(", ")}
+                                                </span>
+                                            )}
+                                    </li>
+                                );
+                            })}
                         </ul>
                     )}
                 </section>

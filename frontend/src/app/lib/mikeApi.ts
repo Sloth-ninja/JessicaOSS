@@ -5,154 +5,154 @@
 
 import { supabase } from "@/lib/supabase";
 import type {
-  AssistantEvent,
-  Chat,
-  ChatDetailOut,
-  CitationAnnotation,
-  Document,
-  Folder,
-  Message,
-  Project,
-  Workflow,
-  TabularReview,
-  TabularReviewDetailOut,
+    AssistantEvent,
+    Chat,
+    ChatDetailOut,
+    CitationAnnotation,
+    Document,
+    Folder,
+    Message,
+    Project,
+    Workflow,
+    TabularReview,
+    TabularReviewDetailOut,
 } from "@/app/components/shared/types";
 
 // Server-side shape before mapping
 interface ServerMessage {
-  id: string;
-  chat_id: string;
-  role: "user" | "assistant";
-  content: string | AssistantEvent[] | null;
-  files?: { filename: string; document_id?: string }[] | null;
-  workflow?: { id: string; title: string } | null;
-  annotations?: CitationAnnotation[] | null;
-  created_at: string;
+    id: string;
+    chat_id: string;
+    role: "user" | "assistant";
+    content: string | AssistantEvent[] | null;
+    files?: { filename: string; document_id?: string }[] | null;
+    workflow?: { id: string; title: string } | null;
+    annotations?: CitationAnnotation[] | null;
+    created_at: string;
 }
 interface ServerChatDetailOut {
-  chat: Chat;
-  messages: ServerMessage[];
+    chat: Chat;
+    messages: ServerMessage[];
 }
 
 const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+    process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 const isDev = process.env.NODE_ENV !== "production";
 const devLog = (...args: Parameters<typeof console.log>) => {
-  if (isDev) console.log(...args);
+    if (isDev) console.log(...args);
 };
 
 export class MikeApiError extends Error {
-  status: number;
-  code: string | null;
+    status: number;
+    code: string | null;
 
-  constructor(args: { message: string; status: number; code?: string | null }) {
-    super(args.message);
-    this.name = "MikeApiError";
-    this.status = args.status;
-    this.code = args.code ?? null;
-  }
+    constructor(args: { message: string; status: number; code?: string | null }) {
+        super(args.message);
+        this.name = "MikeApiError";
+        this.status = args.status;
+        this.code = args.code ?? null;
+    }
 }
 
 export function isMfaRequiredError(error: unknown) {
-  return (
-    error instanceof MikeApiError &&
-    error.status === 403 &&
-    error.code === "mfa_verification_required"
-  );
+    return (
+        error instanceof MikeApiError &&
+        error.status === 403 &&
+        error.code === "mfa_verification_required"
+    );
 }
 
 async function getAuthHeader(): Promise<Record<string, string>> {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  if (!session?.access_token) return {};
-  return { Authorization: `Bearer ${session.access_token}` };
+    const {
+        data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.access_token) return {};
+    return { Authorization: `Bearer ${session.access_token}` };
 }
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const authHeaders = await getAuthHeader();
-  const { headers: initHeaders, ...restInit } = init ?? {};
-  const response = await fetch(`${API_BASE}${path}`, {
-    cache: "no-store",
-    ...restInit,
-    headers: {
-      Accept: "application/json",
-      ...authHeaders,
-      ...(initHeaders as Record<string, string> | undefined),
-    },
-  });
+    const authHeaders = await getAuthHeader();
+    const { headers: initHeaders, ...restInit } = init ?? {};
+    const response = await fetch(`${API_BASE}${path}`, {
+        cache: "no-store",
+        ...restInit,
+        headers: {
+            Accept: "application/json",
+            ...authHeaders,
+            ...(initHeaders as Record<string, string> | undefined),
+        },
+    });
 
-  if (!response.ok) {
-    throw await toApiError(response, path);
-  }
+    if (!response.ok) {
+        throw await toApiError(response, path);
+    }
 
-  if (
-    response.status === 204 ||
-    response.headers.get("content-length") === "0"
-  ) {
-    return undefined as T;
-  }
+    if (
+        response.status === 204 ||
+        response.headers.get("content-length") === "0"
+    ) {
+        return undefined as T;
+    }
 
-  return (await response.json()) as T;
+    return (await response.json()) as T;
 }
 
 async function apiBlobRequest(path: string): Promise<{
-  blob: Blob;
-  filename: string | null;
+    blob: Blob;
+    filename: string | null;
 }> {
-  const authHeaders = await getAuthHeader();
-  const response = await fetch(`${API_BASE}${path}`, {
-    cache: "no-store",
-    headers: {
-      Accept: "application/json",
-      ...authHeaders,
-    },
-  });
+    const authHeaders = await getAuthHeader();
+    const response = await fetch(`${API_BASE}${path}`, {
+        cache: "no-store",
+        headers: {
+            Accept: "application/json",
+            ...authHeaders,
+        },
+    });
 
-  if (!response.ok) {
-    throw await toApiError(response, path);
-  }
+    if (!response.ok) {
+        throw await toApiError(response, path);
+    }
 
-  const disposition = response.headers.get("content-disposition") ?? "";
-  const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
-  return {
-    blob: await response.blob(),
-    filename: filenameMatch?.[1] ?? null,
-  };
+    const disposition = response.headers.get("content-disposition") ?? "";
+    const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
+    return {
+        blob: await response.blob(),
+        filename: filenameMatch?.[1] ?? null,
+    };
 }
 
 async function toApiError(response: Response, path: string) {
-  const text = await response.text();
-  try {
-    const parsed = JSON.parse(text) as {
-      detail?: unknown;
-      code?: unknown;
-    };
-    devLog("[mike-api] non-ok response", {
-      path,
-      status: response.status,
-      code: parsed.code,
-      detail: parsed.detail,
-    });
-    return new MikeApiError({
-      status: response.status,
-      code: typeof parsed.code === "string" ? parsed.code : null,
-      message:
-        typeof parsed.detail === "string" && parsed.detail
-          ? parsed.detail
-          : `API error: ${response.status}`,
-    });
-  } catch {
-    devLog("[mike-api] non-ok non-json response", {
-      path,
-      status: response.status,
-      bodyPreview: text.slice(0, 200),
-    });
-    return new MikeApiError({
-      status: response.status,
-      message: text || `API error: ${response.status}`,
-    });
-  }
+    const text = await response.text();
+    try {
+        const parsed = JSON.parse(text) as {
+            detail?: unknown;
+            code?: unknown;
+        };
+        devLog("[mike-api] non-ok response", {
+            path,
+            status: response.status,
+            code: parsed.code,
+            detail: parsed.detail,
+        });
+        return new MikeApiError({
+            status: response.status,
+            code: typeof parsed.code === "string" ? parsed.code : null,
+            message:
+                typeof parsed.detail === "string" && parsed.detail
+                    ? parsed.detail
+                    : `API error: ${response.status}`,
+        });
+    } catch {
+        devLog("[mike-api] non-ok non-json response", {
+            path,
+            status: response.status,
+            bodyPreview: text.slice(0, 200),
+        });
+        return new MikeApiError({
+            status: response.status,
+            message: text || `API error: ${response.status}`,
+        });
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -160,65 +160,65 @@ async function toApiError(response: Response, path: string) {
 // ---------------------------------------------------------------------------
 
 export async function listProjects(): Promise<Project[]> {
-  return apiRequest<Project[]>("/projects");
+    return apiRequest<Project[]>("/projects");
 }
 
 export async function createProject(
-  name: string,
-  cm_number?: string,
-  shared_with?: string[],
+    name: string,
+    cm_number?: string,
+    shared_with?: string[],
 ): Promise<Project> {
-  return apiRequest<Project>("/projects", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, cm_number, shared_with }),
-  });
+    return apiRequest<Project>("/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, cm_number, shared_with }),
+    });
 }
 
 export async function deleteAccount(): Promise<void> {
-  return apiRequest<void>("/user/account", { method: "DELETE" });
+    return apiRequest<void>("/user/account", { method: "DELETE" });
 }
 
 export async function deleteAllChats(): Promise<void> {
-  return apiRequest<void>("/user/chats", { method: "DELETE" });
+    return apiRequest<void>("/user/chats", { method: "DELETE" });
 }
 
 export async function deleteAllProjects(): Promise<void> {
-  return apiRequest<void>("/user/projects", { method: "DELETE" });
+    return apiRequest<void>("/user/projects", { method: "DELETE" });
 }
 
 export async function deleteAllTabularReviews(): Promise<void> {
-  return apiRequest<void>("/user/tabular-reviews", { method: "DELETE" });
+    return apiRequest<void>("/user/tabular-reviews", { method: "DELETE" });
 }
 
 export async function exportAccountData(): Promise<{
-  blob: Blob;
-  filename: string | null;
+    blob: Blob;
+    filename: string | null;
 }> {
-  return apiBlobRequest("/user/export");
+    return apiBlobRequest("/user/export");
 }
 
 export async function exportChatData(): Promise<{
-  blob: Blob;
-  filename: string | null;
+    blob: Blob;
+    filename: string | null;
 }> {
-  return apiBlobRequest("/user/chats/export");
+    return apiBlobRequest("/user/chats/export");
 }
 
 export async function exportTabularReviewsData(): Promise<{
-  blob: Blob;
-  filename: string | null;
+    blob: Blob;
+    filename: string | null;
 }> {
-  return apiBlobRequest("/user/tabular-reviews/export");
+    return apiBlobRequest("/user/tabular-reviews/export");
 }
 
 export type OrganisationRole = "admin" | "member";
 
 export interface OrganisationPolicies {
-  memberApiKeys: boolean;
-  memberMcpConnectors: boolean;
-  /** Firm allows members to set their own model preferences (WS8 PR F). */
-  memberModelPrefs: boolean;
+    memberApiKeys: boolean;
+    memberMcpConnectors: boolean;
+    /** Firm allows members to set their own model preferences (WS8 PR F). */
+    memberModelPrefs: boolean;
 }
 
 /**
@@ -227,8 +227,8 @@ export interface OrganisationPolicies {
  * any provider).
  */
 export interface OrganisationModelConfig {
-  defaultModel: string | null;
-  offeredProviders: string[];
+    defaultModel: string | null;
+    offeredProviders: string[];
 }
 
 /**
@@ -237,75 +237,79 @@ export interface OrganisationModelConfig {
  * `organisation` field (the user's self-entered firm name).
  */
 export interface OrganisationMembership {
-  id: string;
-  name: string;
-  role: OrganisationRole;
-  policies: OrganisationPolicies;
-  /** Firm model configuration (default model + offered providers) — PR F. */
-  modelConfig: OrganisationModelConfig;
-  /** Deletion governance (WS8 PR G): days a member's tombstoned item is held
-   *  before permanent purge. Admin-editable, server-clamped 1–365. */
-  retentionDays: number;
+    id: string;
+    name: string;
+    role: OrganisationRole;
+    policies: OrganisationPolicies;
+    /** Firm model configuration (default model + offered providers) — PR F. */
+    modelConfig: OrganisationModelConfig;
+    /** Deletion governance (WS8 PR G): days a member's tombstoned item is held
+     *  before permanent purge. Admin-editable, server-clamped 1–365. */
+    retentionDays: number;
 }
 
 export interface UserProfile {
-  displayName: string | null;
-  organisation: string | null;
-  firm: OrganisationMembership | null;
-  isAdmin: boolean;
-  messageCreditsUsed: number;
-  creditsResetDate: string;
-  creditsRemaining: number;
-  tier: string;
-  titleModel: string;
-  tabularModel: string;
-  mfaOnLogin: boolean;
-  apiKeyStatus: ApiKeyStatus;
+    displayName: string | null;
+    organisation: string | null;
+    firm: OrganisationMembership | null;
+    isAdmin: boolean;
+    messageCreditsUsed: number;
+    creditsResetDate: string;
+    creditsRemaining: number;
+    tier: string;
+    titleModel: string;
+    tabularModel: string;
+    mfaOnLogin: boolean;
+    apiKeyStatus: ApiKeyStatus;
 }
 
 export async function getUserProfile(
-  signal?: AbortSignal,
+    signal?: AbortSignal,
 ): Promise<UserProfile> {
-  return apiRequest<UserProfile>(
-    "/user/profile",
-    signal ? { signal } : undefined,
-  );
+    return apiRequest<UserProfile>(
+        "/user/profile",
+        signal ? { signal } : undefined,
+    );
 }
 
 export async function updateUserProfile(payload: {
-  displayName?: string | null;
-  organisation?: string | null;
-  titleModel?: string;
-  tabularModel?: string;
+    displayName?: string | null;
+    organisation?: string | null;
+    titleModel?: string;
+    tabularModel?: string;
 }): Promise<UserProfile> {
-  return apiRequest<UserProfile>("/user/profile", {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+    return apiRequest<UserProfile>("/user/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
 }
 
 export async function updateUserMfaOnLogin(
-  enabled: boolean,
+    enabled: boolean,
 ): Promise<UserProfile> {
-  return apiRequest<UserProfile>("/user/security/mfa-login", {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ enabled }),
-  });
+    return apiRequest<UserProfile>("/user/security/mfa-login", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+    });
 }
 
 export type ApiKeyProvider =
-  "claude" | "gemini" | "openai" | "openrouter" | "companies_house";
+    | "claude"
+    | "gemini"
+    | "openai"
+    | "openrouter"
+    | "companies_house";
 // "firm" = a firm-shared key provided by the user's organisation (WS8). A
 // personal key ("user") always takes priority over it.
 export type ApiKeySource = "user" | "firm" | "env" | null;
 export type ApiKeyState = Record<
-  ApiKeyProvider,
-  {
-    configured: boolean;
-    source: ApiKeySource;
-  }
+    ApiKeyProvider,
+    {
+        configured: boolean;
+        source: ApiKeySource;
+    }
 >;
 
 // Local / on-premises models have no per-user key — availability is a
@@ -315,26 +319,26 @@ export type ApiKeyState = Record<
 export type LocalModelStatus = { configured: boolean; models: string[] };
 
 export type ApiKeyStatus = Record<ApiKeyProvider, boolean> & {
-  sources?: Partial<Record<ApiKeyProvider, ApiKeySource>>;
-  local?: LocalModelStatus;
-  // Providers where a saved personal key is inert because the firm disabled
-  // personal keys (WS8 PR B). Not in use, but still removable.
-  inertPersonalKeys?: ApiKeyProvider[];
+    sources?: Partial<Record<ApiKeyProvider, ApiKeySource>>;
+    local?: LocalModelStatus;
+    // Providers where a saved personal key is inert because the firm disabled
+    // personal keys (WS8 PR B). Not in use, but still removable.
+    inertPersonalKeys?: ApiKeyProvider[];
 };
 
 export async function getApiKeyStatus(): Promise<ApiKeyStatus> {
-  return apiRequest<ApiKeyStatus>("/user/api-keys");
+    return apiRequest<ApiKeyStatus>("/user/api-keys");
 }
 
 export async function saveApiKey(
-  provider: ApiKeyProvider,
-  apiKey: string | null,
+    provider: ApiKeyProvider,
+    apiKey: string | null,
 ): Promise<ApiKeyStatus> {
-  return apiRequest<ApiKeyStatus>(`/user/api-keys/${provider}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ api_key: apiKey }),
-  });
+    return apiRequest<ApiKeyStatus>(`/user/api-keys/${provider}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: apiKey }),
+    });
 }
 
 // ── Firm administration (WS8) ──────────────────────────────────────────────
@@ -345,46 +349,46 @@ export async function saveApiKey(
 export type FirmApiKeyStatus = Record<ApiKeyProvider, boolean>;
 
 export interface FirmMember {
-  userId: string;
-  displayName: string | null;
-  email: string | null;
-  role: OrganisationRole;
-  createdAt: string | null;
+    userId: string;
+    displayName: string | null;
+    email: string | null;
+    role: OrganisationRole;
+    createdAt: string | null;
 }
 
 export async function getFirmApiKeyStatus(): Promise<FirmApiKeyStatus> {
-  return apiRequest<FirmApiKeyStatus>("/admin/firm-keys");
+    return apiRequest<FirmApiKeyStatus>("/admin/firm-keys");
 }
 
 export async function saveFirmApiKey(
-  provider: ApiKeyProvider,
-  apiKey: string | null,
+    provider: ApiKeyProvider,
+    apiKey: string | null,
 ): Promise<FirmApiKeyStatus> {
-  return apiRequest<FirmApiKeyStatus>(`/admin/firm-keys/${provider}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ api_key: apiKey }),
-  });
+    return apiRequest<FirmApiKeyStatus>(`/admin/firm-keys/${provider}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: apiKey }),
+    });
 }
 
 export async function getFirmMembers(): Promise<FirmMember[]> {
-  const data = await apiRequest<{ members: FirmMember[] }>("/admin/members");
-  return data.members;
+    const data = await apiRequest<{ members: FirmMember[] }>("/admin/members");
+    return data.members;
 }
 
 export async function updateFirmMemberRole(
-  userId: string,
-  role: OrganisationRole,
+    userId: string,
+    role: OrganisationRole,
 ): Promise<FirmMember> {
-  const data = await apiRequest<{ member: FirmMember }>(
-    `/admin/members/${userId}/role`,
-    {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ role }),
-    },
-  );
-  return data.member;
+    const data = await apiRequest<{ member: FirmMember }>(
+        `/admin/members/${userId}/role`,
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ role }),
+        },
+    );
+    return data.member;
 }
 
 /**
@@ -392,17 +396,17 @@ export async function updateFirmMemberRole(
  * changed; the server returns the resulting flags. Admin + MFA gated server-side.
  */
 export async function updateFirmPolicies(
-  patch: Partial<OrganisationPolicies>,
+    patch: Partial<OrganisationPolicies>,
 ): Promise<OrganisationPolicies> {
-  const data = await apiRequest<{ policies: OrganisationPolicies }>(
-    "/admin/policies",
-    {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(patch),
-    },
-  );
-  return data.policies;
+    const data = await apiRequest<{ policies: OrganisationPolicies }>(
+        "/admin/policies",
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(patch),
+        },
+    );
+    return data.policies;
 }
 
 // ── Deletion governance (WS8 PR G) ──────────────────────────────────────────
@@ -412,54 +416,61 @@ export async function updateFirmPolicies(
 // MFA-stepped-up server-side. See docs/DELETION_GOVERNANCE_SPEC.md.
 
 export type GovernedResourceType =
-  "project" | "document" | "chat" | "tabular-review" | "workflow";
+    | "project"
+    | "document"
+    | "chat"
+    | "tabular-review"
+    | "workflow";
 
 export interface PendingDeletion {
-  resourceType: GovernedResourceType;
-  id: string;
-  displayName: string | null;
-  deletedBy: string | null;
-  deletedAt: string | null;
-  daysRemaining: number;
+    resourceType: GovernedResourceType;
+    id: string;
+    displayName: string | null;
+    deletedBy: string | null;
+    deletedAt: string | null;
+    daysRemaining: number;
 }
 
 export async function getPendingDeletions(): Promise<PendingDeletion[]> {
-  const data = await apiRequest<{ items: PendingDeletion[] }>(
-    "/admin/pending-deletions",
-  );
-  return data.items;
+    const data = await apiRequest<{ items: PendingDeletion[] }>(
+        "/admin/pending-deletions",
+    );
+    return data.items;
 }
 
 export async function restorePendingDeletion(
-  resourceType: GovernedResourceType,
-  id: string,
+    resourceType: GovernedResourceType,
+    id: string,
 ): Promise<void> {
-  await apiRequest<void>(
-    `/admin/pending-deletions/${resourceType}/${id}/restore`,
-    { method: "POST" },
-  );
+    await apiRequest<void>(
+        `/admin/pending-deletions/${resourceType}/${id}/restore`,
+        { method: "POST" },
+    );
 }
 
 export async function expeditePendingDeletion(
-  resourceType: GovernedResourceType,
-  id: string,
+    resourceType: GovernedResourceType,
+    id: string,
 ): Promise<void> {
-  await apiRequest<void>(
-    `/admin/pending-deletions/${resourceType}/${id}/expedite`,
-    { method: "POST" },
-  );
+    await apiRequest<void>(
+        `/admin/pending-deletions/${resourceType}/${id}/expedite`,
+        { method: "POST" },
+    );
 }
 
 /** Set the firm's soft-delete retention window (days). Server-clamped 1–365. */
 export async function updateFirmRetention(
-  retentionDays: number,
+    retentionDays: number,
 ): Promise<number> {
-  const data = await apiRequest<{ retentionDays: number }>("/admin/retention", {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ retentionDays }),
-  });
-  return data.retentionDays;
+    const data = await apiRequest<{ retentionDays: number }>(
+        "/admin/retention",
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ retentionDays }),
+        },
+    );
+    return data.retentionDays;
 }
 
 // ── Firm usage dashboard (WS8 PR D) ─────────────────────────────────────────
@@ -468,228 +479,228 @@ export async function updateFirmRetention(
 // trend; the workflow-template table always reports both a 7d and a 30d column.
 
 export interface FirmUsageTotals {
-  activeMembers: number;
-  totalMembers: number;
-  chats: number;
-  workflowRuns: number;
-  documents: number;
+    activeMembers: number;
+    totalMembers: number;
+    chats: number;
+    workflowRuns: number;
+    documents: number;
 }
 
 export interface FirmUsageMember {
-  userId: string;
-  displayName: string | null;
-  email: string | null;
-  /** ISO timestamp of the member's most recent activity, or null. */
-  lastActive: string | null;
-  chats: number;
-  workflowRuns: number;
+    userId: string;
+    displayName: string | null;
+    email: string | null;
+    /** ISO timestamp of the member's most recent activity, or null. */
+    lastActive: string | null;
+    chats: number;
+    workflowRuns: number;
 }
 
 export interface FirmUsageWorkflow {
-  workflowId: string;
-  title: string;
-  runs7d: number;
-  runs30d: number;
-  /** ISO timestamp of the most recent run, or null. */
-  lastRun: string | null;
+    workflowId: string;
+    title: string;
+    runs7d: number;
+    runs30d: number;
+    /** ISO timestamp of the most recent run, or null. */
+    lastRun: string | null;
 }
 
 export interface FirmUsageDailyPoint {
-  /** UTC calendar day, YYYY-MM-DD. */
-  date: string;
-  chats: number;
+    /** UTC calendar day, YYYY-MM-DD. */
+    date: string;
+    chats: number;
 }
 
 export interface FirmUsage {
-  period: { days: number; since: string; until: string };
-  totals: FirmUsageTotals;
-  members: FirmUsageMember[];
-  workflows: FirmUsageWorkflow[];
-  daily: FirmUsageDailyPoint[];
+    period: { days: number; since: string; until: string };
+    totals: FirmUsageTotals;
+    members: FirmUsageMember[];
+    workflows: FirmUsageWorkflow[];
+    daily: FirmUsageDailyPoint[];
 }
 
 export async function getFirmUsage(
-  days: number,
-  signal?: AbortSignal,
+    days: number,
+    signal?: AbortSignal,
 ): Promise<FirmUsage> {
-  return apiRequest<FirmUsage>(
-    `/admin/usage?days=${encodeURIComponent(days)}`,
-    signal ? { signal } : undefined,
-  );
+    return apiRequest<FirmUsage>(
+        `/admin/usage?days=${encodeURIComponent(days)}`,
+        signal ? { signal } : undefined,
+    );
 }
 
 export interface McpToolSummary {
-  id: string;
-  toolName: string;
-  openaiToolName: string;
-  title: string | null;
-  description: string | null;
-  enabled: boolean;
-  readOnly: boolean;
-  destructive: boolean;
-  requiresConfirmation: boolean;
-  lastSeenAt: string;
+    id: string;
+    toolName: string;
+    openaiToolName: string;
+    title: string | null;
+    description: string | null;
+    enabled: boolean;
+    readOnly: boolean;
+    destructive: boolean;
+    requiresConfirmation: boolean;
+    lastSeenAt: string;
 }
 
 export interface McpConnectorSummary {
-  id: string;
-  name: string;
-  transport: "streamable_http";
-  serverUrl: string;
-  authType: "none" | "bearer" | "oauth";
-  enabled: boolean;
-  hasAuthConfig: boolean;
-  customHeaderKeys: string[];
-  oauthConnected: boolean;
-  toolPolicy: Record<string, unknown>;
-  tools: McpToolSummary[];
-  toolCount: number;
-  createdAt: string;
-  updatedAt: string;
+    id: string;
+    name: string;
+    transport: "streamable_http";
+    serverUrl: string;
+    authType: "none" | "bearer" | "oauth";
+    enabled: boolean;
+    hasAuthConfig: boolean;
+    customHeaderKeys: string[];
+    oauthConnected: boolean;
+    toolPolicy: Record<string, unknown>;
+    tools: McpToolSummary[];
+    toolCount: number;
+    createdAt: string;
+    updatedAt: string;
 }
 
 export async function listMcpConnectors(): Promise<McpConnectorSummary[]> {
-  return apiRequest<McpConnectorSummary[]>("/user/mcp-connectors");
+    return apiRequest<McpConnectorSummary[]>("/user/mcp-connectors");
 }
 
 export async function getMcpConnector(
-  connectorId: string,
+    connectorId: string,
 ): Promise<McpConnectorSummary> {
-  return apiRequest<McpConnectorSummary>(`/user/mcp-connectors/${connectorId}`);
+    return apiRequest<McpConnectorSummary>(
+        `/user/mcp-connectors/${connectorId}`,
+    );
 }
 
 export async function createMcpConnector(payload: {
-  name: string;
-  serverUrl: string;
-  bearerToken?: string | null;
-  headers?: Record<string, string>;
+    name: string;
+    serverUrl: string;
+    bearerToken?: string | null;
+    headers?: Record<string, string>;
 }): Promise<McpConnectorSummary> {
-  return apiRequest<McpConnectorSummary>("/user/mcp-connectors", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+    return apiRequest<McpConnectorSummary>("/user/mcp-connectors", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
 }
 
 export async function updateMcpConnector(
-  connectorId: string,
-  payload: {
-    name?: string;
-    serverUrl?: string;
-    enabled?: boolean;
-    bearerToken?: string | null;
-    headers?: Record<string, string>;
-  },
-): Promise<McpConnectorSummary> {
-  return apiRequest<McpConnectorSummary>(
-    `/user/mcp-connectors/${connectorId}`,
-    {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+    connectorId: string,
+    payload: {
+        name?: string;
+        serverUrl?: string;
+        enabled?: boolean;
+        bearerToken?: string | null;
+        headers?: Record<string, string>;
     },
-  );
+): Promise<McpConnectorSummary> {
+    return apiRequest<McpConnectorSummary>(
+        `/user/mcp-connectors/${connectorId}`,
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        },
+    );
 }
 
 export async function deleteMcpConnector(connectorId: string): Promise<void> {
-  return apiRequest<void>(`/user/mcp-connectors/${connectorId}`, {
-    method: "DELETE",
-  });
+    return apiRequest<void>(`/user/mcp-connectors/${connectorId}`, {
+        method: "DELETE",
+    });
 }
 
 export async function refreshMcpConnectorTools(
-  connectorId: string,
+    connectorId: string,
 ): Promise<McpConnectorSummary> {
-  return apiRequest<McpConnectorSummary>(
-    `/user/mcp-connectors/${connectorId}/refresh-tools`,
-    { method: "POST" },
-  );
+    return apiRequest<McpConnectorSummary>(
+        `/user/mcp-connectors/${connectorId}/refresh-tools`,
+        { method: "POST" },
+    );
 }
 
 export async function startMcpConnectorOAuth(
-  connectorId: string,
+    connectorId: string,
 ): Promise<{ authorizationUrl: string | null; alreadyAuthorized: boolean }> {
-  return apiRequest<{
-    authorizationUrl: string | null;
-    alreadyAuthorized: boolean;
-  }>(`/user/mcp-connectors/${connectorId}/oauth/start`, { method: "POST" });
+    return apiRequest<{ authorizationUrl: string | null; alreadyAuthorized: boolean }>(
+        `/user/mcp-connectors/${connectorId}/oauth/start`,
+        { method: "POST" },
+    );
 }
 
 export async function setMcpToolEnabled(
-  connectorId: string,
-  toolId: string,
-  enabled: boolean,
+    connectorId: string,
+    toolId: string,
+    enabled: boolean,
 ): Promise<McpConnectorSummary> {
-  return apiRequest<McpConnectorSummary>(
-    `/user/mcp-connectors/${connectorId}/tools/${toolId}`,
-    {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled }),
-    },
-  );
+    return apiRequest<McpConnectorSummary>(
+        `/user/mcp-connectors/${connectorId}/tools/${toolId}`,
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ enabled }),
+        },
+    );
 }
 
 // ── Connector gallery (WS8 PR E) ────────────────────────────────────────────
 
 export type ConnectorAvailability = "oauth" | "custom";
 export type GalleryConnectionStatus =
-  "connected" | "not_connected" | "connection_issue";
+    | "connected"
+    | "not_connected"
+    | "connection_issue";
 
 export interface ConnectorGalleryItem {
-  key: string;
-  /** Registry slug for a shortlist entry; null for a bare custom connector. */
-  registryId: string | null;
-  /** The caller's connector row id when they have one. */
-  connectorId: string | null;
-  name: string;
-  description: string;
-  category: string;
-  popular: boolean;
-  availability: ConnectorAvailability;
-  /** True → show a one-click "Connect" affordance. */
-  connectable: boolean;
-  status: GalleryConnectionStatus;
+    key: string;
+    /** Registry slug for a shortlist entry; null for a bare custom connector. */
+    registryId: string | null;
+    /** The caller's connector row id when they have one. */
+    connectorId: string | null;
+    name: string;
+    description: string;
+    category: string;
+    popular: boolean;
+    availability: ConnectorAvailability;
+    /** True → show a one-click "Connect" affordance. */
+    connectable: boolean;
+    status: GalleryConnectionStatus;
 }
 
 export async function getConnectorGallery(): Promise<ConnectorGalleryItem[]> {
-  const data = await apiRequest<{ items: ConnectorGalleryItem[] }>(
-    "/user/connector-gallery",
-  );
-  return data.items;
+    const data = await apiRequest<{ items: ConnectorGalleryItem[] }>(
+        "/user/connector-gallery",
+    );
+    return data.items;
 }
 
 /** Start a one-click connect for a registry entry (create + begin OAuth). */
 export async function connectGalleryConnector(registryId: string): Promise<{
-  connectorId: string;
-  authorizationUrl: string | null;
-  alreadyAuthorized: boolean;
+    connectorId: string;
+    authorizationUrl: string | null;
+    alreadyAuthorized: boolean;
 }> {
-  return apiRequest(
-    `/user/connector-gallery/${encodeURIComponent(registryId)}/connect`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: "{}",
-    },
-  );
+    return apiRequest(
+        `/user/connector-gallery/${encodeURIComponent(registryId)}/connect`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+    );
 }
 
 /** Admin view of the registry for firm curation. No server URLs / secrets. */
 export interface ConnectorRegistryAdminEntry {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  popular: boolean;
-  availability: ConnectorAvailability;
+    id: string;
+    name: string;
+    description: string;
+    category: string;
+    popular: boolean;
+    availability: ConnectorAvailability;
 }
 
 export async function getConnectorGalleryCuration(): Promise<{
-  registry: ConnectorRegistryAdminEntry[];
-  enabledConnectorIds: string[];
+    registry: ConnectorRegistryAdminEntry[];
+    enabledConnectorIds: string[];
 }> {
-  return apiRequest("/admin/connector-gallery");
+    return apiRequest("/admin/connector-gallery");
 }
 
 /**
@@ -697,27 +708,27 @@ export async function getConnectorGalleryCuration(): Promise<{
  * visible" (the documented default). Admin + MFA gated server-side.
  */
 export async function updateConnectorGalleryCuration(
-  enabledConnectorIds: string[],
+    enabledConnectorIds: string[],
 ): Promise<string[]> {
-  const data = await apiRequest<{ enabledConnectorIds: string[] }>(
-    "/admin/connector-gallery",
-    {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabledConnectorIds }),
-    },
-  );
-  return data.enabledConnectorIds;
+    const data = await apiRequest<{ enabledConnectorIds: string[] }>(
+        "/admin/connector-gallery",
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ enabledConnectorIds }),
+        },
+    );
+    return data.enabledConnectorIds;
 }
 
 // ── Firm model configuration (WS8 PR F) ─────────────────────────────────────
 // GET/PATCH /admin/model-config — admin-gated (+ MFA on writes) server-side.
 
 export async function getFirmModelConfig(): Promise<OrganisationModelConfig> {
-  const data = await apiRequest<{ modelConfig: OrganisationModelConfig }>(
-    "/admin/model-config",
-  );
-  return data.modelConfig;
+    const data = await apiRequest<{ modelConfig: OrganisationModelConfig }>(
+        "/admin/model-config",
+    );
+    return data.modelConfig;
 }
 
 /**
@@ -726,56 +737,56 @@ export async function getFirmModelConfig(): Promise<OrganisationModelConfig> {
  * returns the resulting config.
  */
 export async function updateFirmModelConfig(patch: {
-  defaultModel?: string | null;
-  offeredProviders?: string[] | null;
+    defaultModel?: string | null;
+    offeredProviders?: string[] | null;
 }): Promise<OrganisationModelConfig> {
-  const data = await apiRequest<{ modelConfig: OrganisationModelConfig }>(
-    "/admin/model-config",
-    {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(patch),
-    },
-  );
-  return data.modelConfig;
+    const data = await apiRequest<{ modelConfig: OrganisationModelConfig }>(
+        "/admin/model-config",
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(patch),
+        },
+    );
+    return data.modelConfig;
 }
 
 export async function getProject(projectId: string): Promise<Project> {
-  return apiRequest<Project>(`/projects/${projectId}`);
+    return apiRequest<Project>(`/projects/${projectId}`);
 }
 
 export async function updateProject(
-  projectId: string,
-  payload: {
-    name?: string;
-    cm_number?: string;
-    shared_with?: string[];
-  },
+    projectId: string,
+    payload: {
+        name?: string;
+        cm_number?: string;
+        shared_with?: string[];
+    },
 ): Promise<Project> {
-  return apiRequest<Project>(`/projects/${projectId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+    return apiRequest<Project>(`/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
 }
 
 export async function deleteProject(projectId: string): Promise<void> {
-  await apiRequest(`/projects/${projectId}`, { method: "DELETE" });
+    await apiRequest(`/projects/${projectId}`, { method: "DELETE" });
 }
 
 export interface ProjectPeople {
-  owner: {
-    user_id: string;
-    email: string | null;
-    display_name: string | null;
-  };
-  members: { email: string; display_name: string | null }[];
+    owner: {
+        user_id: string;
+        email: string | null;
+        display_name: string | null;
+    };
+    members: { email: string; display_name: string | null }[];
 }
 
 export async function getProjectPeople(
-  projectId: string,
+    projectId: string,
 ): Promise<ProjectPeople> {
-  return apiRequest<ProjectPeople>(`/projects/${projectId}/people`);
+    return apiRequest<ProjectPeople>(`/projects/${projectId}/people`);
 }
 
 // ---------------------------------------------------------------------------
@@ -787,264 +798,275 @@ export async function getProjectPeople(
 // ---------------------------------------------------------------------------
 
 export async function createProjectFolder(
-  projectId: string,
-  name: string,
-  parentFolderId?: string | null,
+    projectId: string,
+    name: string,
+    parentFolderId?: string | null,
 ): Promise<Folder> {
-  return apiRequest<Folder>(`/projects/${projectId}/folders`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      name,
-      parent_folder_id: parentFolderId ?? null,
-    }),
-  });
+    return apiRequest<Folder>(`/projects/${projectId}/folders`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            name,
+            parent_folder_id: parentFolderId ?? null,
+        }),
+    });
 }
 
 export async function renameProjectFolder(
-  projectId: string,
-  folderId: string,
-  name: string,
+    projectId: string,
+    folderId: string,
+    name: string,
 ): Promise<Folder> {
-  return apiRequest<Folder>(`/projects/${projectId}/folders/${folderId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
-  });
+    return apiRequest<Folder>(
+        `/projects/${projectId}/folders/${folderId}`,
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name }),
+        },
+    );
 }
 
 export async function deleteProjectFolder(
-  projectId: string,
-  folderId: string,
+    projectId: string,
+    folderId: string,
 ): Promise<void> {
-  await apiRequest(`/projects/${projectId}/folders/${folderId}`, {
-    method: "DELETE",
-  });
+    await apiRequest(`/projects/${projectId}/folders/${folderId}`, {
+        method: "DELETE",
+    });
 }
 
 export async function moveSubfolderToFolder(
-  projectId: string,
-  folderId: string,
-  parentFolderId: string | null,
+    projectId: string,
+    folderId: string,
+    parentFolderId: string | null,
 ): Promise<Folder> {
-  return apiRequest<Folder>(`/projects/${projectId}/folders/${folderId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ parent_folder_id: parentFolderId }),
-  });
+    return apiRequest<Folder>(
+        `/projects/${projectId}/folders/${folderId}`,
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ parent_folder_id: parentFolderId }),
+        },
+    );
 }
 
 export async function moveDocumentToFolder(
-  projectId: string,
-  documentId: string,
-  folderId: string | null,
+    projectId: string,
+    documentId: string,
+    folderId: string | null,
 ): Promise<Document> {
-  return apiRequest<Document>(
-    `/projects/${projectId}/documents/${documentId}/folder`,
-    {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folder_id: folderId }),
-    },
-  );
+    return apiRequest<Document>(
+        `/projects/${projectId}/documents/${documentId}/folder`,
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ folder_id: folderId }),
+        },
+    );
 }
 
 export async function renameProjectDocument(
-  projectId: string,
-  documentId: string,
-  filename: string,
+    projectId: string,
+    documentId: string,
+    filename: string,
 ): Promise<Document> {
-  return apiRequest<Document>(
-    `/projects/${projectId}/documents/${documentId}`,
-    {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ filename }),
-    },
-  );
+    return apiRequest<Document>(
+        `/projects/${projectId}/documents/${documentId}`,
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ filename }),
+        },
+    );
 }
 
 export async function addDocumentToProject(
-  projectId: string,
-  documentId: string,
+    projectId: string,
+    documentId: string,
 ): Promise<Document> {
-  return apiRequest<Document>(
-    `/projects/${projectId}/documents/${documentId}`,
-    { method: "POST" },
-  );
+    return apiRequest<Document>(
+        `/projects/${projectId}/documents/${documentId}`,
+        { method: "POST" },
+    );
 }
 
 export interface DocumentVersion {
-  id: string;
-  version_number: number | null;
-  source: string;
-  created_at: string;
-  filename: string | null;
-  file_type?: string | null;
-  size_bytes?: number | null;
-  page_count?: number | null;
-  deleted_at?: string | null;
-  deleted_by?: string | null;
+    id: string;
+    version_number: number | null;
+    source: string;
+    created_at: string;
+    filename: string | null;
+    file_type?: string | null;
+    size_bytes?: number | null;
+    page_count?: number | null;
+    deleted_at?: string | null;
+    deleted_by?: string | null;
 }
 
 export async function listDocumentVersions(documentId: string): Promise<{
-  current_version_id: string | null;
-  versions: DocumentVersion[];
+    current_version_id: string | null;
+    versions: DocumentVersion[];
 }> {
-  return apiRequest(`/single-documents/${documentId}/versions`);
+    return apiRequest(`/single-documents/${documentId}/versions`);
 }
 
 export async function uploadDocumentVersion(
-  documentId: string,
-  file: File,
-  filename?: string,
+    documentId: string,
+    file: File,
+    filename?: string,
 ): Promise<DocumentVersion> {
-  const authHeaders = await getAuthHeader();
-  const form = new FormData();
-  form.append("file", file);
-  if (filename) form.append("filename", filename);
-  const response = await fetch(
-    `${API_BASE}/single-documents/${documentId}/versions`,
-    {
-      method: "POST",
-      headers: { ...authHeaders },
-      body: form,
-    },
-  );
-  if (!response.ok) throw new Error(await response.text());
-  return response.json() as Promise<DocumentVersion>;
+    const authHeaders = await getAuthHeader();
+    const form = new FormData();
+    form.append("file", file);
+    if (filename) form.append("filename", filename);
+    const response = await fetch(
+        `${API_BASE}/single-documents/${documentId}/versions`,
+        {
+            method: "POST",
+            headers: { ...authHeaders },
+            body: form,
+        },
+    );
+    if (!response.ok) throw new Error(await response.text());
+    return response.json() as Promise<DocumentVersion>;
 }
 
 export async function replaceDocumentVersionFile(
-  documentId: string,
-  versionId: string,
-  file: File,
-  filename?: string,
+    documentId: string,
+    versionId: string,
+    file: File,
+    filename?: string,
 ): Promise<DocumentVersion> {
-  const authHeaders = await getAuthHeader();
-  const form = new FormData();
-  form.append("file", file);
-  if (filename) form.append("filename", filename);
-  const response = await fetch(
-    `${API_BASE}/single-documents/${documentId}/versions/${versionId}/file`,
-    {
-      method: "PUT",
-      headers: { ...authHeaders },
-      body: form,
-    },
-  );
-  if (!response.ok) throw new Error(await response.text());
-  return response.json() as Promise<DocumentVersion>;
+    const authHeaders = await getAuthHeader();
+    const form = new FormData();
+    form.append("file", file);
+    if (filename) form.append("filename", filename);
+    const response = await fetch(
+        `${API_BASE}/single-documents/${documentId}/versions/${versionId}/file`,
+        {
+            method: "PUT",
+            headers: { ...authHeaders },
+            body: form,
+        },
+    );
+    if (!response.ok) throw new Error(await response.text());
+    return response.json() as Promise<DocumentVersion>;
 }
 
 export async function copyDocumentVersionFromDocument(
-  documentId: string,
-  sourceDocumentId: string,
-  filename?: string,
+    documentId: string,
+    sourceDocumentId: string,
+    filename?: string,
 ): Promise<DocumentVersion> {
-  return apiRequest<DocumentVersion>(
-    `/single-documents/${documentId}/versions/from-document`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        source_document_id: sourceDocumentId,
-        filename,
-      }),
-    },
-  );
+    return apiRequest<DocumentVersion>(
+        `/single-documents/${documentId}/versions/from-document`,
+        {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                source_document_id: sourceDocumentId,
+                filename,
+            }),
+        },
+    );
 }
 
 export async function renameDocumentVersion(
-  documentId: string,
-  versionId: string,
-  filename: string | null,
+    documentId: string,
+    versionId: string,
+    filename: string | null,
 ): Promise<DocumentVersion> {
-  return apiRequest<DocumentVersion>(
-    `/single-documents/${documentId}/versions/${versionId}`,
-    {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ filename }),
-    },
-  );
+    return apiRequest<DocumentVersion>(
+        `/single-documents/${documentId}/versions/${versionId}`,
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ filename }),
+        },
+    );
 }
 
 export async function deleteDocumentVersion(
-  documentId: string,
-  versionId: string,
+    documentId: string,
+    versionId: string,
 ): Promise<{
-  deleted_version_id: string;
-  current_version_id: string | null;
+    deleted_version_id: string;
+    current_version_id: string | null;
 }> {
-  return apiRequest(`/single-documents/${documentId}/versions/${versionId}`, {
-    method: "DELETE",
-  });
+    return apiRequest(`/single-documents/${documentId}/versions/${versionId}`, {
+        method: "DELETE",
+    });
 }
 
 export async function uploadProjectDocument(
-  projectId: string,
-  file: File,
+    projectId: string,
+    file: File,
 ): Promise<Document> {
-  const authHeaders = await getAuthHeader();
-  const form = new FormData();
-  form.append("file", file);
-  const response = await fetch(`${API_BASE}/projects/${projectId}/documents`, {
-    method: "POST",
-    headers: { ...authHeaders },
-    body: form,
-  });
-  if (!response.ok) throw new Error(await response.text());
-  return response.json() as Promise<Document>;
+    const authHeaders = await getAuthHeader();
+    const form = new FormData();
+    form.append("file", file);
+    const response = await fetch(
+        `${API_BASE}/projects/${projectId}/documents`,
+        {
+            method: "POST",
+            headers: { ...authHeaders },
+            body: form,
+        },
+    );
+    if (!response.ok) throw new Error(await response.text());
+    return response.json() as Promise<Document>;
 }
 
-export async function uploadStandaloneDocument(file: File): Promise<Document> {
-  const authHeaders = await getAuthHeader();
-  const form = new FormData();
-  form.append("file", file);
-  const response = await fetch(`${API_BASE}/single-documents`, {
-    method: "POST",
-    headers: { ...authHeaders },
-    body: form,
-  });
-  if (!response.ok) throw new Error(await response.text());
-  return response.json() as Promise<Document>;
+export async function uploadStandaloneDocument(
+    file: File,
+): Promise<Document> {
+    const authHeaders = await getAuthHeader();
+    const form = new FormData();
+    form.append("file", file);
+    const response = await fetch(`${API_BASE}/single-documents`, {
+        method: "POST",
+        headers: { ...authHeaders },
+        body: form,
+    });
+    if (!response.ok) throw new Error(await response.text());
+    return response.json() as Promise<Document>;
 }
 
 export async function listStandaloneDocuments(): Promise<Document[]> {
-  return apiRequest<Document[]>("/single-documents");
+    return apiRequest<Document[]>("/single-documents");
 }
 
 export async function deleteDocument(documentId: string): Promise<void> {
-  await apiRequest(`/single-documents/${documentId}`, { method: "DELETE" });
+    await apiRequest(`/single-documents/${documentId}`, { method: "DELETE" });
 }
 
 export async function getDocumentUrl(
-  documentId: string,
-  versionId?: string | null,
+    documentId: string,
+    versionId?: string | null,
 ): Promise<{ url: string; filename: string; version_id: string | null }> {
-  const qs = versionId ? `?version_id=${encodeURIComponent(versionId)}` : "";
-  return apiRequest(`/single-documents/${documentId}/url${qs}`);
+    const qs = versionId ? `?version_id=${encodeURIComponent(versionId)}` : "";
+    return apiRequest(`/single-documents/${documentId}/url${qs}`);
 }
 
 export async function downloadDocumentsZip(
-  documentIds: string[],
+    documentIds: string[],
 ): Promise<Blob> {
-  const authHeaders = await getAuthHeader();
-  const response = await fetch(`${API_BASE}/single-documents/download-zip`, {
-    method: "POST",
-    cache: "no-store",
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders,
-    },
-    body: JSON.stringify({ document_ids: documentIds }),
-  });
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(detail || `API error: ${response.status}`);
-  }
-  return response.blob();
+    const authHeaders = await getAuthHeader();
+    const response = await fetch(`${API_BASE}/single-documents/download-zip`, {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+            "Content-Type": "application/json",
+            ...authHeaders,
+        },
+        body: JSON.stringify({ document_ids: documentIds }),
+    });
+    if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(detail || `API error: ${response.status}`);
+    }
+    return response.blob();
 }
 
 // ---------------------------------------------------------------------------
@@ -1052,131 +1074,132 @@ export async function downloadDocumentsZip(
 // ---------------------------------------------------------------------------
 
 export async function createChat(payload?: {
-  project_id?: string;
+    project_id?: string;
 }): Promise<{ id: string }> {
-  return apiRequest<{ id: string }>("/chat/create", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload ?? {}),
-  });
+    return apiRequest<{ id: string }>("/chat/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload ?? {}),
+    });
 }
 
 export async function listChats(options?: { limit?: number }): Promise<Chat[]> {
-  const params = new URLSearchParams();
-  if (options?.limit) params.set("limit", String(options.limit));
-  const query = params.toString();
-  return apiRequest<Chat[]>(`/chat${query ? `?${query}` : ""}`);
+    const params = new URLSearchParams();
+    if (options?.limit) params.set("limit", String(options.limit));
+    const query = params.toString();
+    return apiRequest<Chat[]>(`/chat${query ? `?${query}` : ""}`);
 }
 
 export async function listProjectChats(projectId: string): Promise<Chat[]> {
-  return apiRequest<Chat[]>(`/projects/${projectId}/chats`);
+    return apiRequest<Chat[]>(`/projects/${projectId}/chats`);
 }
 
 export async function getChat(chatId: string): Promise<ChatDetailOut> {
-  const raw = await apiRequest<ServerChatDetailOut>(`/chat/${chatId}`);
-  const messages: Message[] = raw.messages.map((m) => {
-    if (m.role === "user") {
-      return {
-        role: "user",
-        content: typeof m.content === "string" ? m.content : "",
-        files: m.files ?? undefined,
-        workflow: m.workflow ?? undefined,
-      };
-    }
-    const events = Array.isArray(m.content)
-      ? (m.content as AssistantEvent[])
-      : undefined;
-    return {
-      role: "assistant",
-      content:
-        events
-          ?.filter((e) => e.type === "content")
-          .map((e) => (e as { type: "content"; text: string }).text)
-          .join("") ?? "",
-      annotations: m.annotations ?? undefined,
-      events,
-    };
-  });
-  return { chat: raw.chat, messages };
+    const raw = await apiRequest<ServerChatDetailOut>(`/chat/${chatId}`);
+    const messages: Message[] = raw.messages.map((m) => {
+        if (m.role === "user") {
+            return {
+                role: "user",
+                content: typeof m.content === "string" ? m.content : "",
+                files: m.files ?? undefined,
+                workflow: m.workflow ?? undefined,
+            };
+        }
+        const events = Array.isArray(m.content)
+            ? (m.content as AssistantEvent[])
+            : undefined;
+        return {
+            role: "assistant",
+            content:
+                events
+                    ?.filter((e) => e.type === "content")
+                    .map((e) => (e as { type: "content"; text: string }).text)
+                    .join("") ?? "",
+            annotations: m.annotations ?? undefined,
+            events,
+        };
+    });
+    return { chat: raw.chat, messages };
 }
 
 export async function renameChat(chatId: string, title: string): Promise<void> {
-  await apiRequest(`/chat/${chatId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title }),
-  });
+    await apiRequest(`/chat/${chatId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+    });
 }
 
 export async function deleteChat(chatId: string): Promise<void> {
-  await apiRequest(`/chat/${chatId}`, { method: "DELETE" });
+    await apiRequest(`/chat/${chatId}`, { method: "DELETE" });
 }
 
 export async function generateChatTitle(
-  chatId: string,
-  message: string,
+    chatId: string,
+    message: string,
 ): Promise<{ title: string }> {
-  return apiRequest<{ title: string }>(`/chat/${chatId}/generate-title`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }),
-  });
+    return apiRequest<{ title: string }>(`/chat/${chatId}/generate-title`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+    });
 }
 
+
 export async function streamChat(payload: {
-  messages: {
+    messages: {
+        role: string;
+        content: string;
+        files?: { filename: string; document_id?: string }[];
+        workflow?: { id: string; title: string };
+    }[];
+    chat_id?: string;
+    project_id?: string;
+    model?: string;
+    signal?: AbortSignal;
+}): Promise<Response> {
+    const { signal, ...body } = payload;
+    const authHeaders = await getAuthHeader();
+    return fetch(`${API_BASE}/chat`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
+            ...authHeaders,
+        },
+        body: JSON.stringify(body),
+        signal,
+    });
+}
+
+type StreamChatMessage = {
     role: string;
     content: string;
     files?: { filename: string; document_id?: string }[];
     workflow?: { id: string; title: string };
-  }[];
-  chat_id?: string;
-  project_id?: string;
-  model?: string;
-  signal?: AbortSignal;
-}): Promise<Response> {
-  const { signal, ...body } = payload;
-  const authHeaders = await getAuthHeader();
-  return fetch(`${API_BASE}/chat`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "text/event-stream",
-      ...authHeaders,
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
-}
-
-type StreamChatMessage = {
-  role: string;
-  content: string;
-  files?: { filename: string; document_id?: string }[];
-  workflow?: { id: string; title: string };
 };
 
 export async function streamProjectChat(payload: {
-  projectId: string;
-  messages: StreamChatMessage[];
-  chat_id?: string;
-  model?: string;
-  displayed_doc?: { filename: string; document_id: string };
-  attached_documents?: { filename: string; document_id: string }[];
-  signal?: AbortSignal;
+    projectId: string;
+    messages: StreamChatMessage[];
+    chat_id?: string;
+    model?: string;
+    displayed_doc?: { filename: string; document_id: string };
+    attached_documents?: { filename: string; document_id: string }[];
+    signal?: AbortSignal;
 }): Promise<Response> {
-  const { projectId, signal, ...body } = payload;
-  const authHeaders = await getAuthHeader();
-  return fetch(`${API_BASE}/projects/${projectId}/chat`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "text/event-stream",
-      ...authHeaders,
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
+    const { projectId, signal, ...body } = payload;
+    const authHeaders = await getAuthHeader();
+    return fetch(`${API_BASE}/projects/${projectId}/chat`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
+            ...authHeaders,
+        },
+        body: JSON.stringify(body),
+        signal,
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -1184,238 +1207,238 @@ export async function streamProjectChat(payload: {
 // ---------------------------------------------------------------------------
 
 export async function listTabularReviews(
-  projectId?: string,
+    projectId?: string,
 ): Promise<TabularReview[]> {
-  const qs = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
-  return apiRequest<TabularReview[]>(`/tabular-review${qs}`);
+    const qs = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
+    return apiRequest<TabularReview[]>(`/tabular-review${qs}`);
 }
 
 export async function createTabularReview(payload: {
-  title?: string;
-  document_ids: string[];
-  columns_config: { index: number; name: string; prompt: string }[];
-  workflow_id?: string;
-  project_id?: string;
+    title?: string;
+    document_ids: string[];
+    columns_config: { index: number; name: string; prompt: string }[];
+    workflow_id?: string;
+    project_id?: string;
 }): Promise<TabularReview> {
-  return apiRequest<TabularReview>("/tabular-review", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+    return apiRequest<TabularReview>("/tabular-review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
 }
 
 export async function getTabularReview(
-  reviewId: string,
+    reviewId: string,
 ): Promise<TabularReviewDetailOut> {
-  return apiRequest<TabularReviewDetailOut>(`/tabular-review/${reviewId}`);
+    return apiRequest<TabularReviewDetailOut>(`/tabular-review/${reviewId}`);
 }
 
 export async function updateTabularReview(
-  reviewId: string,
-  payload: {
-    title?: string;
-    columns_config?: { index: number; name: string; prompt: string }[];
-    document_ids?: string[];
-    project_id?: string | null;
-    shared_with?: string[];
-  },
+    reviewId: string,
+    payload: {
+        title?: string;
+        columns_config?: { index: number; name: string; prompt: string }[];
+        document_ids?: string[];
+        project_id?: string | null;
+        shared_with?: string[];
+    },
 ): Promise<TabularReview> {
-  return apiRequest<TabularReview>(`/tabular-review/${reviewId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+    return apiRequest<TabularReview>(`/tabular-review/${reviewId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
 }
 
 export async function getTabularReviewPeople(
-  reviewId: string,
+    reviewId: string,
 ): Promise<ProjectPeople> {
-  return apiRequest<ProjectPeople>(`/tabular-review/${reviewId}/people`);
+    return apiRequest<ProjectPeople>(`/tabular-review/${reviewId}/people`);
 }
 
 export async function generateTabularColumnPrompt(
-  title: string,
-  options?: { format?: string; documentName?: string; tags?: string[] },
+    title: string,
+    options?: { format?: string; documentName?: string; tags?: string[] },
 ): Promise<{ prompt: string; source: "preset" | "llm" | "fallback" }> {
-  return apiRequest<{
-    prompt: string;
-    source: "preset" | "llm" | "fallback";
-  }>("/tabular-review/prompt", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      title,
-      format: options?.format,
-      documentName: options?.documentName,
-      tags: options?.tags,
-    }),
-  });
+    return apiRequest<{
+        prompt: string;
+        source: "preset" | "llm" | "fallback";
+    }>("/tabular-review/prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            title,
+            format: options?.format,
+            documentName: options?.documentName,
+            tags: options?.tags,
+        }),
+    });
 }
 
 export async function uploadReviewDocument(
-  reviewId: string,
-  file: File,
-  options?: {
-    projectId?: string;
-    documentIds?: string[];
-    columnsConfig?: { index: number; name: string; prompt: string }[];
-  },
+    reviewId: string,
+    file: File,
+    options?: {
+        projectId?: string;
+        documentIds?: string[];
+        columnsConfig?: { index: number; name: string; prompt: string }[];
+    },
 ): Promise<Document> {
-  const uploaded = options?.projectId
-    ? await uploadProjectDocument(options.projectId, file)
-    : await uploadStandaloneDocument(file);
+    const uploaded = options?.projectId
+        ? await uploadProjectDocument(options.projectId, file)
+        : await uploadStandaloneDocument(file);
 
-  await updateTabularReview(reviewId, {
-    columns_config: options?.columnsConfig,
-    document_ids: [...(options?.documentIds ?? []), uploaded.id],
-  });
+    await updateTabularReview(reviewId, {
+        columns_config: options?.columnsConfig,
+        document_ids: [...(options?.documentIds ?? []), uploaded.id],
+    });
 
-  return uploaded;
+    return uploaded;
 }
 
 export async function deleteTabularReview(reviewId: string): Promise<void> {
-  await apiRequest(`/tabular-review/${reviewId}`, { method: "DELETE" });
+    await apiRequest(`/tabular-review/${reviewId}`, { method: "DELETE" });
 }
 
 export async function streamTabularGeneration(
-  reviewId: string,
+    reviewId: string,
 ): Promise<Response> {
-  const authHeaders = await getAuthHeader();
-  return fetch(`${API_BASE}/tabular-review/${reviewId}/generate`, {
-    method: "POST",
-    headers: { ...authHeaders },
-  });
+    const authHeaders = await getAuthHeader();
+    return fetch(`${API_BASE}/tabular-review/${reviewId}/generate`, {
+        method: "POST",
+        headers: { ...authHeaders },
+    });
 }
 
 export async function streamTabularChat(
-  reviewId: string,
-  messages: { role: string; content: string }[],
-  chat_id?: string | null,
-  signal?: AbortSignal,
-  context?: { reviewTitle?: string | null; projectName?: string | null },
+    reviewId: string,
+    messages: { role: string; content: string }[],
+    chat_id?: string | null,
+    signal?: AbortSignal,
+    context?: { reviewTitle?: string | null; projectName?: string | null },
 ): Promise<Response> {
-  const authHeaders = await getAuthHeader();
-  return fetch(`${API_BASE}/tabular-review/${reviewId}/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders },
-    body: JSON.stringify({
-      messages,
-      chat_id: chat_id ?? undefined,
-      review_title: context?.reviewTitle ?? undefined,
-      project_name: context?.projectName ?? undefined,
-    }),
-    signal: signal ?? undefined,
-  });
+    const authHeaders = await getAuthHeader();
+    return fetch(`${API_BASE}/tabular-review/${reviewId}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify({
+            messages,
+            chat_id: chat_id ?? undefined,
+            review_title: context?.reviewTitle ?? undefined,
+            project_name: context?.projectName ?? undefined,
+        }),
+        signal: signal ?? undefined,
+    });
 }
 
 export interface TRCitationAnnotation {
-  type: "tabular_citation";
-  ref: number;
-  col_index: number;
-  row_index: number;
-  col_name: string;
-  doc_name: string;
-  quote: string;
+    type: "tabular_citation";
+    ref: number;
+    col_index: number;
+    row_index: number;
+    col_name: string;
+    doc_name: string;
+    quote: string;
 }
 
 interface RawTRMessage {
-  id: string;
-  chat_id: string;
-  role: "user" | "assistant";
-  content: string | AssistantEvent[] | null;
-  annotations?: TRCitationAnnotation[] | null;
-  created_at: string;
+    id: string;
+    chat_id: string;
+    role: "user" | "assistant";
+    content: string | AssistantEvent[] | null;
+    annotations?: TRCitationAnnotation[] | null;
+    created_at: string;
 }
 
 export interface TRDisplayMessage {
-  role: "user" | "assistant";
-  content: string;
-  events?: AssistantEvent[];
-  annotations?: TRCitationAnnotation[];
+    role: "user" | "assistant";
+    content: string;
+    events?: AssistantEvent[];
+    annotations?: TRCitationAnnotation[];
 }
 
 export interface TRChat {
-  id: string;
-  title: string | null;
-  created_at: string;
-  updated_at: string;
+    id: string;
+    title: string | null;
+    created_at: string;
+    updated_at: string;
 }
 
 export function mapTRMessages(raw: RawTRMessage[]): TRDisplayMessage[] {
-  return raw.map((m) => {
-    if (m.role === "user") {
-      return {
-        role: "user" as const,
-        content: typeof m.content === "string" ? m.content : "",
-      };
-    }
-    const events = Array.isArray(m.content)
-      ? (m.content as AssistantEvent[])
-      : undefined;
-    const content =
-      events
-        ?.filter((e) => e.type === "content")
-        .map((e) => (e as { type: "content"; text: string }).text)
-        .join("") ?? "";
-    return {
-      role: "assistant" as const,
-      content,
-      events,
-      annotations: m.annotations ?? undefined,
-    };
-  });
+    return raw.map((m) => {
+        if (m.role === "user") {
+            return {
+                role: "user" as const,
+                content: typeof m.content === "string" ? m.content : "",
+            };
+        }
+        const events = Array.isArray(m.content)
+            ? (m.content as AssistantEvent[])
+            : undefined;
+        const content =
+            events
+                ?.filter((e) => e.type === "content")
+                .map((e) => (e as { type: "content"; text: string }).text)
+                .join("") ?? "";
+        return {
+            role: "assistant" as const,
+            content,
+            events,
+            annotations: m.annotations ?? undefined,
+        };
+    });
 }
 
 export async function getTabularChats(reviewId: string): Promise<TRChat[]> {
-  return apiRequest<TRChat[]>(`/tabular-review/${reviewId}/chats`);
+    return apiRequest<TRChat[]>(`/tabular-review/${reviewId}/chats`);
 }
 
 export async function getTabularChatMessages(
-  reviewId: string,
-  chatId: string,
+    reviewId: string,
+    chatId: string,
 ): Promise<RawTRMessage[]> {
-  return apiRequest<RawTRMessage[]>(
-    `/tabular-review/${reviewId}/chats/${chatId}/messages`,
-  );
+    return apiRequest<RawTRMessage[]>(
+        `/tabular-review/${reviewId}/chats/${chatId}/messages`,
+    );
 }
 
 export async function deleteTabularChat(
-  reviewId: string,
-  chatId: string,
+    reviewId: string,
+    chatId: string,
 ): Promise<void> {
-  await apiRequest(`/tabular-review/${reviewId}/chats/${chatId}`, {
-    method: "DELETE",
-  });
+    await apiRequest(`/tabular-review/${reviewId}/chats/${chatId}`, {
+        method: "DELETE",
+    });
 }
 
 export async function regenerateTabularCell(
-  reviewId: string,
-  documentId: string,
-  columnIndex: number,
+    reviewId: string,
+    documentId: string,
+    columnIndex: number,
 ): Promise<{
-  summary: string;
-  flag: "green" | "grey" | "yellow" | "red";
-  reasoning: string;
+    summary: string;
+    flag: "green" | "grey" | "yellow" | "red";
+    reasoning: string;
 }> {
-  return apiRequest(`/tabular-review/${reviewId}/regenerate-cell`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      document_id: documentId,
-      column_index: columnIndex,
-    }),
-  });
+    return apiRequest(`/tabular-review/${reviewId}/regenerate-cell`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            document_id: documentId,
+            column_index: columnIndex,
+        }),
+    });
 }
 
 export async function clearTabularCells(
-  reviewId: string,
-  documentIds: string[],
+    reviewId: string,
+    documentIds: string[],
 ): Promise<void> {
-  await apiRequest(`/tabular-review/${reviewId}/clear-cells`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ document_ids: documentIds }),
-  });
+    await apiRequest(`/tabular-review/${reviewId}/clear-cells`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ document_ids: documentIds }),
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -1424,93 +1447,95 @@ export async function clearTabularCells(
 
 type WorkflowType = Workflow["type"];
 
-export async function listWorkflows(type: WorkflowType): Promise<Workflow[]> {
-  return apiRequest<Workflow[]>(`/workflows?type=${type}`);
+export async function listWorkflows(
+    type: WorkflowType,
+): Promise<Workflow[]> {
+    return apiRequest<Workflow[]>(`/workflows?type=${type}`);
 }
 
 export async function getWorkflow(workflowId: string): Promise<Workflow> {
-  return apiRequest<Workflow>(`/workflows/${workflowId}`);
+    return apiRequest<Workflow>(`/workflows/${workflowId}`);
 }
 
 export async function createWorkflow(payload: {
-  title: string;
-  type: "assistant" | "tabular";
-  prompt_md?: string;
-  columns_config?: { index: number; name: string; prompt: string }[];
-  practice?: string | null;
-}): Promise<Workflow> {
-  return apiRequest<Workflow>("/workflows", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-}
-
-export async function updateWorkflow(
-  workflowId: string,
-  payload: {
-    title?: string;
+    title: string;
+    type: "assistant" | "tabular";
     prompt_md?: string;
     columns_config?: { index: number; name: string; prompt: string }[];
     practice?: string | null;
-  },
+}): Promise<Workflow> {
+    return apiRequest<Workflow>("/workflows", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+}
+
+export async function updateWorkflow(
+    workflowId: string,
+    payload: {
+        title?: string;
+        prompt_md?: string;
+        columns_config?: { index: number; name: string; prompt: string }[];
+        practice?: string | null;
+    },
 ): Promise<Workflow> {
-  return apiRequest<Workflow>(`/workflows/${workflowId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+    return apiRequest<Workflow>(`/workflows/${workflowId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
 }
 
 export async function deleteWorkflow(workflowId: string): Promise<void> {
-  await apiRequest(`/workflows/${workflowId}`, { method: "DELETE" });
+    await apiRequest(`/workflows/${workflowId}`, { method: "DELETE" });
 }
 
 export async function listHiddenWorkflows(): Promise<string[]> {
-  return apiRequest<string[]>("/workflows/hidden");
+    return apiRequest<string[]>("/workflows/hidden");
 }
 
 export async function hideWorkflow(workflowId: string): Promise<void> {
-  await apiRequest("/workflows/hidden", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ workflow_id: workflowId }),
-  });
+    await apiRequest("/workflows/hidden", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workflow_id: workflowId }),
+    });
 }
 
 export async function unhideWorkflow(workflowId: string): Promise<void> {
-  await apiRequest(`/workflows/hidden/${workflowId}`, { method: "DELETE" });
+    await apiRequest(`/workflows/hidden/${workflowId}`, { method: "DELETE" });
 }
 
 export async function shareWorkflow(
-  workflowId: string,
-  payload: { emails: string[]; allow_edit: boolean },
+    workflowId: string,
+    payload: { emails: string[]; allow_edit: boolean },
 ): Promise<void> {
-  await apiRequest<void>(`/workflows/${workflowId}/share`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+    await apiRequest<void>(`/workflows/${workflowId}/share`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
 }
 
 export async function listWorkflowShares(workflowId: string): Promise<
-  {
-    id: string;
-    shared_with_email: string;
-    allow_edit: boolean;
-    created_at: string;
-  }[]
+    {
+        id: string;
+        shared_with_email: string;
+        allow_edit: boolean;
+        created_at: string;
+    }[]
 > {
-  return apiRequest(`/workflows/${workflowId}/shares`);
+    return apiRequest(`/workflows/${workflowId}/shares`);
 }
 
 export async function deleteWorkflowShare(
-  workflowId: string,
-  shareId: string,
+    workflowId: string,
+    shareId: string,
 ): Promise<void> {
-  await apiRequest(`/workflows/${workflowId}/shares/${shareId}`, {
-    method: "DELETE",
-  });
+    await apiRequest(`/workflows/${workflowId}/shares/${shareId}`, {
+        method: "DELETE",
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -1520,54 +1545,72 @@ export async function deleteWorkflowShare(
 // ---------------------------------------------------------------------------
 
 export interface ChCompanySearchItem {
-  title?: string;
-  company_number?: string;
-  company_status?: string;
-  company_type?: string;
-  address_snippet?: string;
-  date_of_creation?: string;
+    title?: string;
+    company_number?: string;
+    company_status?: string;
+    company_type?: string;
+    address_snippet?: string;
+    date_of_creation?: string;
 }
 
 export interface ChCompanySearchResult {
-  items?: ChCompanySearchItem[];
-  total_results?: number;
+    items?: ChCompanySearchItem[];
+    total_results?: number;
 }
 
 export interface ChFilingHistoryItem {
-  date?: string;
-  description?: string;
-  description_values?: { made_up_date?: string; [key: string]: unknown };
-  type?: string;
-  category?: string;
+    date?: string;
+    description?: string;
+    description_values?: { made_up_date?: string; [key: string]: unknown };
+    type?: string;
+    category?: string;
+    transaction_id?: string;
+    links?: { document_metadata?: string; [key: string]: unknown };
 }
 
 export interface ChFilingHistoryResult {
-  items?: ChFilingHistoryItem[];
-  total_count?: number;
-  items_per_page?: number;
-  start_index?: number;
+    items?: ChFilingHistoryItem[];
+    total_count?: number;
+    items_per_page?: number;
+    start_index?: number;
 }
 
 export async function chSearchCompanies(
-  q: string,
+    q: string,
 ): Promise<ChCompanySearchResult> {
-  return apiRequest<ChCompanySearchResult>(
-    `/companies/search?q=${encodeURIComponent(q)}`,
-  );
+    return apiRequest<ChCompanySearchResult>(
+        `/companies/search?q=${encodeURIComponent(q)}`,
+    );
 }
 
 /** Profile + officers + PSCs bundle — the shape CompanyPanel consumes. */
 export async function chGetCompany(companyNumber: string): Promise<unknown> {
-  return apiRequest<unknown>(`/companies/${encodeURIComponent(companyNumber)}`);
+    return apiRequest<unknown>(
+        `/companies/${encodeURIComponent(companyNumber)}`,
+    );
 }
 
 export async function chGetFilingHistory(
-  companyNumber: string,
-  page = 1,
+    companyNumber: string,
+    page = 1,
 ): Promise<ChFilingHistoryResult> {
-  return apiRequest<ChFilingHistoryResult>(
-    `/companies/${encodeURIComponent(companyNumber)}/filing-history?page=${page}`,
-  );
+    return apiRequest<ChFilingHistoryResult>(
+        `/companies/${encodeURIComponent(companyNumber)}/filing-history?page=${page}`,
+    );
+}
+
+/**
+ * Downloads the primary document (usually a PDF) for a single filing as a
+ * Blob. Only call this for items that carry `links.document_metadata`.
+ */
+export async function getFilingDocument(
+    companyNumber: string,
+    transactionId: string,
+): Promise<Blob> {
+    const { blob } = await apiBlobRequest(
+        `/companies/${encodeURIComponent(companyNumber)}/filing-history/${encodeURIComponent(transactionId)}/document`,
+    );
+    return blob;
 }
 
 // Company-search saves (starred + recent companies) — powers the rail shown
@@ -1575,51 +1618,51 @@ export async function chGetFilingHistory(
 // callers swallow view/list failures rather than blocking the page.
 
 export interface ChCompanySave {
-  companyNumber: string;
-  companyName: string;
-  companyStatus: string | null;
-  starred: boolean;
-  lastViewedAt: string | null;
+    companyNumber: string;
+    companyName: string;
+    companyStatus: string | null;
+    starred: boolean;
+    lastViewedAt: string | null;
 }
 
 export interface ChCompanySaves {
-  starred: ChCompanySave[];
-  recents: ChCompanySave[];
+    starred: ChCompanySave[];
+    recents: ChCompanySave[];
 }
 
 export async function getCompanySaves(): Promise<ChCompanySaves> {
-  return apiRequest<ChCompanySaves>("/companies/saves");
+    return apiRequest<ChCompanySaves>("/companies/saves");
 }
 
 /** Record that the user opened a company (fire-and-forget; recents best-effort). */
 export async function recordCompanyView(
-  companyNumber: string,
-  snapshot: { companyName: string; companyStatus?: string | null },
+    companyNumber: string,
+    snapshot: { companyName: string; companyStatus?: string | null },
 ): Promise<void> {
-  return apiRequest<void>(
-    `/companies/${encodeURIComponent(companyNumber)}/view`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(snapshot),
-    },
-  );
+    return apiRequest<void>(
+        `/companies/${encodeURIComponent(companyNumber)}/view`,
+        {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(snapshot),
+        },
+    );
 }
 
 /** Set/clear a company's starred flag (snapshot inserts a not-yet-saved company). */
 export async function setCompanyStar(
-  companyNumber: string,
-  starred: boolean,
-  snapshot?: { companyName?: string; companyStatus?: string | null },
+    companyNumber: string,
+    starred: boolean,
+    snapshot?: { companyName?: string; companyStatus?: string | null },
 ): Promise<void> {
-  return apiRequest<void>(
-    `/companies/${encodeURIComponent(companyNumber)}/star`,
-    {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ starred, ...snapshot }),
-    },
-  );
+    return apiRequest<void>(
+        `/companies/${encodeURIComponent(companyNumber)}/star`,
+        {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ starred, ...snapshot }),
+        },
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1627,21 +1670,21 @@ export async function setCompanyStar(
 // ---------------------------------------------------------------------------
 
 export type CitationCheckResult = {
-  raw: string;
-  kind: "statute-section" | "act" | "si" | "neutral-case";
-  status: "verified" | "unverified" | "unverifiable";
-  url?: string;
-  reason?: string;
+    raw: string;
+    kind: "statute-section" | "act" | "si" | "neutral-case";
+    status: "verified" | "unverified" | "unverifiable";
+    url?: string;
+    reason?: string;
 };
 
 export async function checkCitations(
-  text: string,
+    text: string,
 ): Promise<{ results: CitationCheckResult[] }> {
-  return apiRequest<{ results: CitationCheckResult[] }>("/citations/check", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
-  });
+    return apiRequest<{ results: CitationCheckResult[] }>("/citations/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -1649,47 +1692,73 @@ export async function checkCitations(
 // ---------------------------------------------------------------------------
 
 export interface LegislationSearchMatch {
-  title: string;
-  type: string;
-  year?: number;
-  number?: string;
-  url: string;
+    title: string;
+    type: string;
+    year?: number;
+    number?: string;
+    url: string;
 }
 
 export interface LegislationUnappliedEffect {
-  type?: string;
-  notes?: string;
-  affectedProvisions?: string;
-  requiresApplied?: boolean;
+    type?: string;
+    notes?: string;
+    affectedProvisions?: string;
+    requiresApplied?: boolean;
 }
 
 // Snake_case field names mirror the chat tool's emitted payload
 // (backend legislationTools.ts) so the shared LegislationPanel props line up.
 export type LegislationLookupResponse =
-  | {
-      resolved: true;
-      title: string;
-      url: string;
-      heading: string | null;
-      text: string;
-      extent: string | null;
-      outstanding_effects: boolean;
-      unapplied_effects: LegislationUnappliedEffect[];
-    }
-  | { resolved: false; citation: string; reason: string };
+    | {
+          resolved: true;
+          title: string;
+          url: string;
+          heading: string | null;
+          text: string;
+          extent: string | null;
+          outstanding_effects: boolean;
+          unapplied_effects: LegislationUnappliedEffect[];
+      }
+    | { resolved: false; citation: string; reason: string };
 
 export async function searchLegislation(
-  title: string,
+    title: string,
 ): Promise<{ matches: LegislationSearchMatch[] }> {
-  return apiRequest<{ matches: LegislationSearchMatch[] }>(
-    `/legislation/search?title=${encodeURIComponent(title)}`,
-  );
+    return apiRequest<{ matches: LegislationSearchMatch[] }>(
+        `/legislation/search?title=${encodeURIComponent(title)}`,
+    );
 }
 
 export async function lookupLegislation(
-  citation: string,
+    citation: string,
 ): Promise<LegislationLookupResponse> {
-  return apiRequest<LegislationLookupResponse>(
-    `/legislation/lookup?citation=${encodeURIComponent(citation)}`,
-  );
+    return apiRequest<LegislationLookupResponse>(
+        `/legislation/lookup?citation=${encodeURIComponent(citation)}`,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Research — Land Registry (WS7) — open-data Price Paid lookup over
+// /land-registry. Sold-price history for a postcode; no key, no charge (Open
+// Government Licence v3.0). v1 has no account-connection path by design.
+// ---------------------------------------------------------------------------
+
+export interface PricePaidEntry {
+    address: string;
+    propertyType: string | null;
+    tenure: "Freehold" | "Leasehold" | null;
+    /** Price paid in whole pounds. */
+    price: number;
+    /** Transaction date as ISO `YYYY-MM-DD` — render DD/MM/YYYY. */
+    date: string;
+}
+
+export async function getPricePaid(
+    postcode: string,
+    signal?: AbortSignal,
+): Promise<{ entries: PricePaidEntry[] }> {
+    return apiRequest<{ entries: PricePaidEntry[] }>(
+        `/land-registry/price-paid?postcode=${encodeURIComponent(postcode)}`,
+        { signal },
+    );
 }
