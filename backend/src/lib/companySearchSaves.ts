@@ -54,7 +54,7 @@ type SaveRow = {
  * 42P01 (undefined_table) and 42703 (undefined_column). Any other error is a
  * genuine fault and propagates.
  */
-function isMissingTableOrColumn(error: unknown): boolean {
+export function isMissingTableOrColumn(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const code = (error as { code?: unknown }).code;
   return code === "42P01" || code === "42703";

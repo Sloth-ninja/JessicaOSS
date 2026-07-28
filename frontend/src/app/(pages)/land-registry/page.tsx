@@ -298,7 +298,10 @@ export default function LandRegistryPage() {
                                         copyright and database right{" "}
                                         {new Date().getFullYear()}. This data is
                                         licensed under the Open Government Licence
-                                        v3.0. Showing the 25 most recent transactions.
+                                        v3.0.{" "}
+                                        {entries.length < 25
+                                            ? `Showing all ${entries.length.toLocaleString("en-GB")} transaction${entries.length === 1 ? "" : "s"}.`
+                                            : "Showing the 25 most recent transactions (the list is capped at 25)."}
                                     </p>
                                 </>
                             )}

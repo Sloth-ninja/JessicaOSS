@@ -1,4 +1,5 @@
 import { createServerSupabase } from "./supabase";
+import { isMissingTableOrColumn } from "./companySearchSaves";
 
 type Db = ReturnType<typeof createServerSupabase>;
 
@@ -31,6 +32,7 @@ async function selectAll(
     table: string,
     configure: (query: any) => any,
     columns = "*",
+    options: { tolerateMissing?: boolean } = {},
 ): Promise<Record<string, unknown>[]> {
     const rows: Record<string, unknown>[] = [];
 
@@ -43,6 +45,13 @@ async function selectAll(
                 .range(from, to),
         );
         const { data, error } = await query;
+        // A table added by a later migration (company_search_saves) may not
+        // exist on an unmigrated self-hosted DB. Where tolerated, a missing
+        // table/column (42P01 / 42703) degrades to an empty section rather than
+        // failing the whole export; any other error still throws.
+        if (options.tolerateMissing && isMissingTableOrColumn(error)) {
+            return rows;
+        }
         await throwIfError(error, `Failed to export ${table}`);
         const batch = (data ?? []) as Record<string, unknown>[];
         rows.push(...batch);
@@ -177,6 +186,7 @@ export async function buildUserAccountExport(
         assistantChats,
         tabularChats,
         tabularReviews,
+        companySearchSaves,
         sharedProjects,
         sharedTabularReviews,
     ] = await Promise.all([
@@ -213,6 +223,19 @@ export async function buildUserAccountExport(
         loadUserTabularChats(db, userId),
         selectAll(db, "tabular_reviews", (query) =>
             query.eq("user_id", userId).order("created_at", { ascending: true }),
+        ),
+        // The user's starred + recent company saves. All columns — it is their
+        // data. Tolerant of an unmigrated DB: a missing table yields an empty
+        // section, never a failed export (migration 20260728_01).
+        selectAll(
+            db,
+            "company_search_saves",
+            (query) =>
+                query
+                    .eq("user_id", userId)
+                    .order("created_at", { ascending: true }),
+            "*",
+            { tolerateMissing: true },
         ),
         userEmail
             ? selectAll(db, "projects", (query) =>
@@ -270,6 +293,7 @@ export async function buildUserAccountExport(
         tabular_reviews: tabularReviews,
         tabular_cells: tabularCells,
         tabular_review_chats: tabularChats,
+        company_search_saves: companySearchSaves,
         shared_access: {
             projects: sharedProjects,
             tabular_reviews: sharedTabularReviews,

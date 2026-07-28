@@ -7,6 +7,64 @@
 
 ---
 
+## 2026-07-28 — Company-search train: composed-range fix wave (branch `company-search-train-fixes`)
+
+**Scope:** four findings from the composed-range multi-lens review of the
+company-search train (the `company_search_saves` feature + Land Registry v1),
+none catchable per-PR — they are cross-module gaps between the new saves table
+and the pre-existing account-deletion / SAR-export paths, plus two UI/copy
+honesty fixes. No new dependencies; no env vars; no migration touched.
+
+1. **IMPORTANT — right-to-erasure gap (privacy lens).**
+   `deleteUserAccountData` (`backend/src/lib/userDataCleanup.ts`) never deleted
+   the user's `company_search_saves` rows, so account deletion orphaned their
+   starred/recent company history. Added a `delete().eq("user_id", userId)` on
+   the table. Because self-hosters may not have run migration `20260728_01`, this
+   one delete is 42P01/42703-tolerant (a missing table must not fail account
+   deletion) while every other table keeps today's fail behaviour. The tolerance
+   idiom is not duplicated: `isMissingTableOrColumn` is now exported from
+   `lib/companySearchSaves.ts` and imported here. Confirmed no project-level
+   cleanup is needed — saves are user-level (keyed on `user_id`, no
+   `project_id`), so `deleteUserProjects`/`purgeProjectsByIds` are untouched.
+
+2. **MINOR — SAR completeness (privacy lens, same root cause).**
+   `buildUserAccountExport` (`backend/src/lib/userDataExport.ts`) omitted the
+   user's `company_search_saves`, so a subject-access export was incomplete.
+   Added the section (all columns — it is their data) with the same
+   42P01/42703 tolerance (missing table → empty array, never a failed export)
+   via a new `tolerateMissing` option on the shared `selectAll` helper.
+
+3. **MINOR — star-error visibility (UI-drift lens).** On
+   `company-search/page.tsx` the `starError` message only rendered in the
+   empty-search rail, but the detail-header `StarToggle` is usable mid-search;
+   a failed toggle there showed only the silent icon rollback. Surfaced the
+   same fixed inline message under the detail-header toggle (cleared on the next
+   toggle attempt, matching the existing inline-error idiom — no toast library).
+
+4. **MINOR — copy honesty (copy lens).** On `land-registry/page.tsx` the
+   Price Paid footnote hardcoded "Showing the 25 most recent transactions."
+   regardless of count. Now honest: `<25` → "Showing all N transaction(s)."
+   (correct singular/plural); exactly 25 → "Showing the 25 most recent
+   transactions (the list is capped at 25)." UK English.
+
+**Tests.** New `backend/src/lib/userDataCleanup.test.ts` (account deletion
+removes the user's saves keyed on `user_id`, leaves other users' rows; tolerates
+42P01/42703; still throws on a non-tolerated code e.g. 42501) and
+`backend/src/lib/userDataExport.test.ts` (export includes the saves section with
+all columns; 42P01/42703 → empty section, export still succeeds). +7 tests.
+
+**Verification.** Backend `npx tsc --noEmit` clean; `npx vitest run` 442 passed
+(435 baseline + 7 new). Frontend `npx tsc --noEmit` clean; `npx eslint` clean on
+both changed pages.
+
+**Credit.** All four findings came from the composed-range review, not per-PR
+review — findings 1 and 2 are exactly the "per-task review cannot see
+cross-commit drift" class (`docs/DURABLE_LESSONS.md`, 19/07): the saves table
+and the deletion/export paths were correct in isolation but drifted apart across
+commits.
+
+---
+
 ## 2026-07-28 — Company-search saves feature (branch `company-search-saves`)
 
 **Scope:** the application code for the starred + recent companies feature on

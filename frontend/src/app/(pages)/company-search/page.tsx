@@ -696,6 +696,11 @@ export default function CompanySearchPage() {
                                                     }
                                                 />
                                             </div>
+                                            {starError && (
+                                                <p className="mt-1 text-xs text-red-600">
+                                                    {starError}
+                                                </p>
+                                            )}
                                         </div>
                                         <Button
                                             size="sm"
