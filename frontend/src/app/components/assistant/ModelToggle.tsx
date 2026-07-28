@@ -10,7 +10,10 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { isModelAvailable } from "@/app/lib/modelAvailability";
+import {
+    isModelAvailable,
+    modelGroupToProvider,
+} from "@/app/lib/modelAvailability";
 import type { ApiKeyState } from "@/app/lib/mikeApi";
 
 export interface ModelOption {
@@ -92,13 +95,35 @@ interface Props {
     apiKeys?: ApiKeyState;
     /** Server-reported local:-prefixed model ids; omit/empty when unconfigured. */
     localModels?: string[];
+    /** Firm-offered providers (WS8 PR F); null/omitted ⇒ no restriction. Local
+     *  models are an env-configured data-sovereignty path and are never filtered. */
+    offeredProviders?: string[] | null;
 }
 
-export function ModelToggle({ value, onChange, apiKeys, localModels = [] }: Props) {
+export function ModelToggle({
+    value,
+    onChange,
+    apiKeys,
+    localModels = [],
+    offeredProviders = null,
+}: Props) {
     const [isOpen, setIsOpen] = useState(false);
     const options = useMemo(
         () => [...MODELS, ...toLocalModelOptions(localModels)],
         [localModels],
+    );
+    const groupOrder = useMemo(
+        () =>
+            offeredProviders
+                ? GROUP_ORDER.filter(
+                      (group) =>
+                          group === "Local" ||
+                          offeredProviders.includes(
+                              modelGroupToProvider(group),
+                          ),
+                  )
+                : GROUP_ORDER,
+        [offeredProviders],
     );
     const selected = options.find((m) => m.id === value);
     const selectedLabel = selected?.label ?? "Model";
@@ -128,7 +153,7 @@ export function ModelToggle({ value, onChange, apiKeys, localModels = [] }: Prop
                 </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent className="w-56 z-50" side="top" align="end">
-                {GROUP_ORDER.map((group, gi) => {
+                {groupOrder.map((group, gi) => {
                     const items = options.filter((m) => m.group === group);
                     if (items.length === 0) return null;
                     return (

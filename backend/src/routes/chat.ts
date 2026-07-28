@@ -18,6 +18,7 @@ import {
 import { completeText } from "../lib/llm";
 import {
     getUserModelSettings,
+    resolveOrgChatModel,
 } from "../lib/userSettings";
 import { checkProjectAccess } from "../lib/access";
 import { safeErrorLog, safeErrorMessage } from "../lib/safeError";
@@ -485,7 +486,7 @@ chatRouter.post("/", requireAuth, asyncHandler(async (req, res) => {
     const messages = parsedMessages.messages;
     const chat_id = parsedChatId.chatId;
     const project_id = parsedProjectId.projectId;
-    const model = parsedModel.model;
+    let model = parsedModel.model;
 
     devLog("[chat/stream] incoming request", {
         userId,
@@ -497,6 +498,13 @@ chatRouter.post("/", requireAuth, asyncHandler(async (req, res) => {
 
     const userEmail = res.locals.userEmail as string | undefined;
     const db = createServerSupabase();
+
+    // Enforce the caller's firm model policy on the CLIENT-SUPPLIED model. The
+    // pickers are filtered client-side, but this route accepts a raw model id,
+    // so the policy must be enforced here too (WS8 PR F; gate the routes, not
+    // just the tabs). Local passthrough + fail-open live in resolveOrgChatModel.
+    model = await resolveOrgChatModel(userId, model, db);
+
     let chatId = chat_id ?? null;
     let chatTitle: string | null = null;
     let resolvedProjectId: string | null = parsedProjectId.projectId;

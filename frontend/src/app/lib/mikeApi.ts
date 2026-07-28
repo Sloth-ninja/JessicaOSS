@@ -217,19 +217,32 @@ export type OrganisationRole = "admin" | "member";
 export interface OrganisationPolicies {
     memberApiKeys: boolean;
     memberMcpConnectors: boolean;
+    /** Firm allows members to set their own model preferences (WS8 PR F). */
+    memberModelPrefs: boolean;
+}
+
+/**
+ * Firm model configuration (WS8 PR F). `defaultModel` is null when unset;
+ * `offeredProviders` is empty when there is no restriction (members may pick
+ * any provider).
+ */
+export interface OrganisationModelConfig {
+    defaultModel: string | null;
+    offeredProviders: string[];
 }
 
 /**
  * The user's structured organisation (firm) membership. `null` for orgless
  * self-hosters and unmigrated databases. Distinct from the free-text
- * `organisation` field (the user's self-entered firm name). WS8; no gating
- * behaviour consumes these flags yet.
+ * `organisation` field (the user's self-entered firm name).
  */
 export interface OrganisationMembership {
     id: string;
     name: string;
     role: OrganisationRole;
     policies: OrganisationPolicies;
+    /** Firm model configuration (default model + offered providers) — PR F. */
+    modelConfig: OrganisationModelConfig;
     /** Deletion governance (WS8 PR G): days a member's tombstoned item is held
      *  before permanent purge. Admin-editable, server-clamped 1–365. */
     retentionDays: number;
@@ -706,6 +719,36 @@ export async function updateConnectorGalleryCuration(
         },
     );
     return data.enabledConnectorIds;
+}
+
+// ── Firm model configuration (WS8 PR F) ─────────────────────────────────────
+// GET/PATCH /admin/model-config — admin-gated (+ MFA on writes) server-side.
+
+export async function getFirmModelConfig(): Promise<OrganisationModelConfig> {
+    const data = await apiRequest<{ modelConfig: OrganisationModelConfig }>(
+        "/admin/model-config",
+    );
+    return data.modelConfig;
+}
+
+/**
+ * Update the firm's model configuration. Only the provided fields change; a
+ * `null` clears a field. The server validates `defaultModel` / providers and
+ * returns the resulting config.
+ */
+export async function updateFirmModelConfig(patch: {
+    defaultModel?: string | null;
+    offeredProviders?: string[] | null;
+}): Promise<OrganisationModelConfig> {
+    const data = await apiRequest<{ modelConfig: OrganisationModelConfig }>(
+        "/admin/model-config",
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(patch),
+        },
+    );
+    return data.modelConfig;
 }
 
 export async function getProject(projectId: string): Promise<Project> {

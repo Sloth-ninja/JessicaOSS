@@ -65,3 +65,49 @@ export function resolveModel(id: string | null | undefined, fallback: string): s
     if (id && isLocalModelId(id) && getLocalLlmConfig()) return id;
     return fallback;
 }
+
+// ---------------------------------------------------------------------------
+// Firm model configuration (WS8 PR F)
+// ---------------------------------------------------------------------------
+// The cloud providers a firm can offer members in the model picker. Local
+// models are an env-configured data-sovereignty path, never a firm BYO-provider
+// choice, so they are deliberately NOT part of this set.
+export const MODEL_PROVIDERS = ["claude", "gemini", "openai"] as const;
+export type ModelProviderId = (typeof MODEL_PROVIDERS)[number];
+
+export function isModelProvider(value: unknown): value is ModelProviderId {
+    return (
+        typeof value === "string" &&
+        (MODEL_PROVIDERS as readonly string[]).includes(value)
+    );
+}
+
+/**
+ * True when `id` is a model a firm may pin as its default: any registry model,
+ * or a configured local model id. Mirrors `resolveModel`'s acceptance so a firm
+ * default can never pin an unknown/unusable model.
+ */
+export function isSelectableModelId(id: string): boolean {
+    if (ALL_MODELS.has(id)) return true;
+    return isLocalModelId(id) && !!getLocalLlmConfig();
+}
+
+/** providerForModel that returns null instead of throwing on an unknown id. */
+export function safeProviderForModel(model: string): Provider | null {
+    try {
+        return providerForModel(model);
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Default main-tier model for a cloud provider — the substitution target when a
+ * member's requested chat model sits outside the firm's offered providers
+ * (WS8 PR F firm model policy enforcement).
+ */
+export function defaultMainModelForProvider(provider: ModelProviderId): string {
+    if (provider === "claude") return CLAUDE_MAIN_MODELS[0];
+    if (provider === "openai") return OPENAI_MAIN_MODELS[0];
+    return DEFAULT_MAIN_MODEL; // gemini
+}

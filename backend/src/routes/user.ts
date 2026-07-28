@@ -79,6 +79,17 @@ const PERSONAL_API_KEYS_MANAGED_DETAIL =
     "Personal API keys are managed by your firm.";
 const PERSONAL_CONNECTORS_MANAGED_DETAIL =
     "Connectors are managed by your firm.";
+const MODEL_PREFS_MANAGED_DETAIL =
+    "Model preferences are managed by your firm.";
+
+// True when a PATCH /user/profile body touches a model-preference field. Only
+// then does the memberModelPrefs gate apply (WS8 PR F) — a display-name /
+// organisation-only edit is never blocked by the model policy.
+function bodyTouchesModelPref(body: unknown): boolean {
+    if (!body || typeof body !== "object" || Array.isArray(body)) return false;
+    const raw = body as Record<string, unknown>;
+    return "titleModel" in raw || "tabularModel" in raw;
+}
 
 // Additive: merges the server-env-only local-model status alongside the
 // per-user ApiKeyStatus fields. There is no per-user local key/base URL
@@ -300,6 +311,20 @@ export function serializeProfile(
           : apiKeyStatus?.claude
             ? CLAUDE_LOW_MODELS[0]
             : DEFAULT_TITLE_MODEL;
+    // Firm model policy (WS8 PR F): when the member's firm manages model access
+    // (`memberModelPrefs` off), the reported titleModel/tabularModel are the
+    // firm-effective values (personal prefs inert), so the account page shows
+    // exactly what generation will use. This mirrors getUserModelSettings.
+    const firmManaged = !!membership && !membership.policies.memberModelPrefs;
+    const firmDefault = membership?.modelConfig.defaultModel ?? null;
+    const titleModel = firmManaged
+        ? titleFallback
+        : resolveModel(row.title_model, titleFallback);
+    const tabularModel = firmManaged
+        ? firmDefault
+            ? resolveModel(firmDefault, DEFAULT_TABULAR_MODEL)
+            : DEFAULT_TABULAR_MODEL
+        : resolveModel(row.tabular_model, DEFAULT_TABULAR_MODEL);
     return {
         displayName: row.display_name,
         // `organisation` (free-text) is the user's self-entered firm name,
@@ -314,8 +339,8 @@ export function serializeProfile(
         creditsResetDate: row.credits_reset_date,
         creditsRemaining: Math.max(MONTHLY_CREDIT_LIMIT - creditsUsed, 0),
         tier: row.tier || "Free",
-        titleModel: resolveModel(row.title_model, titleFallback),
-        tabularModel: resolveModel(row.tabular_model, DEFAULT_TABULAR_MODEL),
+        titleModel,
+        tabularModel,
         mfaOnLogin: row.mfa_on_login === true,
         ...(apiKeyStatus ? { apiKeyStatus } : {}),
     };
@@ -548,7 +573,22 @@ userRouter.get("/profile", requireAuth, asyncHandler(async (_req, res) => {
 }));
 
 // PATCH /user/profile
-userRouter.patch("/profile", requireAuth, asyncHandler(async (req, res) => {
+//
+// Firm model policy (WS8 PR F): a member of a firm with `memberModelPrefs` off
+// cannot write their own model preferences — the gate blocks a body that
+// touches titleModel/tabularModel with a fixed 403 detail. A display-name /
+// organisation-only edit skips the gate (shouldGate returns false). Admins are
+// NOT exempt (PR B precedent — they manage models on the firm surface); orgless
+// callers and policy-on firms are unchanged; the gate fails open on lookup error.
+userRouter.patch(
+    "/profile",
+    requireAuth,
+    requireMemberPolicy(
+        "memberModelPrefs",
+        MODEL_PREFS_MANAGED_DETAIL,
+        (req) => bodyTouchesModelPref(req.body),
+    ),
+    asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const parsed = validateProfilePayload(req.body);
     if (!parsed.ok) return void res.status(400).json({ detail: parsed.detail });

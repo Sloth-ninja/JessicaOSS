@@ -29,7 +29,12 @@ const ARIA: OrganisationMembership = {
   id: "org-1",
   name: "Aria Grace Law CIC",
   role: "member",
-  policies: { memberApiKeys: true, memberMcpConnectors: false },
+  policies: {
+    memberApiKeys: true,
+    memberMcpConnectors: false,
+    memberModelPrefs: true,
+  },
+  modelConfig: { defaultModel: null, offeredProviders: [] },
   retentionDays: 30,
 };
 
@@ -66,11 +71,52 @@ describe("serializeProfile — organisation payload shape", () => {
   it("carries the firm's policy flags through unchanged", () => {
     const out = serializeProfile(baseRow, undefined, {
       ...ARIA,
-      policies: { memberApiKeys: false, memberMcpConnectors: true },
+      policies: {
+        memberApiKeys: false,
+        memberMcpConnectors: true,
+        memberModelPrefs: true,
+      },
     });
     expect(out.firm?.policies).toEqual({
       memberApiKeys: false,
       memberMcpConnectors: true,
+      memberModelPrefs: true,
     });
+  });
+});
+
+describe("serializeProfile — firm model policy (WS8 PR F)", () => {
+  const firmManaged = (
+    defaultModel: string | null,
+  ): OrganisationMembership => ({
+    ...ARIA,
+    policies: {
+      memberApiKeys: true,
+      memberMcpConnectors: false,
+      memberModelPrefs: false,
+    },
+    modelConfig: { defaultModel, offeredProviders: [] },
+  });
+
+  it("uses the firm default model for tabular when memberModelPrefs is off", () => {
+    // Personal tabular_model on baseRow is 'gemini-3-flash-preview' — it must be
+    // ignored (inert) in favour of the firm default.
+    const out = serializeProfile(baseRow, undefined, firmManaged("gpt-5.4"));
+    expect(out.tabularModel).toBe("gpt-5.4");
+    // Title stays on the provider-appropriate lightweight default (personal
+    // title_model ignored); mocked titleFallback is 'title-default'.
+    expect(out.titleModel).toBe("title-default");
+  });
+
+  it("falls back to the tabular default when the firm sets no default model", () => {
+    const out = serializeProfile(baseRow, undefined, firmManaged(null));
+    expect(out.tabularModel).toBe("tabular-default");
+    expect(out.titleModel).toBe("title-default");
+  });
+
+  it("honours personal prefs when memberModelPrefs is on (default arg)", () => {
+    const out = serializeProfile(baseRow, undefined, ARIA);
+    // ARIA has memberModelPrefs on → personal tabular_model applies (echoed).
+    expect(out.tabularModel).toBe("gemini-3-flash-preview");
   });
 });

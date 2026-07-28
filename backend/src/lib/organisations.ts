@@ -9,6 +9,20 @@ export interface OrganisationPolicies {
     memberApiKeys: boolean;
     /** Firm allows members to configure their own MCP connectors. */
     memberMcpConnectors: boolean;
+    /** Firm allows members to set their own model preferences (WS8 PR F). */
+    memberModelPrefs: boolean;
+}
+
+/**
+ * Firm model configuration (WS8 PR F, `organisations.model_config` jsonb).
+ * Normalised shape: `defaultModel` is null when unset; `offeredProviders` is an
+ * empty array when there is no restriction (members may pick any provider).
+ */
+export interface OrganisationModelConfig {
+    /** Firm's default model — used for members when `memberModelPrefs` is off. */
+    defaultModel: string | null;
+    /** Providers members are offered in the picker; empty ⇒ no restriction. */
+    offeredProviders: string[];
 }
 
 export interface OrganisationMembership {
@@ -16,6 +30,8 @@ export interface OrganisationMembership {
     name: string;
     role: OrganisationRole;
     policies: OrganisationPolicies;
+    /** Firm model configuration (default model + offered providers) — PR F. */
+    modelConfig: OrganisationModelConfig;
     /**
      * Firm retention window for soft-deleted items, in days (WS8 PR G). Exposed
      * so the member privacy-data copy can honestly say how long the firm holds a
@@ -35,6 +51,8 @@ type OrganisationEmbed = {
     name: string | null;
     allow_member_api_keys: boolean | null;
     allow_member_mcp_connectors: boolean | null;
+    allow_member_model_prefs: boolean | null;
+    model_config: unknown;
     retention_days: number | null;
 };
 
@@ -48,7 +66,30 @@ type MembershipRow = {
 
 // One round-trip: the profile's membership columns plus the joined firm row.
 const MEMBERSHIP_SELECT =
-    "organisation_id, role, organisation:organisations(id, name, allow_member_api_keys, allow_member_mcp_connectors, retention_days)";
+    "organisation_id, role, organisation:organisations(id, name, allow_member_api_keys, allow_member_mcp_connectors, allow_member_model_prefs, model_config, retention_days)";
+
+/**
+ * Coerce the raw `organisations.model_config` jsonb into the normalised
+ * OrganisationModelConfig. Defensive: any non-object, missing or wrong-typed
+ * field degrades to the "unset" shape (null default, no restriction) rather
+ * than throwing — an unmigrated/empty column is simply "no firm config".
+ */
+export function normaliseModelConfig(raw: unknown): OrganisationModelConfig {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        return { defaultModel: null, offeredProviders: [] };
+    }
+    const obj = raw as Record<string, unknown>;
+    const defaultModel =
+        typeof obj.defaultModel === "string" && obj.defaultModel.trim()
+            ? obj.defaultModel
+            : null;
+    const offeredProviders = Array.isArray(obj.offeredProviders)
+        ? obj.offeredProviders.filter(
+              (value): value is string => typeof value === "string",
+          )
+        : [];
+    return { defaultModel, offeredProviders };
+}
 
 // Postgres "undefined_column" — raised when the organisation_id / role columns
 // (or the organisations table) do not exist yet on an unmigrated database. We
@@ -87,7 +128,9 @@ function toMembership(row: MembershipRow | null): OrganisationMembership | null 
         policies: {
             memberApiKeys: org.allow_member_api_keys === true,
             memberMcpConnectors: org.allow_member_mcp_connectors === true,
+            memberModelPrefs: org.allow_member_model_prefs === true,
         },
+        modelConfig: normaliseModelConfig(org.model_config),
         retentionDays:
             typeof org.retention_days === "number" && org.retention_days > 0
                 ? org.retention_days
@@ -290,23 +333,143 @@ export async function updateOrganisationPolicies(
     if (typeof patch.memberMcpConnectors === "boolean") {
         update.allow_member_mcp_connectors = patch.memberMcpConnectors;
     }
+    if (typeof patch.memberModelPrefs === "boolean") {
+        update.allow_member_model_prefs = patch.memberModelPrefs;
+    }
 
     const { data, error } = await db
         .from("organisations")
         .update(update)
         .eq("id", organisationId)
-        .select("allow_member_api_keys, allow_member_mcp_connectors")
+        .select(
+            "allow_member_api_keys, allow_member_mcp_connectors, allow_member_model_prefs",
+        )
         .maybeSingle();
     if (error) throw error;
 
     const row = data as {
         allow_member_api_keys: boolean | null;
         allow_member_mcp_connectors: boolean | null;
+        allow_member_model_prefs: boolean | null;
     } | null;
     return {
         memberApiKeys: row?.allow_member_api_keys === true,
         memberMcpConnectors: row?.allow_member_mcp_connectors === true,
+        memberModelPrefs: row?.allow_member_model_prefs === true,
     };
+}
+
+/** The caller's firm id plus the model policy + config the resolver needs. */
+export interface OrganisationModelContext {
+    id: string;
+    /** Firm allows members to set their own model preferences. */
+    allowMemberModelPrefs: boolean;
+    /** The firm's model configuration (default model + offered providers). */
+    config: OrganisationModelConfig;
+}
+
+/**
+ * Resolve the caller's firm id, its `allow_member_model_prefs` policy AND its
+ * `model_config` in a single join query — the model-resolution layer
+ * (`userSettings.ts`) needs all three to decide whether a member's personal
+ * model prefs apply and, when they do not, which firm default governs. Returns
+ * null for orgless users and unmigrated databases (42703-tolerant). Callers
+ * treat a thrown error as fail-open (personal prefs still apply) — mirrors
+ * `getUserOrganisationKeyContext`.
+ */
+export async function getUserOrganisationModelContext(
+    db: Db = createServerSupabase(),
+    userId: string,
+): Promise<OrganisationModelContext | null> {
+    const { data, error } = await db
+        .from("user_profiles")
+        .select(
+            "organisation_id, organisation:organisations(allow_member_model_prefs, model_config)",
+        )
+        .eq("user_id", userId)
+        .maybeSingle();
+    if (error) {
+        if (isMissingOrganisationColumn(error)) return null;
+        throw error;
+    }
+    const row = data as {
+        organisation_id?: string | null;
+        organisation:
+            | { allow_member_model_prefs?: unknown; model_config?: unknown }
+            | { allow_member_model_prefs?: unknown; model_config?: unknown }[]
+            | null;
+    } | null;
+    if (!row || !row.organisation_id) return null;
+    const embed = Array.isArray(row.organisation)
+        ? (row.organisation[0] ?? null)
+        : row.organisation;
+    const allow =
+        !!embed &&
+        typeof embed === "object" &&
+        (embed as { allow_member_model_prefs?: unknown })
+            .allow_member_model_prefs === true;
+    return {
+        id: row.organisation_id,
+        allowMemberModelPrefs: allow,
+        config: normaliseModelConfig(
+            embed && typeof embed === "object"
+                ? (embed as { model_config?: unknown }).model_config
+                : null,
+        ),
+    };
+}
+
+/**
+ * Read a firm's model configuration (`model_config` jsonb). Scoped to the given
+ * organisation id (the admin route resolves this from the caller's own
+ * membership). Returns the "unset" config for orgless callers and unmigrated
+ * databases (42703-tolerant) — degrades to "no firm config", never throws on a
+ * missing column.
+ */
+export async function getOrganisationModelConfig(
+    db: Db,
+    organisationId: string,
+): Promise<OrganisationModelConfig> {
+    const { data, error } = await db
+        .from("organisations")
+        .select("model_config")
+        .eq("id", organisationId)
+        .maybeSingle();
+    if (error) {
+        if (isMissingOrganisationColumn(error)) {
+            return { defaultModel: null, offeredProviders: [] };
+        }
+        throw error;
+    }
+    return normaliseModelConfig(
+        (data as { model_config?: unknown } | null)?.model_config,
+    );
+}
+
+/**
+ * Replace a firm's model configuration. Scoped to the given organisation id
+ * (the admin route resolves this from the caller's own membership). The caller
+ * is responsible for validating `defaultModel` / `offeredProviders` against the
+ * model registry before calling. Returns the persisted, normalised config.
+ */
+export async function setOrganisationModelConfig(
+    db: Db,
+    organisationId: string,
+    config: OrganisationModelConfig,
+): Promise<OrganisationModelConfig> {
+    const { data, error } = await db
+        .from("organisations")
+        .update({
+            model_config: config,
+            updated_at: new Date().toISOString(),
+        })
+        .eq("id", organisationId)
+        .select("model_config")
+        .maybeSingle();
+    if (error) throw error;
+    return normaliseModelConfig(
+        (data as { model_config?: unknown } | null)?.model_config,
+    );
 }
 
 /**

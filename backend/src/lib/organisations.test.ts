@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   assignDefaultOrganisation,
+  getUserOrganisationModelContext,
   isAdmin,
+  normaliseModelConfig,
   resolveUserOrganisation,
 } from "./organisations";
 
@@ -13,6 +15,8 @@ type OrgRow = {
   name: string;
   allow_member_api_keys: boolean | null;
   allow_member_mcp_connectors: boolean | null;
+  allow_member_model_prefs: boolean | null;
+  model_config: unknown;
 };
 type Profile = { organisation_id: string | null; role: string | null };
 type ProfileStore = Record<string, Profile>;
@@ -102,6 +106,8 @@ const ARIA: OrgRow = {
   name: "Aria Grace Law CIC",
   allow_member_api_keys: true,
   allow_member_mcp_connectors: false,
+  allow_member_model_prefs: false,
+  model_config: {},
 };
 
 beforeEach(() => {
@@ -124,7 +130,12 @@ describe("resolveUserOrganisation", () => {
       id: DEFAULT_ORG,
       name: "Aria Grace Law CIC",
       role: "member",
-      policies: { memberApiKeys: true, memberMcpConnectors: false },
+      policies: {
+        memberApiKeys: true,
+        memberMcpConnectors: false,
+        memberModelPrefs: false,
+      },
+      modelConfig: { defaultModel: null, offeredProviders: [] },
       retentionDays: 30,
     });
   });
@@ -149,6 +160,8 @@ describe("resolveUserOrganisation", () => {
       name: "Solo Firm",
       allow_member_api_keys: null,
       allow_member_mcp_connectors: null,
+      allow_member_model_prefs: null,
+      model_config: null,
     };
     const membership = await resolveUserOrganisation(
       makeDb(profiles, { [OTHER_ORG]: org }),
@@ -157,6 +170,11 @@ describe("resolveUserOrganisation", () => {
     expect(membership?.policies).toEqual({
       memberApiKeys: false,
       memberMcpConnectors: false,
+      memberModelPrefs: false,
+    });
+    expect(membership?.modelConfig).toEqual({
+      defaultModel: null,
+      offeredProviders: [],
     });
   });
 
@@ -221,6 +239,8 @@ describe("resolveUserOrganisation — default-org assignment", () => {
       name: "Other LLP",
       allow_member_api_keys: false,
       allow_member_mcp_connectors: true,
+      allow_member_model_prefs: true,
+      model_config: { defaultModel: "gpt-5.4", offeredProviders: ["openai"] },
     };
     const profiles: ProfileStore = {
       u1: { organisation_id: OTHER_ORG, role: "admin" },
@@ -297,5 +317,95 @@ describe("isAdmin", () => {
     await isAdmin(makeDb(profiles, {}), "u1");
     // isAdmin is a read — it must never write a membership.
     expect(profiles.u1.organisation_id).toBeNull();
+  });
+});
+
+describe("normaliseModelConfig (WS8 PR F)", () => {
+  it("returns the unset shape for null/undefined/non-object input", () => {
+    for (const raw of [null, undefined, 42, "x", []]) {
+      expect(normaliseModelConfig(raw)).toEqual({
+        defaultModel: null,
+        offeredProviders: [],
+      });
+    }
+  });
+
+  it("keeps a string defaultModel and string[] offeredProviders", () => {
+    expect(
+      normaliseModelConfig({
+        defaultModel: "claude-opus-4-8",
+        offeredProviders: ["claude", "gemini"],
+      }),
+    ).toEqual({
+      defaultModel: "claude-opus-4-8",
+      offeredProviders: ["claude", "gemini"],
+    });
+  });
+
+  it("coerces a blank/non-string defaultModel to null and filters non-string providers", () => {
+    expect(
+      normaliseModelConfig({
+        defaultModel: "   ",
+        offeredProviders: ["openai", 5, null, "gemini"],
+      }),
+    ).toEqual({ defaultModel: null, offeredProviders: ["openai", "gemini"] });
+  });
+});
+
+describe("getUserOrganisationModelContext (WS8 PR F)", () => {
+  it("resolves the firm id, policy flag and config in one join", async () => {
+    const profiles: ProfileStore = {
+      u1: { organisation_id: OTHER_ORG, role: "member" },
+    };
+    const org: OrgRow = {
+      id: OTHER_ORG,
+      name: "Other LLP",
+      allow_member_api_keys: false,
+      allow_member_mcp_connectors: false,
+      allow_member_model_prefs: true,
+      model_config: { defaultModel: "gpt-5.4", offeredProviders: ["openai"] },
+    };
+    const ctx = await getUserOrganisationModelContext(
+      makeDb(profiles, { [OTHER_ORG]: org }),
+      "u1",
+    );
+    expect(ctx).toEqual({
+      id: OTHER_ORG,
+      allowMemberModelPrefs: true,
+      config: { defaultModel: "gpt-5.4", offeredProviders: ["openai"] },
+    });
+  });
+
+  it("reports allowMemberModelPrefs false when the firm column is null", async () => {
+    const profiles: ProfileStore = {
+      u1: { organisation_id: DEFAULT_ORG, role: "member" },
+    };
+    const ctx = await getUserOrganisationModelContext(
+      makeDb(profiles, { [DEFAULT_ORG]: ARIA }),
+      "u1",
+    );
+    expect(ctx?.allowMemberModelPrefs).toBe(false);
+    expect(ctx?.config).toEqual({ defaultModel: null, offeredProviders: [] });
+  });
+
+  it("returns null for an orgless user", async () => {
+    const profiles: ProfileStore = {
+      u1: { organisation_id: null, role: "member" },
+    };
+    const ctx = await getUserOrganisationModelContext(
+      makeDb(profiles, {}),
+      "u1",
+    );
+    expect(ctx).toBeNull();
+  });
+
+  it("degrades to null on an unmigrated database (42703)", async () => {
+    const ctx = await getUserOrganisationModelContext(
+      makeDb({ u1: { organisation_id: null, role: null } }, {}, {
+        missingColumns: true,
+      }),
+      "u1",
+    );
+    expect(ctx).toBeNull();
   });
 });

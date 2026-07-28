@@ -19,6 +19,29 @@ export function personalConnectorsBlocked(
 }
 
 /**
+ * A member's model-preference pickers are hidden when their firm has switched
+ * the memberModelPrefs policy OFF — the firm then provides the model access and
+ * default (WS8 PR F). Orgless users are never gated.
+ */
+export function personalModelPrefsBlocked(
+    firm: OrganisationMembership | null | undefined,
+): boolean {
+    return !!firm && !firm.policies.memberModelPrefs;
+}
+
+/**
+ * The providers a firm offers its members in the model picker, or null when
+ * there is no restriction (orgless, or an empty offeredProviders list). Used to
+ * filter the model dropdowns down to the firm's allowed providers.
+ */
+export function firmOfferedProviders(
+    firm: OrganisationMembership | null | undefined,
+): string[] | null {
+    const offered = firm?.modelConfig?.offeredProviders ?? [];
+    return offered.length > 0 ? offered : null;
+}
+
+/**
  * Neutral "managed by your firm" placeholder rendered when a member navigates
  * directly to a route whose tab has been hidden by firm policy. Deliberately not
  * an error — there is simply nothing for the member to configure here.
