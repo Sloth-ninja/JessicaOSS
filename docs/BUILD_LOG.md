@@ -7,6 +7,66 @@
 
 ---
 
+## 2026-07-28 — Company-search saves feature (branch `company-search-saves`)
+
+**Scope:** the application code for the starred + recent companies feature on
+the Company Search page, over the migration landed as #49
+(`company_search_saves`). Self-contained backend seam + `/companies` routes +
+company-search UI. No new dependencies; no env vars; no migration touched.
+
+**Backend.** New self-contained module `lib/companySearchSaves.ts`
+(owner-copyright seam pattern):
+- `recordCompanyView` — upsert on `(user_id, company_number)` bumping
+  `last_viewed_at` + refreshing the name/status snapshot WITHOUT touching
+  `starred`/`created_at` (omitted from the payload, so a star survives a
+  re-view), then prunes non-starred rows beyond the 25 most-recent (starred
+  rows are excluded from the ordering, never pruned).
+- `setCompanyStar` — snapshot-present writes upsert (starring a not-yet-saved
+  company inserts it, since `company_name` is NOT NULL); snapshot-absent flips
+  the flag on an existing row only (a nameless insert is impossible, so an
+  unstar of a missing row is a safe no-op).
+- `listCompanySaves` — `{ starred (by company_name), recents (non-starred, by
+  last_viewed_at desc, capped 25) }`.
+- ALL functions degrade on an unmigrated DB: 42P01 (undefined_table) / 42703
+  (undefined_column) → empty lists / no-ops, never an error to the user
+  (mirrors the `organisations.ts` idiom, extended to the table code).
+
+Routes on the existing `/companies` router (same `requireAuth` + app-level
+`researchLimiter`; sibling try/catch + fixed-generic-detail pattern; caller id
+always from `res.locals.userId`, never the client): `GET /companies/saves`
+(registered before `GET /:companyNumber` so "saves" is never read as a company
+number), `POST /companies/:companyNumber/view` (body `{companyName,
+companyStatus?}`), `PUT /companies/:companyNumber/star` (body `{starred,
+companyName?, companyStatus?}`). Company number through the existing
+`validateCompanyNumber`; body validation via exported `validateViewBody` /
+`validateStarBody` (name non-empty ≤200; status optional ≤50; starred boolean).
+
+**Frontend.** `company-search/page.tsx`: when the search box is empty the left
+rail shows a "Starred" then "Recent" section (existing result-row idiom + a
+lucide `Star` toggle per row, aria-label "Star company"/"Unstar company",
+filled/unfilled per state); empty-state copy "Companies you view will appear
+here."; a star toggle in the open company's header next to the status line;
+opening a company fires a best-effort `POST view` (never blocks, errors
+swallowed); star/unstar updates the rail optimistically with rollback + a small
+inline message on error. Saves load behind the existing skeleton idiom; a
+failed `GET /saves` degrades to the plain empty state (logged via
+`console.error`), never an error wall. `mikeApi.ts`: `getCompanySaves`,
+`recordCompanyView`, `setCompanyStar` + `ChCompanySave`/`ChCompanySaves` types.
+
+**Verification.** Backend `npx tsc --noEmit` clean; `npx vitest run` green
+(373 → 393 tests: +20 new — lib upsert/snapshot-refresh/prune-beyond-25,
+star/unstar incl. star-inserts-with-snapshot, cross-user isolation,
+42P01/42703 degradation + a non-degradable-error passthrough guard; route
+validation for bad company number / name-too-long / non-boolean starred).
+Frontend `npx tsc --noEmit` + `eslint` clean on changed files; prettier clean
+on all changed files. **Screenshots pending** (deviation from the UI DoD noted
+— no live pilot Companies House key in this worktree to drive the rail;
+owner/reviewer to capture on the deployed environment). Merge-train check:
+`git fetch` at PR time showed `origin/main` unmoved (PR #48 not yet merged), so
+no merge/conflict resolution was required.
+
+---
+
 ## 2026-07-28 — Company-search saves migration (branch `company-search-saves-migration`)
 
 **Scope:** the owner-authorised migration for starred companies + recent

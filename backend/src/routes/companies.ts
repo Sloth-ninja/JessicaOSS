@@ -23,8 +23,103 @@ import {
 } from "../lib/companiesHouse";
 import { getCompanyBundle } from "../lib/legalSourcesTools/companiesHouseTools";
 import { safeErrorLog } from "../lib/safeError";
+import {
+  listCompanySaves,
+  recordCompanyView,
+  setCompanyStar,
+  type CompanySnapshot,
+} from "../lib/companySearchSaves";
 
 export const companiesRouter = Router();
+
+// Snapshot field limits for the saves routes (name is stored NOT NULL).
+const MAX_COMPANY_NAME = 200;
+const MAX_COMPANY_STATUS = 50;
+
+type ViewBodyResult =
+  | { ok: true; value: { companyName: string; companyStatus: string | null } }
+  | { ok: false; detail: string };
+
+/**
+ * Validate the POST /companies/:companyNumber/view body: `companyName` is
+ * required, non-empty and ≤200 chars; `companyStatus` is optional and ≤50
+ * chars. Exported for unit tests. Never trusts client-supplied ids — the caller
+ * id always comes from the authenticated session, not the body.
+ */
+export function validateViewBody(body: unknown): ViewBodyResult {
+  const obj = (body ?? {}) as Record<string, unknown>;
+
+  const rawName = obj.companyName;
+  if (typeof rawName !== "string" || !rawName.trim()) {
+    return { ok: false, detail: "A company name is required." };
+  }
+  const companyName = rawName.trim();
+  if (companyName.length > MAX_COMPANY_NAME) {
+    return { ok: false, detail: "Company name is too long." };
+  }
+
+  const statusResult = parseOptionalStatus(obj.companyStatus);
+  if (!statusResult.ok) return statusResult;
+
+  return {
+    ok: true,
+    value: { companyName, companyStatus: statusResult.value },
+  };
+}
+
+type StarBodyResult =
+  | { ok: true; value: { starred: boolean; snapshot?: CompanySnapshot } }
+  | { ok: false; detail: string };
+
+/**
+ * Validate the PUT /companies/:companyNumber/star body: `starred` is a required
+ * boolean; `companyName` (≤200) / `companyStatus` (≤50) are an optional snapshot
+ * used to insert a not-yet-saved company on first star. Exported for unit tests.
+ */
+export function validateStarBody(body: unknown): StarBodyResult {
+  const obj = (body ?? {}) as Record<string, unknown>;
+
+  if (typeof obj.starred !== "boolean") {
+    return { ok: false, detail: "`starred` must be a boolean." };
+  }
+  const starred = obj.starred;
+
+  const statusResult = parseOptionalStatus(obj.companyStatus);
+  if (!statusResult.ok) return statusResult;
+
+  let snapshot: CompanySnapshot | undefined;
+  const rawName = obj.companyName;
+  if (rawName !== undefined && rawName !== null) {
+    if (typeof rawName !== "string") {
+      return { ok: false, detail: "Company name is invalid." };
+    }
+    const companyName = rawName.trim();
+    if (companyName.length > MAX_COMPANY_NAME) {
+      return { ok: false, detail: "Company name is too long." };
+    }
+    if (companyName) {
+      snapshot = { companyName, companyStatus: statusResult.value };
+    }
+  }
+
+  return { ok: true, value: { starred, snapshot } };
+}
+
+function parseOptionalStatus(
+  raw: unknown,
+): { ok: true; value: string | null } | { ok: false; detail: string } {
+  if (raw === undefined || raw === null || raw === "") {
+    return { ok: true, value: null };
+  }
+  if (typeof raw !== "string") {
+    return { ok: false, detail: "Company status is invalid." };
+  }
+  const status = raw.trim();
+  if (status.length > MAX_COMPANY_STATUS) {
+    return { ok: false, detail: "Company status is too long." };
+  }
+  return { ok: true, value: status || null };
+}
 
 const KEY_MISSING_RESPONSE = {
   status: 409,
@@ -47,7 +142,10 @@ export function companiesHouseErrorResponse(err: unknown): {
 } {
   if (err instanceof CompaniesHouseError) {
     if (err.status === 401) {
-      return { status: KEY_MISSING_RESPONSE.status, body: { ...KEY_MISSING_RESPONSE.body } };
+      return {
+        status: KEY_MISSING_RESPONSE.status,
+        body: { ...KEY_MISSING_RESPONSE.body },
+      };
     }
     if (err.status === 404) {
       return {
@@ -85,7 +183,9 @@ export function validateCompanyNumber(raw: string): string | null {
   return /^[A-Z0-9]+$/.test(normalized) ? normalized : null;
 }
 
-async function resolveCompaniesHouseKey(userId: string): Promise<string | null> {
+async function resolveCompaniesHouseKey(
+  userId: string,
+): Promise<string | null> {
   const apiKeys = await getUserApiKeys(userId, createServerSupabase());
   const key = apiKeys.companies_house;
   return key && key.trim() ? key : null;
@@ -121,6 +221,75 @@ companiesRouter.get("/search", requireAuth, async (req, res) => {
     res.json(result);
   } catch (err) {
     logAndRespond("search", err, res);
+  }
+});
+
+// GET /companies/saves — the caller's starred + recent companies for the rail.
+// Registered before GET /:companyNumber so "saves" is never read as a company
+// number. Best-effort: an unmigrated database yields empty lists, never an
+// error (the lib degrades on 42P01/42703).
+companiesRouter.get("/saves", requireAuth, async (_req, res) => {
+  try {
+    const userId = res.locals.userId as string;
+    const saves = await listCompanySaves(createServerSupabase(), userId);
+    res.json(saves);
+  } catch (err) {
+    console.error("[companies/saves] request failed", safeErrorLog(err));
+    res.status(500).json({ detail: "Could not load your saved companies." });
+  }
+});
+
+// POST /companies/:companyNumber/view — record a view (best-effort recents).
+// Body: { companyName, companyStatus? }. The caller id is always the
+// authenticated session, never trusted from the client.
+companiesRouter.post("/:companyNumber/view", requireAuth, async (req, res) => {
+  try {
+    const userId = res.locals.userId as string;
+    const companyNumber = validateCompanyNumber(req.params.companyNumber);
+    if (!companyNumber) {
+      return void res.status(400).json({ detail: "Invalid company number." });
+    }
+    const parsed = validateViewBody(req.body);
+    if (!parsed.ok) {
+      return void res.status(400).json({ detail: parsed.detail });
+    }
+    await recordCompanyView(createServerSupabase(), userId, {
+      companyNumber,
+      companyName: parsed.value.companyName,
+      companyStatus: parsed.value.companyStatus,
+    });
+    res.status(204).end();
+  } catch (err) {
+    console.error("[companies/view] request failed", safeErrorLog(err));
+    res.status(500).json({ detail: "Could not record this view." });
+  }
+});
+
+// PUT /companies/:companyNumber/star — set/clear the starred flag.
+// Body: { starred: boolean, companyName?, companyStatus? } (the snapshot lets a
+// not-yet-saved company be inserted on first star).
+companiesRouter.put("/:companyNumber/star", requireAuth, async (req, res) => {
+  try {
+    const userId = res.locals.userId as string;
+    const companyNumber = validateCompanyNumber(req.params.companyNumber);
+    if (!companyNumber) {
+      return void res.status(400).json({ detail: "Invalid company number." });
+    }
+    const parsed = validateStarBody(req.body);
+    if (!parsed.ok) {
+      return void res.status(400).json({ detail: parsed.detail });
+    }
+    await setCompanyStar(
+      createServerSupabase(),
+      userId,
+      companyNumber,
+      parsed.value.starred,
+      parsed.value.snapshot,
+    );
+    res.status(204).end();
+  } catch (err) {
+    console.error("[companies/star] request failed", safeErrorLog(err));
+    res.status(500).json({ detail: "Could not update this company." });
   }
 });
 
