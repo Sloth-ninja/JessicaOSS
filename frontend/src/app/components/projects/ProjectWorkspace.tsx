@@ -20,6 +20,7 @@ import {
     listProjectChats,
     listTabularReviews,
     updateProject,
+    updateProjectVisibility,
 } from "@/app/lib/mikeApi";
 import type {
     Chat,
@@ -510,6 +511,29 @@ export function ProjectWorkspaceProvider({
                                                     ...prev,
                                                     shared_with:
                                                         updated.shared_with,
+                                                }
+                                              : prev,
+                                      );
+                                  }
+                        }
+                        firmName={profile?.firm?.name ?? null}
+                        resourceKind="matter"
+                        firmVisibility={project.visibility ?? "private"}
+                        onFirmVisibilityChange={
+                            project.is_owner === false
+                                ? undefined
+                                : async (next) => {
+                                      const updated =
+                                          await updateProjectVisibility(
+                                              projectId,
+                                              next,
+                                          );
+                                      setProject((prev) =>
+                                          prev
+                                              ? {
+                                                    ...prev,
+                                                    visibility:
+                                                        updated.visibility,
                                                 }
                                               : prev,
                                       );

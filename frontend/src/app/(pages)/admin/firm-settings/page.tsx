@@ -20,6 +20,7 @@ import {
 } from "@/app/components/shared/MfaVerificationPopup";
 import {
     expeditePendingDeletion,
+    getAdminFirmLibrary,
     getConnectorGalleryCuration,
     getFirmApiKeyStatus,
     getFirmMembers,
@@ -28,6 +29,7 @@ import {
     isMfaRequiredError,
     MikeApiError,
     restorePendingDeletion,
+    revertFirmLibraryItem,
     saveFirmApiKey,
     updateConnectorGalleryCuration,
     updateFirmMemberRole,
@@ -37,7 +39,9 @@ import {
     type ApiKeyProvider,
     type ConnectorRegistryAdminEntry,
     type FirmApiKeyStatus,
+    type FirmLibraryItem,
     type FirmMember,
+    type FirmResourceType,
     type GovernedResourceType,
     type OrganisationModelConfig,
     type OrganisationPolicies,
@@ -158,6 +162,7 @@ export default function FirmSettingsPage() {
                 <FirmApiKeysSection />
                 <PoliciesCard />
                 <ModelConfigCard />
+                <FirmLibrarySection />
                 <RetentionCard />
                 <PendingDeletionsSection />
                 <ConnectorsCurationCard />
@@ -798,6 +803,178 @@ function RetentionCard() {
                     {error && (
                         <p className="mt-2 text-xs text-red-600">{error}</p>
                     )}
+                </div>
+            </SectionCard>
+            {mfa.popup}
+        </>
+    );
+}
+
+// Firm library (WS9). Everything currently visible to the whole firm, with a
+// per-item Revert-to-private. Reverts are MFA-gated server-side; the whole
+// mutation (optimistic removal + network + rollback) is the guarded action so
+// it replays intact after an MFA step-up, mirroring MembersSection.
+type FirmLibraryAdminRow = FirmLibraryItem & {
+    resourceType: FirmResourceType;
+    typeLabel: string;
+};
+
+function firmLibraryRowKey(row: FirmLibraryAdminRow): string {
+    return `${row.resourceType}:${row.id}`;
+}
+
+function FirmLibrarySection() {
+    const mfa = useMfaGuardedAction();
+    const [rows, setRows] = useState<FirmLibraryAdminRow[] | null>(null);
+    const [loadError, setLoadError] = useState(false);
+    const [reloadKey, setReloadKey] = useState(0);
+    const [error, setError] = useState<string | null>(null);
+    const [busyKey, setBusyKey] = useState<string | null>(null);
+
+    useEffect(() => {
+        let active = true;
+        (async () => {
+            try {
+                const library = await getAdminFirmLibrary();
+                if (!active) return;
+                setRows([
+                    ...library.projects.map((item) => ({
+                        ...item,
+                        resourceType: "project" as const,
+                        typeLabel: "Matter",
+                    })),
+                    ...library.reviews.map((item) => ({
+                        ...item,
+                        resourceType: "tabular_review" as const,
+                        typeLabel: "Tabular review",
+                    })),
+                ]);
+                setLoadError(false);
+            } catch {
+                if (active) setLoadError(true);
+            }
+        })();
+        return () => {
+            active = false;
+        };
+    }, [reloadKey]);
+
+    // State reset lives in the handler, not the effect (set-state-in-effect).
+    const retryLoad = () => {
+        setLoadError(false);
+        setRows(null);
+        setReloadKey((k) => k + 1);
+    };
+
+    const revert = (row: FirmLibraryAdminRow) => {
+        const name =
+            row.name?.trim() || `this ${row.typeLabel.toLowerCase()}`;
+        if (
+            !window.confirm(
+                `Revert “${name}” to private? Everyone at your firm will lose access to it. The owner keeps it.`,
+            )
+        ) {
+            return;
+        }
+        setError(null);
+        // The whole mutation is the guarded action so it replays intact after an
+        // MFA step-up. The optimistic removal is rolled back on any failure;
+        // mfa-required is rethrown for the guard, everything else surfaces inline.
+        void mfa.run(async () => {
+            const key = firmLibraryRowKey(row);
+            setBusyKey(key);
+            const snapshot = rows;
+            setRows((prev) =>
+                (prev ?? []).filter((r) => firmLibraryRowKey(r) !== key),
+            );
+            try {
+                await revertFirmLibraryItem(row.resourceType, row.id);
+            } catch (err) {
+                setRows(snapshot);
+                if (isMfaRequiredError(err)) throw err;
+                if (err instanceof MikeApiError && err.message) {
+                    setError(err.message);
+                } else {
+                    setError("Could not revert that item.");
+                }
+            } finally {
+                setBusyKey(null);
+            }
+        });
+    };
+
+    return (
+        <>
+            <SectionCard
+                title="Firm library"
+                description="Everything currently visible to the whole firm. Reverting makes an item private again — its owner keeps it."
+            >
+                {error && (
+                    <p className="px-5 py-3 text-xs text-red-600">{error}</p>
+                )}
+                {loadError ? (
+                    <LoadErrorRow
+                        message="Could not load the firm library."
+                        onRetry={retryLoad}
+                    />
+                ) : rows === null ? (
+                    <div className="space-y-2 px-5 py-4">
+                        {[0, 1, 2].map((i) => (
+                            <div
+                                key={i}
+                                className="h-6 w-full animate-pulse rounded bg-gray-100"
+                            />
+                        ))}
+                    </div>
+                ) : rows.length === 0 ? (
+                    <p className="px-5 py-6 text-sm text-gray-500">
+                        Nothing is shared with the whole firm yet.
+                    </p>
+                ) : (
+                    <ul className="divide-y divide-gray-100">
+                        {rows.map((row) => {
+                            const rowBusy =
+                                busyKey === firmLibraryRowKey(row);
+                            const owner = row.ownerDisplayName?.trim() || "—";
+                            return (
+                                <li
+                                    key={firmLibraryRowKey(row)}
+                                    className="flex flex-wrap items-center gap-3 px-5 py-3.5"
+                                >
+                                    <span className="min-w-0 flex-1">
+                                        <span className="block truncate text-sm text-gray-900">
+                                            {row.name?.trim() ||
+                                                `Untitled ${row.typeLabel.toLowerCase()}`}
+                                        </span>
+                                        <span className="block truncate text-xs text-gray-400">
+                                            {row.typeLabel} · {owner} · updated{" "}
+                                            {formatUkDate(row.updatedAt)}
+                                        </span>
+                                    </span>
+                                    <span className="w-32 shrink-0 text-right">
+                                        {rowBusy ? (
+                                            <Loader2 className="ml-auto h-4 w-4 animate-spin text-gray-400" />
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                onClick={() => revert(row)}
+                                                className="text-xs font-medium text-gray-700 transition-colors hover:text-gray-950"
+                                            >
+                                                Revert to private
+                                            </button>
+                                        )}
+                                    </span>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                )}
+                <div className="flex items-start gap-2.5 border-t border-gray-100 bg-gray-50 px-5 py-3.5">
+                    <Info className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                    <p className="text-xs leading-relaxed text-gray-600">
+                        Reverts require two-factor confirmation and are recorded
+                        in the audit trail.
+                    </p>
                 </div>
             </SectionCard>
             {mfa.popup}

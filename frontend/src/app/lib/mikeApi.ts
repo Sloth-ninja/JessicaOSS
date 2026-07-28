@@ -751,6 +751,116 @@ export async function updateFirmModelConfig(patch: {
     return data.modelConfig;
 }
 
+// ---------------------------------------------------------------------------
+// Firm library & matter visibility (WS9)
+// ---------------------------------------------------------------------------
+
+export type FirmVisibility = "private" | "firm";
+export type FirmResourceType = "project" | "tabular_review";
+
+/**
+ * A share suggestion sourced from the caller's firm (GET /user/firm-members).
+ * Deliberately minimal — display name + email only, no user ids or roles.
+ */
+export interface FirmMemberSuggestion {
+    displayName: string | null;
+    email: string | null;
+}
+
+export async function getFirmMemberSuggestions(): Promise<
+    FirmMemberSuggestion[]
+> {
+    const data = await apiRequest<{ members: FirmMemberSuggestion[] }>(
+        "/user/firm-members",
+    );
+    return data.members;
+}
+
+interface VisibilityResult {
+    id: string;
+    visibility: FirmVisibility;
+    organisation_id: string | null;
+}
+
+/**
+ * Flip a matter between private and firm-visible. Owner-only and firm-members-
+ * only (both server-enforced); returns the stored visibility so the caller can
+ * reconcile its local state.
+ */
+export async function updateProjectVisibility(
+    projectId: string,
+    visibility: FirmVisibility,
+): Promise<VisibilityResult> {
+    return apiRequest<VisibilityResult>(`/projects/${projectId}/visibility`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ visibility }),
+    });
+}
+
+/**
+ * Flip a STANDALONE tabular review between private and firm-visible. A review
+ * inside a matter inherits the matter's visibility and is rejected server-side.
+ */
+export async function updateTabularReviewVisibility(
+    reviewId: string,
+    visibility: FirmVisibility,
+): Promise<VisibilityResult> {
+    return apiRequest<VisibilityResult>(
+        `/tabular-review/${reviewId}/visibility`,
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ visibility }),
+        },
+    );
+}
+
+export interface FirmLibraryItem {
+    id: string;
+    name: string | null;
+    ownerUserId: string | null;
+    ownerDisplayName: string | null;
+    updatedAt: string | null;
+    /** True when the caller owns the item (still listed — it is in the library). */
+    isOwner: boolean;
+    documentCount: number;
+    /** Matters only: chats + reviews under the matter. */
+    chatCount?: number;
+    reviewCount?: number;
+}
+
+export interface FirmLibrary {
+    projects: FirmLibraryItem[];
+    reviews: FirmLibraryItem[];
+}
+
+/**
+ * The member-facing firm library: firm-visible matters + standalone reviews in
+ * the caller's firm. An orgless caller gets empty lists.
+ */
+export async function getFirmLibrary(): Promise<FirmLibrary> {
+    return apiRequest<FirmLibrary>("/firm-library");
+}
+
+/** Admin view of the same library, for the Firm settings oversight card. */
+export async function getAdminFirmLibrary(): Promise<FirmLibrary> {
+    return apiRequest<FirmLibrary>("/admin/firm-library");
+}
+
+/**
+ * Admin revert of a firm-visible item back to private (MFA-gated server-side).
+ * Only affects an item in the admin's own firm; the owner keeps the item.
+ */
+export async function revertFirmLibraryItem(
+    resourceType: FirmResourceType,
+    id: string,
+): Promise<void> {
+    await apiRequest(`/admin/firm-library/${resourceType}/${id}/revert`, {
+        method: "POST",
+    });
+}
+
 export async function getProject(projectId: string): Promise<Project> {
     return apiRequest<Project>(`/projects/${projectId}`);
 }

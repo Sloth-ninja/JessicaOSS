@@ -1,8 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { User, UserPlus, Loader2, Plus } from "lucide-react";
-import type { ProjectPeople } from "@/app/lib/mikeApi";
+import { User, UserPlus, Loader2, Plus, Info } from "lucide-react";
+import {
+    getFirmMemberSuggestions,
+    type FirmMemberSuggestion,
+    type FirmVisibility,
+    type ProjectPeople,
+} from "@/app/lib/mikeApi";
+import { AccountToggle } from "@/app/(pages)/account/AccountToggle";
+import { ConfirmPopup } from "./ConfirmPopup";
 import { Modal } from "./Modal";
 
 /**
@@ -34,6 +41,28 @@ interface Props {
      * sync its local state on success. Throw to surface an error inline.
      */
     onSharedWithChange?: (sharedWith: string[]) => Promise<void> | void;
+    /**
+     * The caller's firm name (WS9). When set, orgless users are unaffected;
+     * firm members get the firm-member share suggestions and — for an item they
+     * own — the "Visible to everyone at <firm>" control. Null/undefined ⇒ no
+     * firm surfaces at all.
+     */
+    firmName?: string | null;
+    /** Noun used in the firm-visibility copy. Defaults to "matter". */
+    resourceKind?: "matter" | "review";
+    /** Current firm visibility of the item ('private' when absent). */
+    firmVisibility?: FirmVisibility;
+    /**
+     * Persist a firm-visibility flip (owner only). When provided, the toggle is
+     * shown; throw to surface an inline error (the optimistic flip is rolled
+     * back). Omitted ⇒ no toggle (non-owner, or see `firmVisibilityInherited`).
+     */
+    onFirmVisibilityChange?: (next: FirmVisibility) => Promise<void>;
+    /**
+     * True for a project-scoped review: it inherits its matter's visibility, so
+     * the toggle is replaced by an explanatory note.
+     */
+    firmVisibilityInherited?: boolean;
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -56,11 +85,29 @@ export function PeopleModal({
     currentUserEmail,
     breadcrumb,
     onSharedWithChange,
+    firmName,
+    resourceKind = "matter",
+    firmVisibility,
+    onFirmVisibilityChange,
+    firmVisibilityInherited,
 }: Props) {
     const [newEmail, setNewEmail] = useState("");
     const [busy, setBusy] = useState<"add" | "remove" | null>(null);
     const [removingEmail, setRemovingEmail] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
+
+    // Firm-member share suggestions (WS9) — fetched once per open when the
+    // caller belongs to a firm and can edit membership.
+    const [firmMembers, setFirmMembers] = useState<FirmMemberSuggestion[]>([]);
+
+    // Firm-visibility control state. `firmVisibilityLocal` mirrors the prop but
+    // flips optimistically so the toggle responds instantly; it rolls back on a
+    // failed persist.
+    const [firmVisibilityLocal, setFirmVisibilityLocal] =
+        useState<FirmVisibility>(firmVisibility ?? "private");
+    const [firmBusy, setFirmBusy] = useState(false);
+    const [firmError, setFirmError] = useState<string | null>(null);
+    const [confirmShareOpen, setConfirmShareOpen] = useState(false);
 
     // Server-resolved roster: owner email/display_name + members'
     // display_names. We keep `resource.shared_with` as the source of truth
@@ -79,7 +126,37 @@ export function PeopleModal({
         setError(null);
         setBusy(null);
         setRemovingEmail(null);
+        setFirmError(null);
+        setConfirmShareOpen(false);
     }, [open]);
+
+    // Keep the optimistic toggle in step with the parent's value.
+    useEffect(() => {
+        setFirmVisibilityLocal(firmVisibility ?? "private");
+    }, [firmVisibility]);
+
+    // Firm-member suggestions: only when the caller has a firm and may edit the
+    // member list. Failure leaves the list empty (the modal still works on
+    // free-typed emails), never an error.
+    const canEditMembers = !!onSharedWithChange;
+    const showFirmSurfaces = !!firmName;
+    useEffect(() => {
+        if (!open || !showFirmSurfaces || !canEditMembers) {
+            setFirmMembers([]);
+            return;
+        }
+        let cancelled = false;
+        getFirmMemberSuggestions()
+            .then((members) => {
+                if (!cancelled) setFirmMembers(members);
+            })
+            .catch(() => {
+                /* no suggestions on failure */
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [open, showFirmSurfaces, canEditMembers]);
 
     // Re-fetch roster whenever the modal opens or membership changes —
     // keyed by the joined shared_with list so add/remove triggers a refresh.
@@ -153,13 +230,15 @@ export function PeopleModal({
         !isSelfEmail &&
         busy === null;
 
-    async function handleAdd() {
-        if (!canAdd || !onSharedWithChange) return;
+    // Shared add path for both the email input and the firm suggestions. The
+    // caller is responsible for having validated `email` (a valid, not-already-
+    // present, non-owner, non-self address).
+    async function addEmail(email: string) {
+        if (!onSharedWithChange || busy !== null) return;
         setBusy("add");
         setError(null);
         try {
-            const next = [...sharedWith, trimmedNewEmail];
-            await onSharedWithChange(next);
+            await onSharedWithChange([...sharedWith, email]);
             setNewEmail("");
         } catch (e) {
             setError(
@@ -171,6 +250,58 @@ export function PeopleModal({
             setBusy(null);
         }
     }
+
+    async function handleAdd() {
+        if (!canAdd) return;
+        await addEmail(trimmedNewEmail);
+    }
+
+    // Firm suggestions not already on the item (and never the owner or you).
+    const firmSuggestions = firmMembers.filter((member) => {
+        const email = member.email?.trim().toLowerCase();
+        if (!email) return false;
+        if (sharedLower.includes(email)) return false;
+        if (ownerEmail && email === ownerEmail.toLowerCase()) return false;
+        if (email === normalizedCurrentUserEmail) return false;
+        return true;
+    });
+
+    // Persist a firm-visibility flip with an optimistic toggle + rollback.
+    async function applyVisibility(next: FirmVisibility) {
+        if (!onFirmVisibilityChange || firmBusy) return;
+        const previous = firmVisibilityLocal;
+        setFirmVisibilityLocal(next);
+        setFirmBusy(true);
+        setFirmError(null);
+        try {
+            await onFirmVisibilityChange(next);
+        } catch (e) {
+            setFirmVisibilityLocal(previous);
+            setFirmError(
+                e instanceof Error
+                    ? e.message
+                    : "Couldn't update firm visibility. Try again.",
+            );
+        } finally {
+            setFirmBusy(false);
+        }
+    }
+
+    // Confirm before turning ON (the whole firm gains access); OFF is immediate.
+    function handleVisibilityToggle(next: boolean) {
+        if (next) setConfirmShareOpen(true);
+        else void applyVisibility("private");
+    }
+
+    const noun = resourceKind === "review" ? "review" : "matter";
+    const firmShareDescription =
+        resourceKind === "review"
+            ? "Everyone in your firm can open this review and its documents, and use it in AI chat. They can't delete or manage it. Shown in the Firm library."
+            : "Everyone in your firm can open this matter, its documents and its chats, and use it in AI chat. They can't delete or manage it. Shown in the Firm library.";
+    const firmShareConfirmMessage =
+        resourceKind === "review"
+            ? `Everyone at ${firmName} will be able to open this review and its documents, and use it in AI chat. They can't delete or manage it, and it will appear in the Firm library. Firm admins can turn it off later.`
+            : `Everyone at ${firmName} will be able to open this matter, its documents and its chats, and use it in AI chat. They can't delete or manage it, and it will appear in the Firm library. Firm admins can turn it off later.`;
 
     async function handleRemove(email: string) {
         if (!onSharedWithChange || busy !== null) return;
@@ -270,6 +401,38 @@ export function PeopleModal({
                                 {error}
                             </p>
                         )}
+
+                        {/* Firm-member suggestions (WS9). External emails are
+                            still typed in the input above, exactly as before. */}
+                        {firmSuggestions.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-2 pt-1">
+                                {firmSuggestions.map((member) => {
+                                    const email = member.email!.trim();
+                                    const name =
+                                        member.displayName?.trim() || email;
+                                    return (
+                                        <button
+                                            key={email.toLowerCase()}
+                                            type="button"
+                                            onClick={() =>
+                                                void addEmail(
+                                                    email.toLowerCase(),
+                                                )
+                                            }
+                                            disabled={busy !== null}
+                                            title={`Add ${email}`}
+                                            className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            <Plus className="h-3 w-3" />
+                                            {name}
+                                        </button>
+                                    );
+                                })}
+                                <span className="text-xs text-gray-400">
+                                    firm suggestions
+                                </span>
+                            </div>
+                        )}
                     </section>
                 )}
 
@@ -355,8 +518,77 @@ export function PeopleModal({
                         </ul>
                     )}
                 </section>
+
+                {/* Firm visibility (WS9). Shown only to firm members. A
+                    project-scoped review inherits its matter's visibility, so it
+                    gets an explanatory note instead of the toggle. */}
+                {showFirmSurfaces && firmVisibilityInherited && (
+                    <section className="rounded-xl border border-gray-200">
+                        <div className="flex items-start gap-2.5 px-4 py-3">
+                            <Info className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                            <p className="text-xs leading-relaxed text-gray-600">
+                                This review takes its matter&apos;s visibility.
+                                To share it with everyone at {firmName}, change
+                                the matter&apos;s visibility instead.
+                            </p>
+                        </div>
+                    </section>
+                )}
+
+                {showFirmSurfaces &&
+                    !firmVisibilityInherited &&
+                    onFirmVisibilityChange && (
+                        <section className="overflow-hidden rounded-xl border border-gray-200">
+                            <div className="flex items-start gap-3 px-4 py-3">
+                                <div className="min-w-0 flex-1">
+                                    <p className="text-sm font-medium text-gray-800">
+                                        Visible to everyone at {firmName}
+                                    </p>
+                                    <p className="mt-0.5 text-xs leading-relaxed text-gray-500">
+                                        {firmShareDescription}
+                                    </p>
+                                    {firmError && (
+                                        <p className="mt-1.5 text-xs text-red-500">
+                                            {firmError}
+                                        </p>
+                                    )}
+                                </div>
+                                <div className="mt-0.5 shrink-0">
+                                    <AccountToggle
+                                        size="md"
+                                        checked={firmVisibilityLocal === "firm"}
+                                        loading={firmBusy}
+                                        onChange={handleVisibilityToggle}
+                                        ariaLabel={`Make this ${noun} visible to everyone at ${firmName}`}
+                                    />
+                                </div>
+                            </div>
+                            <div className="flex items-start gap-2.5 border-t border-gray-100 bg-gray-50 px-4 py-2.5">
+                                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gray-400" />
+                                <p className="text-xs leading-relaxed text-gray-500">
+                                    Turning this on is recorded in the firm audit
+                                    trail. Firm admins can turn it off.
+                                </p>
+                            </div>
+                        </section>
+                    )}
             </div>
 
+            <ConfirmPopup
+                open={confirmShareOpen}
+                title={`Make this ${noun} visible to everyone at ${firmName}?`}
+                message={firmShareConfirmMessage}
+                confirmLabel="Make visible"
+                confirmStatus={firmBusy ? "loading" : "idle"}
+                onCancel={() => {
+                    if (firmBusy) return;
+                    setConfirmShareOpen(false);
+                }}
+                onConfirm={() => {
+                    setConfirmShareOpen(false);
+                    void applyVisibility("firm");
+                }}
+            />
         </Modal>
     );
 }

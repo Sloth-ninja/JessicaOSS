@@ -19,6 +19,9 @@ export interface Project {
   name: string;
   cm_number: string | null;
   shared_with: string[];
+  /** Firm visibility (WS9): 'firm' means every member of the owner's firm can
+   *  open it; 'private' (or absent) is owner + individually-shared only. */
+  visibility?: "private" | "firm";
   created_at: string;
   updated_at: string;
   documents?: Document[];
@@ -350,6 +353,9 @@ export interface TabularReview {
   practice?: string | null;
   /** Per-review email list. Used so standalone (project_id null) reviews can be shared directly. */
   shared_with?: string[];
+  /** Firm visibility (WS9) for standalone reviews; a review inside a matter
+   *  inherits the matter's visibility (its own stays 'private'). */
+  visibility?: "private" | "firm";
   /** Server-set: true when the requesting user is the review's creator. */
   is_owner?: boolean;
   created_at: string;

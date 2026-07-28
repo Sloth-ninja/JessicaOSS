@@ -14,6 +14,7 @@ import {
     RowActions,
 } from "@/app/components/shared/RowActions";
 import { PageHeader } from "@/app/components/shared/PageHeader";
+import { FirmBadge } from "@/app/components/shared/FirmBadge";
 import {
     TABLE_CHECKBOX_CLASS,
     TABLE_STICKY_CELL_BG,
@@ -419,6 +420,11 @@ export function ProjectsOverview() {
                                         toggleOne(project.id)
                                     }
                                     label={project.name}
+                                    adornment={
+                                        project.visibility === "firm" ? (
+                                            <FirmBadge />
+                                        ) : undefined
+                                    }
                                     editing={renamingId === project.id}
                                     editValue={renameValue}
                                     onEditValueChange={setRenameValue}

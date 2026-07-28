@@ -7,6 +7,78 @@
 
 ---
 
+## 2026-07-28 — WS9 PR 3: firm-visibility frontend (branch `ws9-firm-visibility-frontend`)
+
+**Scope:** the firm-library UI on top of WS9 PR 2's backend (#55). Frontend only —
+no backend/migration/`.env` touched (verified: `git diff --name-only` shows zero
+`backend/` files; backend `tsc` + `vitest` re-run green, 500/500, to prove it).
+Built to the approved mock-ups (three screens). Orgless self-hosters see none of it.
+
+**mikeApi (`lib/mikeApi.ts`).** Five typed functions + types for the new endpoints:
+`getFirmMemberSuggestions` (`GET /user/firm-members`), `updateProjectVisibility` /
+`updateTabularReviewVisibility` (`PATCH …/visibility`), `getFirmLibrary`
+(`GET /firm-library`), `getAdminFirmLibrary` (`GET /admin/firm-library`),
+`revertFirmLibraryItem` (`POST /admin/firm-library/:type/:id/revert`). `visibility?:
+'private' | 'firm'` added to the `Project` and `TabularReview` overview types.
+
+**PeopleModal (`components/shared/PeopleModal.tsx`).** (a) Firm-member suggestion
+pills under the email input — fetched via `getFirmMemberSuggestions` only when the
+caller has a firm and can edit membership; clicking a pill adds that member through
+the existing add flow (refactored into a shared `addEmail`); suggestions already on
+the item / the owner / you are filtered out; external emails are still free-typed
+exactly as before; a fetch failure yields no pills (never an error). (b) A "Visible
+to everyone at <firm>" section: an `AccountToggle` (now with an `ariaLabel` prop)
+wired to the visibility routes, shown ONLY to a firm member who owns the item;
+optimistic flip with rollback + inline error; a `ConfirmPopup` before turning ON
+whose copy states what the whole firm gains (mock-up wording); the info strip
+"Turning this on is recorded in the firm audit trail. Firm admins can turn it off."
+Threaded a `resourceKind` ("matter" | "review") for copy and a
+`firmVisibilityInherited` flag: a project-scoped review hides the toggle and shows
+the "takes its matter's visibility" note instead (wired in `TabularReviewView` off
+`review.project_id`; matters wired in `ProjectWorkspace`).
+
+**Firm library page (`(pages)/firm-library/page.tsx`).** New page per screen 2:
+breadcrumbs "Firm › Firm library", a card listing firm-visible matters + standalone
+reviews (Name + type + `FirmBadge`, Owner, Contents counts, Updated DD/MM/YYYY);
+rows navigate to the normal matter/review views; loading skeleton, retry row on load
+failure (never an unbounded spinner), honest empty state, mock-up info strip.
+Sidebar (`AppSidebar.tsx`): a "Firm" group with a "Firm library" item gated on
+`profile?.firm` presence (NOT admin — contrast the isAdmin-gated Firm admin group).
+
+**Admin card (`admin/firm-settings/page.tsx`).** A "Firm library" `SectionCard`
+(new `FirmLibrarySection`) per screen 3: lists everything firm-visible with a
+per-item "Revert to private" — `window.confirm` + `useMfaGuardedAction` (the whole
+optimistic-removal mutation is the guarded action so it replays intact after an MFA
+step-up), rollback + inline error, `LoadErrorRow`, skeleton, empty state, and the
+info strip "Reverts require two-factor confirmation and are recorded in the audit
+trail." Placed between Model configuration and Deletion retention.
+
+**Badges.** `FirmBadge` (small indigo pill, mock-up styling adapted to the existing
+`text-[11px]` badge idiom) shown on firm-visible rows in the matters list
+(`ProjectsOverview`) and the tabular-reviews list (`(pages)/tabular-reviews`), via a
+new optional `adornment` prop on the shared `TablePrimaryCell` (renders after the
+truncating label).
+
+**Mock-up deviations (2, both honesty-driven).** (1) The admin card shows
+"<type> · <owner> · updated DD/MM/YYYY" rather than the mock-up's "firm-visible since
+DD/MM/YYYY": the payload carries only `updatedAt` (bumped by any edit, not just the
+flip), so claiming "firm-visible since" would be false. (2) Firm-library review rows
+show "N documents" without the mock-up's "· M columns": the firm-library payload
+returns a document count but no column count for reviews, so the column figure is not
+rendered rather than fabricated (render only what is built — DURABLE_LESSONS).
+
+**Verification.** Frontend `npx tsc --noEmit` clean; `npx eslint` on the changed
+files reports zero problems introduced — the only 3 errors are pre-existing
+`react-hooks/set-state-in-effect` on untouched lines (`ProjectsOverview` 73/107,
+`AppSidebar` 109; the repo carries 112 such baseline problems repo-wide, confirmed
+via `npm run lint`). NO prettier run on frontend files (DURABLE_LESSONS: 4-space,
+ESLint-enforced). Backend `tsc` + `vitest` re-run green (500/500) to prove it was
+untouched. **Screenshots pending** (deviation from the definition-of-done's
+"screenshots for UI"): built headless in a worktree with no browser; the mock-ups
+are the visual reference. In-browser QA to be done on the pilot after merge/deploy.
+
+---
+
 ## 2026-07-28 — WS9 PR 2: firm-visibility backend (branch `ws9-firm-visibility-backend`)
 
 **Scope:** backend enforcement + routes for the firm library, on top of WS9 PR 1's

@@ -30,6 +30,7 @@ export function AccountToggle({
     onChange,
     size = "sm",
     label,
+    ariaLabel,
     className,
 }: {
     checked: boolean;
@@ -38,6 +39,8 @@ export function AccountToggle({
     onChange: (checked: boolean) => void;
     size?: AccountToggleSize;
     label?: string;
+    /** Accessible name when there is no visible `label` beside the switch. */
+    ariaLabel?: string;
     className?: string;
 }) {
     const sizes = sizeClasses[size];
@@ -46,6 +49,7 @@ export function AccountToggle({
             type="button"
             role="switch"
             aria-checked={checked}
+            aria-label={ariaLabel}
             disabled={disabled || loading}
             onClick={() => onChange(!checked)}
             className={cn(

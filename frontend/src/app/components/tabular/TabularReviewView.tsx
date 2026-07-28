@@ -26,6 +26,7 @@ import {
     regenerateTabularCell,
     streamTabularGeneration,
     updateTabularReview,
+    updateTabularReviewVisibility,
     uploadReviewDocument,
 } from "@/app/lib/mikeApi";
 import type {
@@ -1073,6 +1074,31 @@ export function TRView({ reviewId, projectId }: Props) {
                                       ? {
                                             ...prev,
                                             shared_with: updated.shared_with,
+                                        }
+                                      : prev,
+                              );
+                          }
+                }
+                firmName={profile?.firm?.name ?? null}
+                resourceKind="review"
+                firmVisibility={review?.visibility ?? "private"}
+                // A review inside a matter inherits the matter's visibility, so
+                // the toggle is replaced by an explanatory note.
+                firmVisibilityInherited={!!review?.project_id}
+                onFirmVisibilityChange={
+                    review?.is_owner === false || !!review?.project_id
+                        ? undefined
+                        : async (next) => {
+                              const updated =
+                                  await updateTabularReviewVisibility(
+                                      reviewId,
+                                      next,
+                                  );
+                              setReview((prev) =>
+                                  prev
+                                      ? {
+                                            ...prev,
+                                            visibility: updated.visibility,
                                         }
                                       : prev,
                               );
