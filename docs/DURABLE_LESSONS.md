@@ -371,3 +371,22 @@ with member scope, so they were unaffected. Debugging signature: a detail/GET ro
 404s a deleted item but a sibling sub-route (`/:id/documents`, `/:id/generate`)
 returns 200/streams for the same id; grep shows the sub-routes calling the access
 helper but never `getTombstonedIds`.
+
+### 2026-07-28 — Shell cwd drift into a worktree silently updates the wrong refs
+
+Trigger: after inspecting a crashed builder's worktree with `cd <worktree> &&
+git status`, the session shell's cwd stayed in that worktree. Subsequent
+chained `gh pr merge … && git pull` commands then fast-forwarded the
+WORKTREE's branch while the main checkout's `main` fell 4 commits behind —
+and a composed-range review workflow diffed `<base>...main` against the stale
+ref, reviewing only a third of the train. The invalid run surfaced as an
+adversarial verifier "refuting" a real finding on the grounds that the code
+"was not in the range". Rules: (1) ref-affecting git commands always name
+their checkout explicitly (`git -C /abs/path/to/main-checkout …`) — never
+rely on the session cwd, which persists across turns and outlives worktree
+inspections; (2) composed-range reviews pin BOTH ends of the range to SHAs
+(`<base-sha>...<head-sha>`), never a local branch name, and reviewers verify
+the head SHA matches origin before starting. Debugging signature: a verifier
+claiming reviewed code does not exist on `main`, or `git pull` output
+"Updating <sha>.." where `<sha>` is a feature-branch head, means the command
+ran in the wrong checkout — check `git worktree list` and your cwd.
