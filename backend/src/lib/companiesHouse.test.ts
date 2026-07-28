@@ -5,6 +5,7 @@ import {
   getCompanyProfile,
   getCompanyOfficers,
   getCompanyPSCs,
+  getFilingDocument,
   getFilingHistory,
   searchCompanies,
   resetCompaniesHouseStateForTests,
@@ -278,5 +279,258 @@ describe("companiesHouse client", () => {
     await expect(
       searchCompanies(API_KEY, "bucket-drain-after-refill"),
     ).resolves.toBeDefined();
+  });
+});
+
+describe("getFilingDocument", () => {
+  const API_KEY = "test-key-abc123";
+  const DOC_BASE = "https://document-api.company-information.service.gov.uk";
+  const METADATA_URL = `${DOC_BASE}/document/abc123`;
+  const CONTENT_URL = `${DOC_BASE}/document/abc123/content`;
+
+  beforeEach(() => {
+    resetCompaniesHouseStateForTests();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function pdfResponse(bytes: Uint8Array, headers: Record<string, string>) {
+    return new Response(bytes.buffer as ArrayBuffer, { status: 200, headers });
+  }
+
+  it("resolves the metadata → content chain and returns the bytes, type and filename", async () => {
+    const pdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]); // %PDF
+    const fetchMock = vi.fn((url: string | URL, init?: RequestInit) => {
+      void init;
+      const u = String(url);
+      if (u.includes("/filing-history/")) {
+        return Promise.resolve(
+          jsonResponse({
+            date: "2024-03-01",
+            type: "CS01",
+            links: { document_metadata: METADATA_URL },
+          }),
+        );
+      }
+      if (u === METADATA_URL) {
+        return Promise.resolve(
+          jsonResponse({ links: { document: CONTENT_URL } }),
+        );
+      }
+      if (u === CONTENT_URL) {
+        return Promise.resolve(
+          pdfResponse(pdfBytes, {
+            "content-type": "application/pdf",
+            "content-length": String(pdfBytes.byteLength),
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${u}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getFilingDocument(API_KEY, "13927967", "abc123");
+
+    expect(result.contentType).toBe("application/pdf");
+    expect(result.filename).toBe("13927967-2024-03-01-CS01.pdf");
+    expect(Buffer.from(pdfBytes).equals(result.bytes)).toBe(true);
+
+    // The signed-content hop is fetched with Accept: application/pdf.
+    const contentCall = fetchMock.mock.calls.find(
+      (c) => String(c[0]) === CONTENT_URL,
+    );
+    expect(contentCall).toBeDefined();
+    expect(
+      (contentCall?.[1] as { headers?: Record<string, string> })?.headers
+        ?.Accept,
+    ).toBe("application/pdf");
+  });
+
+  it("throws a 404 when the filing transaction has no document_metadata link", async () => {
+    const fetchMock = vi.fn((url?: string | URL) => {
+      void url;
+      return Promise.resolve(
+        jsonResponse({ date: "2024-03-01", type: "CS01" }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getFilingDocument(API_KEY, "13927967", "abc123"),
+    ).rejects.toMatchObject({ status: 404 });
+    // Never reaches the document API host.
+    expect(
+      fetchMock.mock.calls.some((c) => String(c[0]).includes(DOC_BASE)),
+    ).toBe(false);
+  });
+
+  it("throws a 404 when the document metadata has no content link", async () => {
+    const fetchMock = vi.fn((url: string | URL) => {
+      const u = String(url);
+      if (u.includes("/filing-history/")) {
+        return Promise.resolve(
+          jsonResponse({ links: { document_metadata: METADATA_URL } }),
+        );
+      }
+      return Promise.resolve(jsonResponse({ links: {} }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getFilingDocument(API_KEY, "13927967", "abc123"),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("rejects a document whose declared size exceeds the guard", async () => {
+    const fetchMock = vi.fn((url: string | URL) => {
+      const u = String(url);
+      if (u.includes("/filing-history/")) {
+        return Promise.resolve(
+          jsonResponse({ links: { document_metadata: METADATA_URL } }),
+        );
+      }
+      if (u === METADATA_URL) {
+        return Promise.resolve(
+          jsonResponse({ links: { document: CONTENT_URL } }),
+        );
+      }
+      return Promise.resolve(
+        pdfResponse(new Uint8Array([0]), {
+          "content-type": "application/pdf",
+          "content-length": String(26 * 1024 * 1024),
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getFilingDocument(API_KEY, "13927967", "abc123"),
+    ).rejects.toBeInstanceOf(CompaniesHouseError);
+  });
+
+  it("aborts and rejects a streamed body that exceeds the cap despite no honest Content-Length", async () => {
+    // 26 MB in a single chunk, streamed with NO content-length header — the
+    // fast-path check can't catch it, so the streaming counter must abort.
+    const oversizeChunk = new Uint8Array(26 * 1024 * 1024);
+    let streamCancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(oversizeChunk);
+        // Deliberately never close: we expect a cancel before the next read.
+      },
+      cancel() {
+        streamCancelled = true;
+      },
+    });
+    const fetchMock = vi.fn((url: string | URL) => {
+      const u = String(url);
+      if (u.includes("/filing-history/")) {
+        return Promise.resolve(
+          jsonResponse({ links: { document_metadata: METADATA_URL } }),
+        );
+      }
+      if (u === METADATA_URL) {
+        return Promise.resolve(
+          jsonResponse({ links: { document: CONTENT_URL } }),
+        );
+      }
+      return Promise.resolve(
+        new Response(stream, {
+          status: 200,
+          headers: { "content-type": "application/pdf" },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getFilingDocument(API_KEY, "13927967", "abc123"),
+    ).rejects.toMatchObject({ status: 502 });
+    // The transfer was torn down, not fully buffered.
+    expect(streamCancelled).toBe(true);
+  });
+
+  it("forces a non-allowlisted upstream content type to application/octet-stream", async () => {
+    const bytes = new Uint8Array([0x3c, 0x68, 0x74, 0x6d, 0x6c]); // "<html"
+    const fetchMock = vi.fn((url: string | URL) => {
+      const u = String(url);
+      if (u.includes("/filing-history/")) {
+        return Promise.resolve(
+          jsonResponse({ links: { document_metadata: METADATA_URL } }),
+        );
+      }
+      if (u === METADATA_URL) {
+        return Promise.resolve(
+          jsonResponse({ links: { document: CONTENT_URL } }),
+        );
+      }
+      return Promise.resolve(
+        pdfResponse(bytes, { "content-type": "text/html; charset=utf-8" }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getFilingDocument(API_KEY, "13927967", "abc123");
+    expect(result.contentType).toBe("application/octet-stream");
+  });
+
+  it("rejects host-spoofing metadata links (suffix-domain and userinfo bypass) without a key-attached fetch", async () => {
+    const bypassUrls = [
+      // Suffix-domain: real host is a prefix of an attacker domain.
+      "https://document-api.company-information.service.gov.uk.evil.com/doc",
+      // Userinfo trick: everything before '@' is credentials, real host is evil.com.
+      "https://document-api.company-information.service.gov.uk@evil.com/doc",
+    ];
+    for (const bypassUrl of bypassUrls) {
+      resetCompaniesHouseStateForTests();
+      const fetchMock = vi.fn((url?: string | URL) => {
+        void url;
+        return Promise.resolve(
+          jsonResponse({ links: { document_metadata: bypassUrl } }),
+        );
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(
+        getFilingDocument(API_KEY, "13927967", "abc123"),
+      ).rejects.toMatchObject({ status: 404 });
+      // The authenticated request must never reach the spoofed host.
+      expect(
+        fetchMock.mock.calls.some((c) => String(c[0]).includes("evil.com")),
+      ).toBe(false);
+    }
+  });
+
+  it("rejects a metadata link that points off the document API host (SSRF guard)", async () => {
+    const fetchMock = vi.fn((url?: string | URL) => {
+      void url;
+      return Promise.resolve(
+        jsonResponse({
+          links: { document_metadata: "https://evil.example.com/doc" },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getFilingDocument(API_KEY, "13927967", "abc123"),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(
+      fetchMock.mock.calls.some((c) =>
+        String(c[0]).includes("evil.example.com"),
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects an empty API key without any network call", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getFilingDocument("", "13927967", "abc123"),
+    ).rejects.toMatchObject({ status: 401 });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

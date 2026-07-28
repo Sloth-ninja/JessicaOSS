@@ -7,6 +7,114 @@
 
 ---
 
+## 2026-07-28 — Company search: PSC/officer status + filing-history documents (branch `company-search-status-filings`)
+
+**Scope:** two owner-reported company-search defects. (1) Ceased PSCs and
+resigned officers rendered as if current — a company with 2 of 3 PSCs marked
+CEASED on the register showed no indication. (2) Filing-history rows had no way
+to view the underlying document. Frontend-only fix for (1); a new backend
+document-proxy route for (2). No new dependencies, no migrations.
+
+**Defect 1 — status visibility (`frontend/.../assistant/CompanyPanel.tsx`, one
+component backing BOTH the assistant side panel and the `/company-search` tabs):**
+- PSC renderer now reads `ceased_on` (previously never read — the field existed
+  on the type but the UI ignored it): neutral grey "Ceased" pill (shared
+  `Badge` secondary variant, matching the company-type pill idiom already on the
+  page) + "Ceased DD/MM/YYYY", de-emphasised (muted) row.
+- Officers: the inline "Resigned {date}" text promoted to the same "Resigned"
+  pill treatment + DD/MM/YYYY, de-emphasised row.
+- Both lists sorted **active-first** via a stable partition (preserves API order
+  within each group). Section headers show a muted count suffix
+  ("· N resigned" / "· N ceased") when any are inactive.
+- Dates use a new `formatUkShortDate` (en-GB DD/MM/YYYY) for the status dates;
+  the active "Appointed" line kept its existing long-form to minimise churn.
+
+**Defect 2 — filing document retrieval:**
+- `lib/companiesHouse.ts`: `getFilingTransaction` (single filing metadata, via
+  the shared auth/rate-limit/cache `chGet`) + `getFilingDocument`, which walks
+  the three-hop CH Document API chain (transaction → `links.document_metadata`
+  on the document-api host → metadata `links.document` → `/content` with
+  `Accept: application/pdf`, following CH's 302 to the signed S3 URL). Returns
+  `{ bytes, contentType, filename }`. **25 MB size guard, hardened after review:**
+  a fast-path check on a declared `Content-Length`, then a **streamed read with
+  a running byte counter that aborts the transfer (`AbortController` + reader
+  cancel) the instant the cap is exceeded** — so a lying/absent Content-Length
+  or a chunked response can't balloon memory. **SSRF guard, hardened after
+  review:** the metadata/content URLs come from CH's own response but are
+  validated with `isDocumentApiUrl` — `new URL(u)` then exact
+  `protocol === "https:" && host === "document-api.company-information.service.gov.uk"`.
+  The original `startsWith` guard was **bypassable** (reviewer-verified) by a
+  suffix-domain (`…service.gov.uk.evil.com`) or userinfo
+  (`…service.gov.uk@evil.com`) URL — either would have exfiltrated the API key
+  attached to the initial request; the parse+exact-host check rejects both.
+  Anything off-host is treated as "no document" (404). Node's undici `fetch`
+  drops the `Authorization` header on the cross-origin 302, so the key never
+  reaches the signed S3 host. Key never appears in any thrown message (module
+  invariant preserved). The response `Content-Type` is **allowlisted**
+  (`application/pdf` / `application/octet-stream`); anything else is forced to
+  `application/octet-stream` so an inline disposition never renders untrusted
+  upstream content.
+- `routes/companies.ts`: `GET /:companyNumber/filing-history/:transactionId/document`
+  + a `validateTransactionId` guard (`[A-Za-z0-9_-]+`, rejects path/query
+  metacharacters — the value is interpolated into an outgoing CH URL, same
+  rationale as `validateCompanyNumber`). Streams bytes with the upstream
+  Content-Type and `Content-Disposition: inline; filename="<num>-<date>-<type>.pdf"`.
+  **Design decision (approved):** this handler uses the sibling routes'
+  try/catch + `logAndRespond` pattern rather than `asyncHandler`. The catch
+  guarantees a response AND maps CH errors onto fixed safe details via
+  `companiesHouseErrorResponse` (404 no-document, 409 key-missing, 502
+  otherwise) — a generic `asyncHandler` 500 would flatten those. The
+  response-guarantee is exactly what the async-handler rule
+  (DURABLE_LESSONS 2026-07-19/21) exists to provide, so the rule's intent is met.
+- `mikeApi.ts`: `ChFilingHistoryItem` gains `transaction_id` + `links`;
+  new `getFilingDocument(companyNumber, transactionId): Promise<Blob>` (reuses
+  `apiBlobRequest`).
+- `FilingHistoryList.tsx`: per-item "View PDF" affordance, shown only when the
+  item carries `links.document_metadata` + `transaction_id`. Fetches the blob,
+  opens it via `URL.createObjectURL` in a new tab (revoked after a delay), with
+  a per-item busy spinner and an inline fixed error on failure. If
+  `window.open` returns null (pop-up blocked) the blob URL is revoked
+  immediately and the inline error is shown (review nit). Existing page-level
+  "View on Companies House" link retained.
+- `legalSourcesTools/companiesHouseTools.ts`: one-line addition to the
+  `companies_house_get_company` tool description instructing the model to state
+  a resigned officer's / ceased PSC's status explicitly (raw data already
+  carried the fields). Tools otherwise unchanged.
+
+**Verification:**
+- Backend `npx tsc --noEmit` clean; `npx vitest run` — **388/388** across 26
+  files (15 new tests: 9 for the metadata→content helper in
+  `companiesHouse.test.ts` — happy chain, no-metadata 404, no-content-link 404,
+  declared-oversize reject, **streamed-oversize abort→502**, **content-type
+  allowlist→octet-stream**, **host-spoof bypass reject (suffix-domain +
+  userinfo, no key-attached fetch)**, off-host SSRF reject, empty-key 401
+  no-network; 6 in `companies.test.ts` — `validateTransactionId` + the document
+  route mounted on a real HTTP server with the CH client mocked: streams bytes +
+  headers, no-document→404, key-missing→409, oversize→502-no-raw-text,
+  invalid-txid→400).
+- Frontend `npx tsc --noEmit` clean; `npx eslint` clean on the changed files.
+- Prettier: changed backend files clean **except** two pre-existing lines in
+  `routes/companies.ts` (verbatim in HEAD, outside this diff) — left untouched
+  to preserve minimal-diff discipline. The frontend file follows the repo's
+  4-space house style (eslint is the enforced frontend gate and passes);
+  prettier's 2-space default is not applied so as not to reformat the whole file.
+
+**Deviation from DoD:** no UI screenshots attached (headless environment) — the
+frontend changes are verified by tsc + eslint only; **screenshots pending** a
+manual pass by the owner before the pilot. No unit-test framework on the
+frontend (repo-wide), so FE changes carry no tests, per CLAUDE.md.
+
+**Review round (REQUEST_CHANGES → addressed):** independent review flagged one
+security blocker (bypassable `startsWith` host check → parse+exact-host
+`isDocumentApiUrl`, with suffix-domain + userinfo regression tests), one
+should-fix (buffer-then-check size guard → streamed read with an aborting byte
+counter, + a streamed-oversize test), and two nits (content-type allowlist;
+`window.open` null / pop-up-blocked handling). All fixed on this branch; the
+DURABLE_LESSONS entry was corrected to prescribe URL-parse + exact host/protocol
+equality and name the two bypass shapes.
+
+---
+
 ## 2026-07-28 — Company-search saves migration (branch `company-search-saves-migration`)
 
 **Scope:** the owner-authorised migration for starred companies + recent

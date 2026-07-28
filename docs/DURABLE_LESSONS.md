@@ -31,6 +31,7 @@
 - 2026-07-22 — user_profiles.user_id is uuid; event tables' user_id is text — never cross-join raw
 - 2026-07-23 — Relative `cd` in chained/background shell commands: use absolute paths
 - 2026-07-27 — Fail-open vs fail-safe is a per-operation choice; deletes fail SAFE
+- 2026-07-28 — CH document proxy: parse+exact-host allowlist (not startsWith); fetch drops Authorization on cross-origin 302; stream-cap the body
 
 ## Lessons
 
@@ -269,3 +270,53 @@ export to a mocked module (`userDataCleanup` here), grep for every
 `vi.mock("…/thatModule"` and add the new name to each factory. Debugging
 signature: a whole test FILE fails to load with "No <newExport> export is
 defined on the … mock", not an assertion failure.
+
+### 2026-07-28 — Companies House document proxy: two load-bearing facts
+
+Trigger: building the filing-document view/download path (transaction →
+Document API metadata → signed content URL). Two things the whole design leans
+on:
+
+- **`fetch` (undici/Node 22) strips the `Authorization` header when it follows
+  a cross-origin redirect.** CH's `/content` endpoint 302s to a *pre-signed*
+  S3 URL on a different host; because the redirect is cross-origin, our Basic
+  auth header is dropped automatically, so the API key never reaches S3 (and
+  the signed URL already carries its own auth). This is why `redirect: "follow"`
+  is safe here — but it means you must NOT assume the header survives a redirect
+  when you *do* need it. Rule: for any authenticated fetch that may redirect,
+  know whether the hop is same- or cross-origin; never rely on Authorization
+  persisting across a cross-origin 302.
+- **Host-check any URL you take from an upstream JSON body before fetching it
+  with credentials attached — by PARSING it, never by `startsWith`.**
+  `links.document_metadata` / `links.document` come from CH's own response, but
+  a tampered/unexpected value would otherwise send an authenticated request
+  (with the API key on it) wherever it points — key exfiltration + an SSRF
+  primitive. **A string `startsWith(base)` guard is broken:** two shapes slip
+  past a prefix match on `https://document-api.company-information.service.gov.uk` —
+  the **suffix-domain** spoof
+  `https://document-api.company-information.service.gov.uk.evil.com/…` (the real
+  base is a literal prefix of an attacker-owned domain) and the **userinfo**
+  trick `https://document-api.company-information.service.gov.uk@evil.com/…`
+  (everything before `@` is credentials; the real host is `evil.com`). Correct
+  guard: `new URL(u)` then require `url.protocol === "https:" && url.host ===
+  "<exact host>"` (equality, not prefix; `.host` includes any port and excludes
+  userinfo). Reject anything else — here as "no document" (404). This first
+  shipped in this PR with the flawed `startsWith` and was caught in review;
+  fixed before merge. Debugging signature: any allowlist/SSRF check that
+  compares a URL as a raw string (`startsWith`/`includes`/regex on the whole
+  URL) rather than parsing and comparing `.host` is bypassable — audit it.
+  Corollary: enforce size caps by **streaming with a running byte counter and
+  aborting** (`AbortController` + read the body reader), not by
+  `arrayBuffer()`-then-check — a lying/absent `Content-Length` or a chunked
+  response defeats a post-hoc check; and never echo an upstream `Content-Type`
+  back with `Content-Disposition: inline` — allowlist (`application/pdf`,
+  `application/octet-stream`) and force anything else to a download-only
+  octet-stream so a browser can't render tampered content inline.
+
+Complementary product bug from the same work: the PSC `ceased_on` field existed
+on the frontend type but was **never read** by the renderer, so ceased PSCs
+displayed as current. Inverse of the 19/07 "a column existing is not a reason to
+surface it" lesson — here the field was fetched and typed but the behaviour was
+never wired. When a raw API field encodes a lifecycle status (ceased/resigned/
+revoked), rendering the record without it is a correctness bug, not a cosmetic
+one.
