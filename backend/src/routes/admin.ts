@@ -44,6 +44,11 @@ import {
     safeProviderForModel,
 } from "../lib/llm";
 import { isLocalModelId } from "../lib/llm/localConfig";
+import {
+    adminRevertResource,
+    isFirmResourceType,
+    listFirmLibrary,
+} from "../lib/firmVisibility";
 
 export const adminRouter = Router();
 
@@ -581,5 +586,58 @@ adminRouter.patch(
 
         const modelConfig = await setOrganisationModelConfig(db, orgId, next);
         res.json({ modelConfig });
+    }),
+);
+
+// ── Firm library (WS9) ────────────────────────────────────────────────────────
+
+// GET /admin/firm-library — the firm's firm-visible matters + standalone reviews
+// (name, owner, updated, counts). Org-scoped to the caller's own firm inside
+// listFirmLibrary. Read-only; the per-item Revert is the POST below.
+adminRouter.get(
+    "/firm-library",
+    asyncHandler(async (_req, res) => {
+        const db = createServerSupabase();
+        const userId = res.locals.userId as string;
+        const orgId = await callerOrganisationId(db, userId);
+        if (!orgId) return void res.status(403).json({ detail: ADMIN_REQUIRED });
+        const userEmail = res.locals.userEmail as string | undefined;
+        res.json(await listFirmLibrary(db, userId, userEmail ?? null, orgId));
+    }),
+);
+
+// POST /admin/firm-library/:resourceType/:id/revert — take a firm-visible item
+// back to private. Reverts ONLY an item belonging to the caller's own firm
+// (adminRevertResource verifies organisation_id before the update); MFA-gated
+// and audited. resourceType is 'project' | 'tabular_review'.
+adminRouter.post(
+    "/firm-library/:resourceType/:id/revert",
+    requireMfaIfEnrolled,
+    asyncHandler(async (req, res) => {
+        const { resourceType, id } = req.params;
+        if (!isFirmResourceType(resourceType)) {
+            return void res
+                .status(404)
+                .json({ detail: "That item is not available." });
+        }
+        const db = createServerSupabase();
+        const userId = res.locals.userId as string;
+        const orgId = await callerOrganisationId(db, userId);
+        if (!orgId) return void res.status(403).json({ detail: ADMIN_REQUIRED });
+
+        const outcome = await adminRevertResource(db, resourceType, id, orgId);
+        if (outcome !== "updated") {
+            return void res
+                .status(404)
+                .json({ detail: "That item is not available." });
+        }
+        await insertDeletionAudit(db, {
+            organisationId: orgId,
+            actorUserId: userId,
+            action: "firm_reverted",
+            resourceType,
+            resourceId: id,
+        });
+        res.status(204).send();
     }),
 );

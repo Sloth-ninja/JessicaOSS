@@ -38,6 +38,11 @@ import {
     insertDeletionAudit,
     getTombstonedIds,
 } from "../lib/deletionGovernance";
+import { getUserOrganisationId } from "../lib/organisations";
+import {
+    parseFirmVisibility,
+    setResourceVisibility,
+} from "../lib/firmVisibility";
 
 function formatPromptSuffix(format?: string, tags?: string[]): string {
     switch (format) {
@@ -97,10 +102,14 @@ tabularRouter.get("/", requireAuth, asyncHandler(async (req, res) => {
             ? (req.query.project_id as string)
             : null;
 
+    // Standalone firm-visible reviews in the caller's organisation are surfaced
+    // via the RPC's firm predicate (WS9); orgless callers pass null ⇒ unchanged.
+    const userOrgId = await getUserOrganisationId(db, userId);
     const { data, error } = await db.rpc("get_tabular_reviews_overview", {
         p_user_id: userId,
         p_user_email: userEmail ?? null,
         p_project_id: projectIdFilter,
+        p_user_org_id: userOrgId,
     });
     if (error) return void res.status(500).json({ detail: error.message });
 
@@ -316,7 +325,7 @@ tabularRouter.get("/:reviewId/people", requireAuth, asyncHandler(async (req, res
 
     const { data: review } = await db
         .from("tabular_reviews")
-        .select("id, user_id, project_id, shared_with")
+        .select("*")
         .eq("id", reviewId)
         .single();
     if (!review)
@@ -604,6 +613,72 @@ tabularRouter.patch("/:reviewId", requireAuth, asyncHandler(async (req, res) => 
     });
 }));
 
+// PATCH /tabular-review/:reviewId/visibility — flip a STANDALONE review between
+// 'private' and 'firm' (WS9). OWNER only, firm members only (orgless ⇒ 403). A
+// project-scoped review inherits its matter's visibility, so it is rejected with
+// a fixed 400 (change the matter's visibility instead). Best-effort audited.
+tabularRouter.patch(
+    "/:reviewId/visibility",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+        const userId = res.locals.userId as string;
+        const { reviewId } = req.params;
+        const visibility = parseFirmVisibility(
+            (req.body as { visibility?: unknown } | null)?.visibility,
+        );
+        if (!visibility)
+            return void res
+                .status(400)
+                .json({ detail: "visibility must be 'private' or 'firm'." });
+
+        const db = createServerSupabase();
+        const orgId = await getUserOrganisationId(db, userId);
+        if (!orgId)
+            return void res.status(403).json({
+                detail: "Firm visibility is not available for your account.",
+            });
+
+        // Owner + standalone guard. A non-owner (or unknown review) gets the
+        // fixed 404; a project-scoped review is rejected 400.
+        const { data: review } = await db
+            .from("tabular_reviews")
+            .select("id, user_id, project_id")
+            .eq("id", reviewId)
+            .single();
+        if (!review || review.user_id !== userId)
+            return void res.status(404).json({ detail: "Review not found" });
+        if (review.project_id)
+            return void res.status(400).json({
+                detail:
+                    "A review inside a matter takes the matter's visibility. Change the matter's visibility instead.",
+            });
+
+        const outcome = await setResourceVisibility(
+            db,
+            "tabular_review",
+            reviewId,
+            userId,
+            { visibility, organisationId: orgId },
+        );
+        if (outcome !== "updated")
+            return void res.status(404).json({ detail: "Review not found" });
+
+        await insertDeletionAudit(db, {
+            organisationId: orgId,
+            actorUserId: userId,
+            action: visibility === "firm" ? "firm_shared" : "firm_reverted",
+            resourceType: "tabular_review",
+            resourceId: reviewId,
+        });
+
+        res.json({
+            id: reviewId,
+            visibility,
+            organisation_id: visibility === "firm" ? orgId : null,
+        });
+    }),
+);
+
 // DELETE /tabular-review/:reviewId
 tabularRouter.delete("/:reviewId", requireAuth, asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
@@ -662,7 +737,7 @@ tabularRouter.post("/:reviewId/clear-cells", requireAuth, asyncHandler(async (re
     const db = createServerSupabase();
     const { data: review, error: reviewError } = await db
         .from("tabular_reviews")
-        .select("id, user_id, project_id")
+        .select("*")
         .eq("id", reviewId)
         .single();
     if (reviewError || !review)
@@ -1024,7 +1099,7 @@ tabularRouter.get("/:reviewId/chats", requireAuth, asyncHandler(async (req, res)
     // Verify access (owner or shared-project member).
     const { data: review, error } = await db
         .from("tabular_reviews")
-        .select("id, user_id, project_id")
+        .select("*")
         .eq("id", reviewId)
         .single();
     if (error || !review)
@@ -1076,7 +1151,7 @@ tabularRouter.get(
 
         const { data: review } = await db
             .from("tabular_reviews")
-            .select("id, user_id, project_id")
+            .select("*")
             .eq("id", reviewId)
             .single();
         if (!review)

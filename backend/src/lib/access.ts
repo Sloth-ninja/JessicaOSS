@@ -13,6 +13,7 @@
 
 import type { createServerSupabase } from "./supabase";
 import { getTombstonedIds } from "./deletionGovernance";
+import { getUserOrganisationId } from "./organisations";
 
 type Db = ReturnType<typeof createServerSupabase>;
 
@@ -24,27 +25,99 @@ export type ProjectAccess =
               id: string;
               user_id: string;
               shared_with: string[] | null;
+              visibility?: string | null;
+              organisation_id?: string | null;
           };
       }
     | { ok: false };
+
+// Postgres "undefined_column" / "undefined_table" — the firm-visibility columns
+// (projects/tabular_reviews visibility + organisation_id) do not exist yet on an
+// unmigrated database (migration 20260728_02). We degrade so the firm branch is
+// silently absent rather than failing owner/sharee access. Mirrors the
+// organisations / deletionGovernance 42703 idiom.
+function isMissingFirmColumn(error: unknown): boolean {
+    if (!error || typeof error !== "object") return false;
+    const code = (error as { code?: unknown }).code;
+    return code === "42703" || code === "42P01";
+}
+
+/**
+ * The caller's organisation id. `provided === undefined` means "not resolved by
+ * the caller — look it up" (42703-tolerant ⇒ null); a supplied value (incl. an
+ * explicit null for a known-orgless caller) is used as-is so a request that has
+ * already resolved the org id can thread it through instead of re-querying.
+ */
+async function resolveCallerOrgId(
+    db: Db,
+    userId: string,
+    provided: string | null | undefined,
+): Promise<string | null> {
+    if (provided !== undefined) return provided;
+    return getUserOrganisationId(db, userId);
+}
+
+/**
+ * Firm-visibility predicate, applied identically everywhere: an item is
+ * firm-visible to the caller when it is stamped `visibility='firm'` AND its
+ * `organisation_id` equals the caller's own organisation id. A null caller org
+ * (orgless / unmigrated) never matches.
+ */
+function isFirmVisibleRow(
+    row: { visibility?: string | null; organisation_id?: string | null },
+    callerOrgId: string | null,
+): boolean {
+    return (
+        !!callerOrgId &&
+        row.visibility === "firm" &&
+        !!row.organisation_id &&
+        row.organisation_id === callerOrgId
+    );
+}
+
+type ProjectAccessRow = {
+    id: string;
+    user_id: string;
+    shared_with: string[] | null;
+    visibility?: string | null;
+    organisation_id?: string | null;
+};
+
+/**
+ * Load the columns `checkProjectAccess` needs, tolerating an unmigrated database.
+ * Tries the firm-visibility columns first; on a missing-column error falls back
+ * to the legacy column set so owner/sharee access still resolves (the firm
+ * branch is then simply unavailable). A not-found row yields null either way.
+ */
+async function loadProjectAccessRow(
+    db: Db,
+    projectId: string,
+): Promise<ProjectAccessRow | null> {
+    const withFirm = await db
+        .from("projects")
+        .select("id, user_id, shared_with, visibility, organisation_id")
+        .eq("id", projectId)
+        .single();
+    if (withFirm.error && isMissingFirmColumn(withFirm.error)) {
+        const legacy = await db
+            .from("projects")
+            .select("id, user_id, shared_with")
+            .eq("id", projectId)
+            .single();
+        return (legacy.data as ProjectAccessRow | null) ?? null;
+    }
+    return (withFirm.data as ProjectAccessRow | null) ?? null;
+}
 
 export async function checkProjectAccess(
     projectId: string,
     userId: string,
     userEmail: string | null | undefined,
     db: Db,
+    userOrgId?: string | null,
 ): Promise<ProjectAccess> {
-    const { data: project } = await db
-        .from("projects")
-        .select("id, user_id, shared_with")
-        .eq("id", projectId)
-        .single();
-    if (!project) return { ok: false };
-    const proj = project as {
-        id: string;
-        user_id: string;
-        shared_with: string[] | null;
-    };
+    const proj = await loadProjectAccessRow(db, projectId);
+    if (!proj) return { ok: false };
     if (proj.user_id === userId) {
         return { ok: true, isOwner: true, project: proj };
     }
@@ -54,6 +127,13 @@ export async function checkProjectAccess(
         email &&
         sharedWith.some((e) => (e ?? "").toLowerCase() === email)
     ) {
+        return { ok: true, isOwner: false, project: proj };
+    }
+    // Firm branch (WS9): a firm-visible matter is readable by any member of the
+    // owner's organisation. Firm viewers are NOT owners. Resolved only after the
+    // cheap owner/sharee checks miss (avoids an org lookup on the common path).
+    const orgId = await resolveCallerOrgId(db, userId, userOrgId);
+    if (isFirmVisibleRow(proj, orgId)) {
         return { ok: true, isOwner: false, project: proj };
     }
     return { ok: false };
@@ -70,6 +150,7 @@ export async function ensureDocAccess(
     userId: string,
     userEmail: string | null | undefined,
     db: Db,
+    userOrgId?: string | null,
 ): Promise<{ ok: true; isOwner: boolean } | { ok: false }> {
     // A tombstoned single document is hidden immediately (WS8 PR G): fetch-by-id
     // routes return 404 so it cannot resurface while awaiting purge. Project
@@ -83,11 +164,14 @@ export async function ensureDocAccess(
     }
     if (doc.user_id === userId) return { ok: true, isOwner: true };
     if (!doc.project_id) return { ok: false };
+    // A document in a firm-visible matter inherits that matter's access via
+    // checkProjectAccess's firm branch (WS9).
     const access = await checkProjectAccess(
         doc.project_id,
         userId,
         userEmail,
         db,
+        userOrgId,
     );
     if (access.ok) return { ok: true, isOwner: false };
     return { ok: false };
@@ -107,10 +191,13 @@ export async function ensureReviewAccess(
         user_id: string;
         project_id: string | null;
         shared_with?: string[] | null;
+        visibility?: string | null;
+        organisation_id?: string | null;
     },
     userId: string,
     userEmail: string | null | undefined,
     db: Db,
+    userOrgId?: string | null,
 ): Promise<{ ok: true; isOwner: boolean } | { ok: false }> {
     if (review.user_id === userId) return { ok: true, isOwner: true };
     const email = (userEmail ?? "").toLowerCase();
@@ -119,12 +206,23 @@ export async function ensureReviewAccess(
             return { ok: true, isOwner: false };
         }
     }
-    if (!review.project_id) return { ok: false };
+    if (!review.project_id) {
+        // Standalone review: it can be firm-visible in its own right (WS9). A
+        // project-scoped review instead inherits its matter's visibility via the
+        // checkProjectAccess firm branch below. The review object must carry
+        // visibility/organisation_id for this branch to fire (absent ⇒ off).
+        const orgId = await resolveCallerOrgId(db, userId, userOrgId);
+        if (isFirmVisibleRow(review, orgId)) {
+            return { ok: true, isOwner: false };
+        }
+        return { ok: false };
+    }
     const access = await checkProjectAccess(
         review.project_id,
         userId,
         userEmail,
         db,
+        userOrgId,
     );
     if (access.ok) return { ok: true, isOwner: false };
     return { ok: false };
@@ -142,6 +240,7 @@ export async function filterAccessibleDocumentIds(
     userId: string,
     userEmail: string | null | undefined,
     db: Db,
+    userOrgId?: string | null,
 ): Promise<string[]> {
     if (documentIds.length === 0) return [];
     const { data: docs } = await db
@@ -163,8 +262,10 @@ export async function filterAccessibleDocumentIds(
         ids: documentIds,
     });
 
+    // Documents in a firm-visible matter become attachable: listAccessibleProjectIds
+    // includes firm-visible projects (WS9), so their documents pass the check below.
     const accessibleProjectIds = new Set(
-        await listAccessibleProjectIds(userId, userEmail, db),
+        await listAccessibleProjectIds(userId, userEmail, db, userOrgId),
     );
     const allowed: string[] = [];
     for (const doc of rows) {
@@ -190,8 +291,10 @@ export async function listAccessibleProjectIds(
     userId: string,
     userEmail: string | null | undefined,
     db: Db,
+    userOrgId?: string | null,
 ): Promise<string[]> {
-    const [{ data: own }, { data: shared }] = await Promise.all([
+    const orgId = await resolveCallerOrgId(db, userId, userOrgId);
+    const [{ data: own }, { data: shared }, { data: firm }] = await Promise.all([
         db.from("projects").select("id").eq("user_id", userId),
         userEmail
             ? db
@@ -200,9 +303,21 @@ export async function listAccessibleProjectIds(
                   .filter("shared_with", "cs", JSON.stringify([userEmail]))
                   .neq("user_id", userId)
             : Promise.resolve({ data: [] as { id: string }[] }),
+        // Firm-visible matters in the caller's organisation (WS9). A missing
+        // visibility/organisation_id column (unmigrated) errors the query → null
+        // data → contributes nothing (branch silently absent).
+        orgId
+            ? db
+                  .from("projects")
+                  .select("id")
+                  .eq("visibility", "firm")
+                  .eq("organisation_id", orgId)
+                  .neq("user_id", userId)
+            : Promise.resolve({ data: [] as { id: string }[] }),
     ]);
     const ids = new Set<string>();
     for (const p of (own ?? []) as { id: string }[]) ids.add(p.id);
     for (const p of (shared ?? []) as { id: string }[]) ids.add(p.id);
+    for (const p of (firm ?? []) as { id: string }[]) ids.add(p.id);
     return [...ids];
 }

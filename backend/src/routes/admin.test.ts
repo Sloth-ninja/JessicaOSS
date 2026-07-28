@@ -134,6 +134,17 @@ vi.mock("../lib/deletionGovernance", async (importOriginal) => {
   };
 });
 
+const listFirmLibrary = vi.fn();
+const adminRevertResource = vi.fn();
+vi.mock("../lib/firmVisibility", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/firmVisibility")>();
+  return {
+    ...actual,
+    listFirmLibrary: (...args: unknown[]) => listFirmLibrary(...args),
+    adminRevertResource: (...args: unknown[]) => adminRevertResource(...args),
+  };
+});
+
 import { adminRouter } from "./admin";
 
 let server: Server;
@@ -189,6 +200,10 @@ beforeEach(() => {
       Promise.resolve(days),
     );
   insertDeletionAudit.mockReset().mockResolvedValue(undefined);
+  listFirmLibrary
+    .mockReset()
+    .mockResolvedValue({ projects: [], reviews: [] });
+  adminRevertResource.mockReset().mockResolvedValue("updated");
 });
 
 describe("admin authz", () => {
@@ -754,5 +769,81 @@ describe("PATCH /admin/retention", () => {
     const res = await patchRetention({ retentionDays: 30 });
     expect(res.status).toBe(403);
     expect(updateOrganisationRetention).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /admin/firm-library (WS9)", () => {
+  it("returns 403 for a non-admin caller", async () => {
+    state.isAdmin = false;
+    const res = await fetch(`${baseUrl}/admin/firm-library`);
+    expect(res.status).toBe(403);
+    expect(listFirmLibrary).not.toHaveBeenCalled();
+  });
+
+  it("returns the firm's library scoped to the caller's org", async () => {
+    listFirmLibrary.mockResolvedValue({
+      projects: [{ id: "p1", name: "Firm Matter" }],
+      reviews: [],
+    });
+    const res = await fetch(`${baseUrl}/admin/firm-library`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      projects: [{ id: "p1", name: "Firm Matter" }],
+      reviews: [],
+    });
+    // Scoped to the caller's own firm id.
+    expect(listFirmLibrary).toHaveBeenCalledWith(
+      expect.anything(),
+      "caller",
+      null,
+      "org-1",
+    );
+  });
+});
+
+describe("POST /admin/firm-library/:resourceType/:id/revert (WS9)", () => {
+  const revert = (resourceType: string, id: string) =>
+    fetch(`${baseUrl}/admin/firm-library/${resourceType}/${id}/revert`, {
+      method: "POST",
+    });
+
+  it("returns 404 for an unknown resourceType (never reaches the revert)", async () => {
+    const res = await revert("workflow", "x1");
+    expect(res.status).toBe(404);
+    expect(adminRevertResource).not.toHaveBeenCalled();
+  });
+
+  it("reverts a firm-visible item in the caller's org and audits it", async () => {
+    const res = await revert("project", "p1");
+    expect(res.status).toBe(204);
+    expect(adminRevertResource).toHaveBeenCalledWith(
+      expect.anything(),
+      "project",
+      "p1",
+      "org-1",
+    );
+    expect(insertDeletionAudit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        organisationId: "org-1",
+        action: "firm_reverted",
+        resourceType: "project",
+        resourceId: "p1",
+      }),
+    );
+  });
+
+  it("returns 404 (cross-org / not firm-visible) and skips the audit", async () => {
+    adminRevertResource.mockResolvedValue("not_found");
+    const res = await revert("tabular_review", "r9");
+    expect(res.status).toBe(404);
+    expect(insertDeletionAudit).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 without MFA step-up", async () => {
+    state.mfaOk = false;
+    const res = await revert("project", "p1");
+    expect(res.status).toBe(403);
+    expect(adminRevertResource).not.toHaveBeenCalled();
   });
 });

@@ -25,6 +25,7 @@ import {
     type OrganisationMembership,
     getOrganisationEnabledConnectorIds,
     getUserOrganisationId,
+    listOrganisationMembers,
     resolveUserOrganisation,
 } from "../lib/organisations";
 import {
@@ -571,6 +572,28 @@ userRouter.get("/profile", requireAuth, asyncHandler(async (_req, res) => {
     if (error) return void res.status(500).json({ detail: error.message });
     res.json({ ...data, apiKeyStatus: withLocalStatus(apiKeyStatus) });
 }));
+
+// GET /user/firm-members — the people-picker source for the firm-member share
+// suggestions (WS9). Returns display name + email for each member of the
+// caller's firm; nothing else (no user ids or roles leak here). Org members
+// only — an orgless caller gets an empty list.
+userRouter.get(
+    "/firm-members",
+    requireAuth,
+    asyncHandler(async (_req, res) => {
+        const userId = res.locals.userId as string;
+        const db = createServerSupabase();
+        const orgId = await getUserOrganisationId(db, userId);
+        if (!orgId) return void res.json({ members: [] });
+        const members = await listOrganisationMembers(db, orgId);
+        res.json({
+            members: members.map((member) => ({
+                displayName: member.displayName,
+                email: member.email,
+            })),
+        });
+    }),
+);
 
 // PATCH /user/profile
 //
