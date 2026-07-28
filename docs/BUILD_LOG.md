@@ -260,6 +260,22 @@ is ever sent. A future PR could surface the admin's own local models there.
 
 ---
 
+## 2026-07-28 — WS8 close-out: status refresh (branch `ws8-closeout-status`)
+
+**Scope:** docs-only. CLAUDE.md `## Current status` rewritten to the completed
+WS8 state (review clean → #43 minors, #44 migration, #45 firm model prefs incl.
+the review-forced server-side chat-model clamp, #46 deletion governance incl.
+the fail-safe inversion; both sides deployed 28/07). HANDOVER §3a marked
+resolved/historical. Flags the one outstanding owner action: run migration
+`20260727_01_firm_models_and_deletion_governance.sql` in production Supabase
+(code is 42703-tolerant until then).
+
+**Verification:** docs-only diff; PR states cross-checked against `gh pr list`;
+deploys verified (backend Fly health ok; frontend Worker redeployed; live
+routes 200).
+
+---
+
 ## 2026-07-27 — WS8 F/G bundled migration + schema mirror (branch `firm-models-deletion-migration`)
 
 **Scope:** the single owner-authorised migration shared by PR F (firm model

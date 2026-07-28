@@ -27,7 +27,16 @@ Quill/Unity + HMLR integration briefs).
 Deploy gotchas are in DURABLE_LESSONS (OpenNext packager/bun.lock, wrangler
 autoconfig delegation, piped-exit-code trap, Express-async crash class).
 
-## 3a. IN-FLIGHT at 23 July 2026 session end — verify this FIRST
+> **RESOLVED 28 July 2026:** everything in §3a completed. PR E merged (#40) and
+> deployed; the composed-range review ran (0 Critical/Important, minors fixed
+> #43); migration #44 owner-authorised; PR F merged (#45, incl. a review-forced
+> server-side chat-model clamp); PR G merged (#46, spec in
+> `docs/DELETION_GOVERNANCE_SPEC.md`, fail-safe inversion recorded in
+> DURABLE_LESSONS); both sides deployed 28/07. Outstanding owner action: run
+> migration `20260727_01` in production Supabase. Current truth: CLAUDE.md
+> `## Current status`.
+
+## 3a. (Historical) IN-FLIGHT at 23 July 2026 session end
 
 **WS8 "Firm administration" is nearly complete.** Merged + deployed: #34 org
 foundation (organisations table, admin role, `firm` profile payload,
