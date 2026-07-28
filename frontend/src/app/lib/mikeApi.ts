@@ -1668,3 +1668,29 @@ export async function lookupLegislation(
         `/legislation/lookup?citation=${encodeURIComponent(citation)}`,
     );
 }
+
+// ---------------------------------------------------------------------------
+// Research — Land Registry (WS7) — open-data Price Paid lookup over
+// /land-registry. Sold-price history for a postcode; no key, no charge (Open
+// Government Licence v3.0). v1 has no account-connection path by design.
+// ---------------------------------------------------------------------------
+
+export interface PricePaidEntry {
+    address: string;
+    propertyType: string | null;
+    tenure: "Freehold" | "Leasehold" | null;
+    /** Price paid in whole pounds. */
+    price: number;
+    /** Transaction date as ISO `YYYY-MM-DD` — render DD/MM/YYYY. */
+    date: string;
+}
+
+export async function getPricePaid(
+    postcode: string,
+    signal?: AbortSignal,
+): Promise<{ entries: PricePaidEntry[] }> {
+    return apiRequest<{ entries: PricePaidEntry[] }>(
+        `/land-registry/price-paid?postcode=${encodeURIComponent(postcode)}`,
+        { signal },
+    );
+}
