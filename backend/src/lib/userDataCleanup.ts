@@ -1,5 +1,6 @@
 import { createServerSupabase } from "./supabase";
 import { deleteFile, listFiles } from "./storage";
+import { isMissingTableOrColumn } from "./companySearchSaves";
 
 type Db = ReturnType<typeof createServerSupabase>;
 
@@ -410,5 +411,19 @@ export async function deleteUserAccountData(
     const results = await Promise.all(deletions);
     for (const result of results) {
         await throwIfError(result.error, "Failed to delete account data");
+    }
+
+    // Company-search saves (starred + recent companies, migration 20260728_01)
+    // are user-level, keyed on user_id — not project-scoped, so no cleanup is
+    // needed in deleteUserProjects / purgeProjectsByIds. This delete is tolerant
+    // of an unmigrated self-hosted database: a missing table/column (42P01 /
+    // 42703) must NOT fail account deletion, so we swallow exactly those codes
+    // while any other error keeps today's fail behaviour.
+    const savesResult = await db
+        .from("company_search_saves")
+        .delete()
+        .eq("user_id", userId);
+    if (savesResult.error && !isMissingTableOrColumn(savesResult.error)) {
+        await throwIfError(savesResult.error, "Failed to delete account data");
     }
 }
