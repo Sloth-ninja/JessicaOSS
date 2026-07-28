@@ -29,7 +29,14 @@ via `checkProjectAccess`) so a tombstoned parent is not-ok for EVERYONE incl. th
 owner — matching the detail routes' behaviour; owners manage tombstoned items only
 via admin Pending deletions. 42703-tolerant (empty set on an unmigrated DB). The
 now-redundant per-route guards on the two detail routes were LEFT in place as cheap
-defence-in-depth (one-line comments added). **Verified** deletion governance's
+defence-in-depth (one-line comments added). **Follow-up (independent review of PR
+#57):** `ensureDocAccess` had the same owner-short-circuit bug — it returned
+`{ok:true}` for `doc.user_id === userId` BEFORE consulting the parent matter, so a
+document owner (or a firm colleague who uploaded a doc into someone else's
+tombstoned firm matter) could still `GET /documents/:id` and download it for the
+retention window. Added the parent-matter tombstone check BEFORE the owner
+short-circuit (mirroring `ensureReviewAccess`); standalone docs (`project_id` null)
+are unaffected. **Verified** deletion governance's
 restore/expedite/list paths (`restoreResource`, `expediteResource`,
 `listPendingDeletions`) do NOT route through these helpers — they query the tables
 directly with member scope, so they keep seeing tombstoned rows (as required).

@@ -172,6 +172,18 @@ export async function ensureDocAccess(
         });
         if (tombstoned.has(doc.id)) return { ok: false };
     }
+    // A document in a tombstoned parent matter is denied to EVERYONE — including
+    // the document's owner (WS8×WS9). This must precede the owner short-circuit
+    // below, or a doc owner (or a firm colleague who uploaded a doc into someone
+    // else's now-tombstoned firm matter) could still GET/download it for the
+    // whole retention window. Mirrors ensureReviewAccess (tombstone before owner).
+    // Standalone docs (project_id null) are unaffected. 42703-tolerant.
+    if (doc.project_id) {
+        const parentTombstoned = await getTombstonedIds(db, "project", {
+            ids: [doc.project_id],
+        });
+        if (parentTombstoned.has(doc.project_id)) return { ok: false };
+    }
     if (doc.user_id === userId) return { ok: true, isOwner: true };
     if (!doc.project_id) return { ok: false };
     // A document in a firm-visible matter inherits that matter's access via

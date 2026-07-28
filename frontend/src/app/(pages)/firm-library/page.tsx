@@ -171,7 +171,7 @@ export default function FirmLibraryPage() {
                                     {(rows ?? []).map((row) => (
                                         <tr
                                             key={`${row.kind}-${row.id}`}
-                                            role="button"
+                                            role="link"
                                             tabIndex={0}
                                             aria-label={`Open ${
                                                 row.name?.trim() ||

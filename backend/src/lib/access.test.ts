@@ -491,6 +491,48 @@ describe("ensureDocAccess — firm-visible matter documents", () => {
     );
     expect(res).toEqual({ ok: false });
   });
+
+  it("DENIES the document's OWNER when the parent matter is tombstoned (WS8×WS9)", async () => {
+    // The tombstone gate must precede the owner short-circuit — otherwise a doc
+    // owner keeps GET/download access to a soft-deleted matter for the retention
+    // window. The doc itself is NOT tombstoned; only its parent project is.
+    getTombstonedIds.mockImplementation((_db: unknown, type: string) =>
+      Promise.resolve(type === "project" ? new Set(["p1"]) : new Set()),
+    );
+    const db = makeDb({
+      projects: [
+        {
+          id: "p1",
+          user_id: OWNER,
+          shared_with: [],
+          visibility: "firm",
+          organisation_id: ORG,
+        },
+      ],
+    });
+    const res = await ensureDocAccess(
+      { id: "d1", user_id: CALLER, project_id: "p1" },
+      CALLER,
+      CALLER_EMAIL,
+      db,
+    );
+    expect(res).toEqual({ ok: false });
+  });
+
+  it("a STANDALONE document (project_id null) is unaffected by the parent-tombstone gate", async () => {
+    // A project-tombstone lookup would return this id if it ran, proving the gate
+    // is correctly skipped for standalone docs — the owner still gets access.
+    getTombstonedIds.mockImplementation((_db: unknown, type: string) =>
+      Promise.resolve(type === "project" ? new Set(["p1"]) : new Set()),
+    );
+    const res = await ensureDocAccess(
+      { id: "d1", user_id: CALLER, project_id: null },
+      CALLER,
+      CALLER_EMAIL,
+      makeDb({}),
+    );
+    expect(res).toEqual({ ok: true, isOwner: true });
+  });
 });
 
 // ── listAccessibleProjectIds / filterAccessibleDocumentIds — firm rows ─────────
