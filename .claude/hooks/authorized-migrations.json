@@ -4,6 +4,7 @@
     "20260706_remove_courtlistener.sql",
     "20260706_add_companies_house_user_api_key_provider.sql",
     "20260721_01_firm_administration.sql",
-    "20260727_01_firm_models_and_deletion_governance.sql"
+    "20260727_01_firm_models_and_deletion_governance.sql",
+    "20260728_01_company_search_saves.sql"
   ]
 }
