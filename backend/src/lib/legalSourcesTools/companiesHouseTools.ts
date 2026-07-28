@@ -38,7 +38,7 @@ export const COMPANIES_HOUSE_TOOLS: OpenAIToolSchema[] = [
     function: {
       name: "companies_house_get_company",
       description:
-        "Fetch a UK company's full record from Companies House in one call: profile (status, company type, incorporation date, registered office, SIC codes, accounts and confirmation-statement due dates), officers (directors/secretaries, active and resigned), and persons with significant control (PSCs). Company numbers are 8 characters, may be zero-padded, and may carry a jurisdiction prefix (e.g. SC for Scotland, NI for Northern Ireland).",
+        "Fetch a UK company's full record from Companies House in one call: profile (status, company type, incorporation date, registered office, SIC codes, accounts and confirmation-statement due dates), officers (directors/secretaries, active and resigned), and persons with significant control (PSCs). Company numbers are 8 characters, may be zero-padded, and may carry a jurisdiction prefix (e.g. SC for Scotland, NI for Northern Ireland). Each officer carries a `resigned_on` date when they have resigned and each PSC a `ceased_on` date when they have ceased — always state a resigned officer's or ceased PSC's status explicitly rather than presenting them as current.",
       parameters: {
         type: "object",
         properties: {
