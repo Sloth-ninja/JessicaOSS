@@ -239,7 +239,8 @@ projectsRouter.get("/:projectId", requireAuth, asyncHandler(async (req, res) => 
     return void res.status(404).json({ detail: "Matter not found" });
 
   // A tombstoned matter is hidden immediately (WS8 PR G) — 404 so it cannot
-  // resurface via its detail route while awaiting purge.
+  // resurface via its detail route while awaiting purge. Now also enforced inside
+  // checkProjectAccess (WS9 fix); kept here as cheap defence-in-depth.
   const tombstoned = await getTombstonedIds(db, "project", { ids: [projectId] });
   if (tombstoned.has(projectId))
     return void res.status(404).json({ detail: "Matter not found" });

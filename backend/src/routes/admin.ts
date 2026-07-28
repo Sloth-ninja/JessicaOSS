@@ -635,7 +635,14 @@ adminRouter.post(
             organisationId: orgId,
             actorUserId: userId,
             action: "firm_reverted",
-            resourceType,
+            // Unify the audit resource_type with the deletion-governance
+            // vocabulary (WS8×WS9 fix): the URL segment keeps the firm-type
+            // underscore form ('tabular_review'), but the audit column stores the
+            // hyphenated 'tabular-review'. 'project' is identical in both.
+            resourceType:
+                resourceType === "tabular_review"
+                    ? "tabular-review"
+                    : resourceType,
             resourceId: id,
         });
         res.status(204).send();

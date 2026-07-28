@@ -171,8 +171,23 @@ export default function FirmLibraryPage() {
                                     {(rows ?? []).map((row) => (
                                         <tr
                                             key={`${row.kind}-${row.id}`}
+                                            role="link"
+                                            tabIndex={0}
+                                            aria-label={`Open ${
+                                                row.name?.trim() ||
+                                                `Untitled ${row.kind}`
+                                            } (${row.typeLabel})`}
                                             onClick={() => router.push(row.href)}
-                                            className="cursor-pointer border-b border-gray-100 transition-colors hover:bg-gray-50"
+                                            onKeyDown={(e) => {
+                                                if (
+                                                    e.key === "Enter" ||
+                                                    e.key === " "
+                                                ) {
+                                                    e.preventDefault();
+                                                    router.push(row.href);
+                                                }
+                                            }}
+                                            className="cursor-pointer border-b border-gray-100 transition-colors hover:bg-gray-50 focus:bg-gray-50 focus:outline-none"
                                         >
                                             <td className="px-5 py-3">
                                                 <div className="flex items-center gap-2">

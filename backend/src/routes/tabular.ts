@@ -273,7 +273,9 @@ tabularRouter.get("/:reviewId", requireAuth, asyncHandler(async (req, res) => {
     if (!access.ok)
         return void res.status(404).json({ detail: "Review not found" });
 
-    // A tombstoned review is hidden immediately (WS8 PR G) — 404 while awaiting purge.
+    // A tombstoned review is hidden immediately (WS8 PR G) — 404 while awaiting
+    // purge. Now also enforced inside ensureReviewAccess (WS9 fix); kept here as
+    // cheap defence-in-depth.
     const tombstoned = await getTombstonedIds(db, "tabular-review", {
         ids: [reviewId],
     });
@@ -667,7 +669,10 @@ tabularRouter.patch(
             organisationId: orgId,
             actorUserId: userId,
             action: visibility === "firm" ? "firm_shared" : "firm_reverted",
-            resourceType: "tabular_review",
+            // Audit column uses the hyphenated deletion-governance form so firm
+            // and deletion rows share one resource_type vocabulary (WS8×WS9 fix).
+            // The firm-visibility API/type still uses the underscore form.
+            resourceType: "tabular-review",
             resourceId: reviewId,
         });
 

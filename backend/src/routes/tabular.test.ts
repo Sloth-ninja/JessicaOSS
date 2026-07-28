@@ -20,6 +20,9 @@ const state = vi.hoisted(() => ({
   review: { id: "r1", user_id: "owner", project_id: null } as
     | { id: string; user_id: string; project_id: string | null }
     | null,
+  // WS8×WS9: when true, getTombstonedIds reports the review as soft-deleted so
+  // ensureReviewAccess denies it at the choke point.
+  reviewTombstoned: false,
 }));
 
 vi.mock("../middleware/auth", () => ({
@@ -78,6 +81,13 @@ vi.mock("../lib/deletionGovernance", async (importOriginal) => {
   return {
     ...actual,
     insertDeletionAudit: (...args: unknown[]) => insertDeletionAudit(...args),
+    // ensureReviewAccess (real) consults this to gate on the review's tombstone.
+    getTombstonedIds: (_db: unknown, type: string) =>
+      Promise.resolve(
+        state.reviewTombstoned && type === "tabular-review"
+          ? new Set([state.review?.id])
+          : new Set(),
+      ),
   };
 });
 
@@ -107,6 +117,7 @@ beforeEach(() => {
   state.orgId = "org-1";
   state.outcome = "updated";
   state.review = { id: "r1", user_id: "owner", project_id: null };
+  state.reviewTombstoned = false;
   getUserOrganisationId.mockReset().mockImplementation(() =>
     Promise.resolve(state.orgId),
   );
@@ -177,7 +188,9 @@ describe("PATCH /tabular-review/:reviewId/visibility", () => {
       expect.anything(),
       expect.objectContaining({
         action: "firm_shared",
-        resourceType: "tabular_review",
+        // Audit column uses the hyphenated deletion-governance vocabulary,
+        // even though the firm-visibility call above uses the underscore form.
+        resourceType: "tabular-review",
         resourceId: "r1",
       }),
     );
@@ -188,5 +201,24 @@ describe("PATCH /tabular-review/:reviewId/visibility", () => {
     const res = await patchVisibility("r1", { visibility: "firm" });
     expect(res.status).toBe(404);
     expect(insertDeletionAudit).not.toHaveBeenCalled();
+  });
+});
+
+// Representative content sub-route: the /generate WRITE path must 404 on a
+// tombstoned review, via ensureReviewAccess's folded-in tombstone gate (WS8×WS9).
+// The owner is the caller, so without the tombstone the row would be accessible —
+// proving the 404 comes from the tombstone gate, not from a membership miss.
+describe("POST /tabular-review/:reviewId/generate — tombstoned review is denied", () => {
+  const generate = (reviewId: string) =>
+    fetch(`${baseUrl}/tabular-review/${reviewId}/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+  it("404s the owner's write when the review is tombstoned", async () => {
+    state.reviewTombstoned = true;
+    const res = await generate("r1");
+    expect(res.status).toBe(404);
   });
 });

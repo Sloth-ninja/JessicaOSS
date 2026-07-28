@@ -118,6 +118,16 @@ export async function checkProjectAccess(
 ): Promise<ProjectAccess> {
     const proj = await loadProjectAccessRow(db, projectId);
     if (!proj) return { ok: false };
+    // A tombstoned matter is not accessible to ANYONE — including the owner
+    // (WS8×WS9): tombstoning sets only deleted_at, so without this a firm-visible
+    // (or shared, or owned) soft-deleted matter would keep passing the branches
+    // below for its whole retention window. Folding the guard into this choke
+    // point makes every project sub-route (documents/chats/people/upload/…)
+    // inherit the detail routes' existing 404 behaviour. 42703-tolerant (empty
+    // set on an unmigrated DB). Owners manage tombstoned items only via the admin
+    // Pending deletions surface, which reads the tables directly (not this path).
+    const tombstoned = await getTombstonedIds(db, "project", { ids: [projectId] });
+    if (tombstoned.has(projectId)) return { ok: false };
     if (proj.user_id === userId) {
         return { ok: true, isOwner: true, project: proj };
     }
@@ -162,6 +172,18 @@ export async function ensureDocAccess(
         });
         if (tombstoned.has(doc.id)) return { ok: false };
     }
+    // A document in a tombstoned parent matter is denied to EVERYONE — including
+    // the document's owner (WS8×WS9). This must precede the owner short-circuit
+    // below, or a doc owner (or a firm colleague who uploaded a doc into someone
+    // else's now-tombstoned firm matter) could still GET/download it for the
+    // whole retention window. Mirrors ensureReviewAccess (tombstone before owner).
+    // Standalone docs (project_id null) are unaffected. 42703-tolerant.
+    if (doc.project_id) {
+        const parentTombstoned = await getTombstonedIds(db, "project", {
+            ids: [doc.project_id],
+        });
+        if (parentTombstoned.has(doc.project_id)) return { ok: false };
+    }
     if (doc.user_id === userId) return { ok: true, isOwner: true };
     if (!doc.project_id) return { ok: false };
     // A document in a firm-visible matter inherits that matter's access via
@@ -188,6 +210,7 @@ export async function ensureDocAccess(
  */
 export async function ensureReviewAccess(
     review: {
+        id?: string;
         user_id: string;
         project_id: string | null;
         shared_with?: string[] | null;
@@ -199,6 +222,19 @@ export async function ensureReviewAccess(
     db: Db,
     userOrgId?: string | null,
 ): Promise<{ ok: true; isOwner: boolean } | { ok: false }> {
+    // A tombstoned review is not accessible to ANYONE — including the owner
+    // (WS8×WS9): the review's write sub-routes (/generate, /chat, …) load the row
+    // and call this helper but never re-checked the tombstone, so a soft-deleted
+    // review stayed readable AND writable for its whole retention window. Fold the
+    // guard in here (mirrors ensureDocAccess). A project-scoped review's PARENT
+    // matter tombstone is covered separately by checkProjectAccess below.
+    // 42703-tolerant. Callers pass a select("*") row so `id` is present.
+    if (review.id) {
+        const tombstoned = await getTombstonedIds(db, "tabular-review", {
+            ids: [review.id],
+        });
+        if (tombstoned.has(review.id)) return { ok: false };
+    }
     if (review.user_id === userId) return { ok: true, isOwner: true };
     const email = (userEmail ?? "").toLowerCase();
     if (email && Array.isArray(review.shared_with)) {

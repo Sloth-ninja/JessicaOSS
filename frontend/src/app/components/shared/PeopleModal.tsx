@@ -347,7 +347,11 @@ export function PeopleModal({
                                 <UserPlus className="h-3.5 w-3.5 text-gray-400 shrink-0" />
                                 <input
                                     type="email"
-                                    placeholder="Add by email…"
+                                    placeholder={
+                                        showFirmSurfaces && canEditMembers
+                                            ? "Add from your firm, or type any email…"
+                                            : "Add by email…"
+                                    }
                                     value={newEmail}
                                     onChange={(e) =>
                                         setNewEmail(e.target.value)

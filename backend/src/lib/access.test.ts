@@ -231,6 +231,134 @@ describe("checkProjectAccess — firm branch matrix", () => {
   });
 });
 
+// ── Parent-tombstone gating (WS8×WS9 fix) ─────────────────────────────────────
+// A tombstoned matter must be denied to EVERYONE — owner, sharee and firm viewer
+// alike — at the shared choke point, so every content sub-route inherits the 404
+// the detail routes already return.
+
+describe("checkProjectAccess — a tombstoned matter is denied to everyone", () => {
+  const firmProject = {
+    id: "p1",
+    user_id: OWNER,
+    shared_with: [CALLER_EMAIL],
+    visibility: "firm",
+    organisation_id: ORG,
+  };
+
+  beforeEach(() => {
+    getTombstonedIds.mockResolvedValue(new Set(["p1"]));
+  });
+
+  it("denies the OWNER (who would otherwise pass the fast-path)", async () => {
+    const db = makeDb({ projects: [{ ...firmProject, user_id: CALLER }] });
+    expect(await checkProjectAccess("p1", CALLER, CALLER_EMAIL, db)).toEqual({
+      ok: false,
+    });
+  });
+
+  it("denies an EMAIL-SHAREE", async () => {
+    const db = makeDb({
+      projects: [
+        { ...firmProject, visibility: "private", organisation_id: null },
+      ],
+    });
+    expect(await checkProjectAccess("p1", CALLER, CALLER_EMAIL, db)).toEqual({
+      ok: false,
+    });
+  });
+
+  it("denies a same-org FIRM member", async () => {
+    getUserOrganisationId.mockResolvedValue(ORG);
+    const db = makeDb({ projects: [firmProject] });
+    expect(await checkProjectAccess("p1", CALLER, CALLER_EMAIL, db)).toEqual({
+      ok: false,
+    });
+  });
+});
+
+describe("ensureReviewAccess — a tombstoned review is denied to everyone", () => {
+  const firmReview = {
+    id: "r1",
+    user_id: OWNER,
+    project_id: null,
+    shared_with: [CALLER_EMAIL],
+    visibility: "firm",
+    organisation_id: ORG,
+  };
+
+  beforeEach(() => {
+    // The review's OWN tombstone (tabular-review) is set; the project lookup (if
+    // any) stays clean.
+    getTombstonedIds.mockImplementation((_db: unknown, type: string) =>
+      Promise.resolve(type === "tabular-review" ? new Set(["r1"]) : new Set()),
+    );
+  });
+
+  it("denies the OWNER", async () => {
+    const res = await ensureReviewAccess(
+      { ...firmReview, user_id: CALLER },
+      CALLER,
+      CALLER_EMAIL,
+      makeDb({}),
+    );
+    expect(res).toEqual({ ok: false });
+  });
+
+  it("denies an EMAIL-SHAREE", async () => {
+    const res = await ensureReviewAccess(
+      firmReview,
+      CALLER,
+      CALLER_EMAIL,
+      makeDb({}),
+    );
+    expect(res).toEqual({ ok: false });
+  });
+
+  it("denies a same-org FIRM member (standalone review)", async () => {
+    getUserOrganisationId.mockResolvedValue(ORG);
+    const res = await ensureReviewAccess(
+      firmReview,
+      CALLER,
+      CALLER_EMAIL,
+      makeDb({}),
+    );
+    expect(res).toEqual({ ok: false });
+  });
+
+  it("denies a project-scoped review whose PARENT matter is tombstoned (review itself live)", async () => {
+    getUserOrganisationId.mockResolvedValue(ORG);
+    // review not tombstoned; the parent project is.
+    getTombstonedIds.mockImplementation((_db: unknown, type: string) =>
+      Promise.resolve(type === "project" ? new Set(["parent"]) : new Set()),
+    );
+    const db = makeDb({
+      projects: [
+        {
+          id: "parent",
+          user_id: OWNER,
+          shared_with: [],
+          visibility: "firm",
+          organisation_id: ORG,
+        },
+      ],
+    });
+    const res = await ensureReviewAccess(
+      {
+        id: "r2",
+        user_id: OWNER,
+        project_id: "parent",
+        shared_with: [],
+        visibility: "private",
+        organisation_id: null,
+      },
+      CALLER,
+      CALLER_EMAIL,
+      db,
+    );
+    expect(res).toEqual({ ok: false });
+  });
+});
+
 // ── ensureReviewAccess — standalone firm branch ───────────────────────────────
 
 describe("ensureReviewAccess — firm branch", () => {
@@ -362,6 +490,48 @@ describe("ensureDocAccess — firm-visible matter documents", () => {
       db,
     );
     expect(res).toEqual({ ok: false });
+  });
+
+  it("DENIES the document's OWNER when the parent matter is tombstoned (WS8×WS9)", async () => {
+    // The tombstone gate must precede the owner short-circuit — otherwise a doc
+    // owner keeps GET/download access to a soft-deleted matter for the retention
+    // window. The doc itself is NOT tombstoned; only its parent project is.
+    getTombstonedIds.mockImplementation((_db: unknown, type: string) =>
+      Promise.resolve(type === "project" ? new Set(["p1"]) : new Set()),
+    );
+    const db = makeDb({
+      projects: [
+        {
+          id: "p1",
+          user_id: OWNER,
+          shared_with: [],
+          visibility: "firm",
+          organisation_id: ORG,
+        },
+      ],
+    });
+    const res = await ensureDocAccess(
+      { id: "d1", user_id: CALLER, project_id: "p1" },
+      CALLER,
+      CALLER_EMAIL,
+      db,
+    );
+    expect(res).toEqual({ ok: false });
+  });
+
+  it("a STANDALONE document (project_id null) is unaffected by the parent-tombstone gate", async () => {
+    // A project-tombstone lookup would return this id if it ran, proving the gate
+    // is correctly skipped for standalone docs — the owner still gets access.
+    getTombstonedIds.mockImplementation((_db: unknown, type: string) =>
+      Promise.resolve(type === "project" ? new Set(["p1"]) : new Set()),
+    );
+    const res = await ensureDocAccess(
+      { id: "d1", user_id: CALLER, project_id: null },
+      CALLER,
+      CALLER_EMAIL,
+      makeDb({}),
+    );
+    expect(res).toEqual({ ok: true, isOwner: true });
   });
 });
 

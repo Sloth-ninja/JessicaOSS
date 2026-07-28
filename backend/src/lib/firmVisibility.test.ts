@@ -42,12 +42,16 @@ function makeDb(opts: {
     let patch: Row | null = null;
     const eqs: Array<[string, unknown]> = [];
     const ins: Array<[string, unknown[]]> = [];
+    const iss: Array<[string, unknown]> = [];
 
     function matched(): Row[] {
       return (tables[table] ?? []).filter(
         (row) =>
           eqs.every(([c, v]) => row[c] === v) &&
-          ins.every(([c, vs]) => vs.includes(row[c])),
+          ins.every(([c, vs]) => vs.includes(row[c])) &&
+          // `.is(col, null)` matches rows where the column is null OR absent
+          // (an untombstoned fixture omits deleted_at entirely).
+          iss.every(([c, v]) => (row[c] ?? null) === v),
       );
     }
 
@@ -76,6 +80,10 @@ function makeDb(opts: {
       },
       in(col: string, vals: unknown[]) {
         ins.push([col, vals]);
+        return b;
+      },
+      is(col: string, val: unknown) {
+        iss.push([col, val]);
         return b;
       },
       then(onF: unknown, onR: unknown) {
@@ -189,6 +197,33 @@ describe("setResourceVisibility", () => {
       organisationId: ORG,
     });
     expect(outcome).toBe("unsupported");
+  });
+
+  it("REFUSES to flip a tombstoned item (deleted_at set ⇒ not_found, untouched)", async () => {
+    // WS8×WS9: the `.is(deleted_at, null)` predicate must exclude a soft-deleted
+    // row, so an owner cannot firm-share (or un-share) an item pending purge.
+    const { db, tables } = makeDb({
+      tables: {
+        projects: [
+          {
+            id: "p1",
+            user_id: OWNER,
+            visibility: "private",
+            organisation_id: null,
+            deleted_at: "2026-07-28T00:00:00Z",
+          },
+        ],
+      },
+    });
+    const outcome = await setResourceVisibility(db, "project", "p1", OWNER, {
+      visibility: "firm",
+      organisationId: ORG,
+    });
+    expect(outcome).toBe("not_found");
+    expect(tables.projects[0]).toMatchObject({
+      visibility: "private",
+      organisation_id: null,
+    });
   });
 });
 

@@ -833,6 +833,27 @@ describe("POST /admin/firm-library/:resourceType/:id/revert (WS9)", () => {
     );
   });
 
+  it("maps the tabular_review URL segment to the hyphenated audit resource_type", async () => {
+    // WS8×WS9: URL keeps the firm-type underscore form; the audit column unifies
+    // on deletion governance's hyphenated 'tabular-review'.
+    const res = await revert("tabular_review", "r1");
+    expect(res.status).toBe(204);
+    expect(adminRevertResource).toHaveBeenCalledWith(
+      expect.anything(),
+      "tabular_review",
+      "r1",
+      "org-1",
+    );
+    expect(insertDeletionAudit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "firm_reverted",
+        resourceType: "tabular-review",
+        resourceId: "r1",
+      }),
+    );
+  });
+
   it("returns 404 (cross-org / not firm-visible) and skips the audit", async () => {
     adminRevertResource.mockResolvedValue("not_found");
     const res = await revert("tabular_review", "r9");
