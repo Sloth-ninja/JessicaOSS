@@ -151,9 +151,10 @@ export default function LandRegistryPage() {
                                 HM Land Registry’s conditions of use don’t allow
                                 portal credentials to be entered into a third-party
                                 application until that application is an authorised
-                                channel partner. JessicaOS has started that process.
-                                Your portal account works exactly as today in the
-                                meantime.
+                                channel partner. This requires JessicaOS to be
+                                authorised as an HM Land Registry channel partner.
+                                Until then, your portal account works exactly as
+                                today.
                             </p>
                             <ul className="mt-3 list-disc space-y-1.5 pl-5">
                                 <li>
@@ -294,8 +295,9 @@ export default function LandRegistryPage() {
                                     </div>
                                     <p className="mt-3 max-w-prose text-[11px] leading-relaxed text-gray-400">
                                         Contains HM Land Registry data © Crown
-                                        copyright and database right 2026. This data
-                                        is licensed under the Open Government Licence
+                                        copyright and database right{" "}
+                                        {new Date().getFullYear()}. This data is
+                                        licensed under the Open Government Licence
                                         v3.0. Showing the 25 most recent transactions.
                                     </p>
                                 </>
