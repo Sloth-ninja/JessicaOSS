@@ -1564,6 +1564,8 @@ export interface ChFilingHistoryItem {
     description_values?: { made_up_date?: string; [key: string]: unknown };
     type?: string;
     category?: string;
+    transaction_id?: string;
+    links?: { document_metadata?: string; [key: string]: unknown };
 }
 
 export interface ChFilingHistoryResult {
@@ -1595,6 +1597,20 @@ export async function chGetFilingHistory(
     return apiRequest<ChFilingHistoryResult>(
         `/companies/${encodeURIComponent(companyNumber)}/filing-history?page=${page}`,
     );
+}
+
+/**
+ * Downloads the primary document (usually a PDF) for a single filing as a
+ * Blob. Only call this for items that carry `links.document_metadata`.
+ */
+export async function getFilingDocument(
+    companyNumber: string,
+    transactionId: string,
+): Promise<Blob> {
+    const { blob } = await apiBlobRequest(
+        `/companies/${encodeURIComponent(companyNumber)}/filing-history/${encodeURIComponent(transactionId)}/document`,
+    );
+    return blob;
 }
 
 // ---------------------------------------------------------------------------
