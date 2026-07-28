@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { KeyRound, MessageSquare, Search } from "lucide-react";
+import { KeyRound, MessageSquare, Search, Star } from "lucide-react";
 import { useUserProfile } from "@/contexts/UserProfileContext";
 import { personalApiKeysBlocked } from "@/app/(pages)/account/firmPolicy";
 import { PageHeader } from "@/app/components/shared/PageHeader";
@@ -25,8 +25,13 @@ import { setAssistantPrefill } from "@/app/lib/assistantPrefill";
 import {
     chGetCompany,
     chSearchCompanies,
+    getCompanySaves,
+    recordCompanyView,
+    setCompanyStar,
     MikeApiError,
     type ChCompanySearchItem,
+    type ChCompanySave,
+    type ChCompanySaves,
 } from "@/app/lib/mikeApi";
 import { cn } from "@/lib/utils";
 
@@ -66,6 +71,39 @@ function StatusDot({ status }: { status?: string }) {
     );
 }
 
+function StarToggle({
+    starred,
+    onToggle,
+    className,
+}: {
+    starred: boolean;
+    onToggle: () => void;
+    className?: string;
+}) {
+    return (
+        <button
+            type="button"
+            onClick={(e) => {
+                e.stopPropagation();
+                onToggle();
+            }}
+            aria-label={starred ? "Unstar company" : "Star company"}
+            aria-pressed={starred}
+            className={cn(
+                "flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-gray-200/70",
+                className,
+            )}
+        >
+            <Star
+                className={cn(
+                    "h-4 w-4",
+                    starred ? "fill-amber-400 text-amber-500" : "text-gray-400",
+                )}
+            />
+        </button>
+    );
+}
+
 function searchErrorMessage(err: unknown): string {
     if (err instanceof MikeApiError && err.status === 429) {
         return "Companies House rate limit reached. Please try again in a few minutes.";
@@ -100,6 +138,13 @@ export default function CompanySearchPage() {
     const [companyError, setCompanyError] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<DetailTab>("overview");
 
+    // Saved companies (starred + recents) shown in the rail when the search box
+    // is empty. Recents are a best-effort enhancement: a failed load degrades to
+    // the plain empty state, never an error wall.
+    const [saves, setSaves] = useState<ChCompanySaves | null>(null);
+    const [savesLoading, setSavesLoading] = useState(true);
+    const [starError, setStarError] = useState<string | null>(null);
+
     // Key state: from the profile (status endpoint), or discovered via a 409.
     const [keyMissingFromApi, setKeyMissingFromApi] = useState(false);
     const keyConfigured = profile
@@ -110,6 +155,175 @@ export default function CompanySearchPage() {
     const firmManagesKeys = personalApiKeysBlocked(profile?.firm);
 
     const searchSeq = useRef(0);
+
+    // Load the saved-companies rail once the key is confirmed. A failure is not
+    // an error wall — log it and fall back to the empty state. All state updates
+    // happen inside the deferred callback, never synchronously in the effect
+    // body (mirrors the debounced search effect below).
+    useEffect(() => {
+        if (!keyConfigured) return;
+        let active = true;
+        const timer = setTimeout(() => {
+            setSavesLoading(true);
+            getCompanySaves()
+                .then((result) => {
+                    if (active) setSaves(result);
+                })
+                .catch((err) => {
+                    console.error(
+                        "[company-search] failed to load saves",
+                        err,
+                    );
+                    if (active) setSaves({ starred: [], recents: [] });
+                })
+                .finally(() => {
+                    if (active) setSavesLoading(false);
+                });
+        }, 0);
+        return () => {
+            active = false;
+            clearTimeout(timer);
+        };
+    }, [keyConfigured]);
+
+    const isStarred = (companyNumber?: string): boolean =>
+        !!companyNumber &&
+        !!saves?.starred.some((s) => s.companyNumber === companyNumber);
+
+    // Optimistically move a just-viewed company to the front of recents (unless
+    // it is starred). Purely local; the server prunes/orders authoritatively.
+    function bumpRecentLocally(save: ChCompanySave) {
+        setSaves((prev) => {
+            const base = prev ?? { starred: [], recents: [] };
+            if (
+                base.starred.some((s) => s.companyNumber === save.companyNumber)
+            ) {
+                return base;
+            }
+            const recents = [
+                { ...save, starred: false },
+                ...base.recents.filter(
+                    (r) => r.companyNumber !== save.companyNumber,
+                ),
+            ].slice(0, 25);
+            return { ...base, recents };
+        });
+    }
+
+    // Toggle a company's star with an optimistic rail update and rollback on
+    // error. The snapshot lets the backend insert a not-yet-saved company.
+    function toggleStar(company: {
+        companyNumber?: string;
+        companyName: string;
+        companyStatus?: string | null;
+    }) {
+        const companyNumber = company.companyNumber;
+        if (!companyNumber) return;
+        const nextStarred = !isStarred(companyNumber);
+        const previous = saves;
+
+        setStarError(null);
+        setSaves((prev) => {
+            const base = prev ?? { starred: [], recents: [] };
+            if (nextStarred) {
+                const entry: ChCompanySave = {
+                    companyNumber,
+                    companyName: company.companyName,
+                    companyStatus: company.companyStatus ?? null,
+                    starred: true,
+                    lastViewedAt: null,
+                };
+                return {
+                    starred: [
+                        ...base.starred.filter(
+                            (s) => s.companyNumber !== companyNumber,
+                        ),
+                        entry,
+                    ].sort((a, b) =>
+                        a.companyName.localeCompare(b.companyName),
+                    ),
+                    recents: base.recents.filter(
+                        (r) => r.companyNumber !== companyNumber,
+                    ),
+                };
+            }
+            const removed = base.starred.find(
+                (s) => s.companyNumber === companyNumber,
+            );
+            return {
+                starred: base.starred.filter(
+                    (s) => s.companyNumber !== companyNumber,
+                ),
+                recents: removed
+                    ? [
+                          { ...removed, starred: false },
+                          ...base.recents.filter(
+                              (r) => r.companyNumber !== companyNumber,
+                          ),
+                      ].slice(0, 25)
+                    : base.recents,
+            };
+        });
+
+        setCompanyStar(companyNumber, nextStarred, {
+            companyName: company.companyName,
+            companyStatus: company.companyStatus ?? null,
+        }).catch((err) => {
+            console.error("[company-search] failed to update star", err);
+            setSaves(previous);
+            setStarError("Could not update. Please try again.");
+        });
+    }
+
+    // One row in the saves rail: the existing result-row idiom plus a star
+    // toggle. Selecting a row opens the company (as a search item would).
+    function renderSaveRow(save: ChCompanySave) {
+        return (
+            <div
+                key={save.companyNumber}
+                className={cn(
+                    "mb-0.5 flex items-center rounded-lg transition-colors",
+                    selected?.company_number === save.companyNumber
+                        ? "bg-gray-200/60"
+                        : "hover:bg-gray-100",
+                )}
+            >
+                <button
+                    onClick={() =>
+                        selectCompany({
+                            company_number: save.companyNumber,
+                            title: save.companyName,
+                            company_status: save.companyStatus ?? undefined,
+                        })
+                    }
+                    className="min-w-0 flex-1 rounded-lg px-2.5 py-2 text-left"
+                >
+                    <div className="truncate text-[13px] font-semibold text-gray-900">
+                        {save.companyName || save.companyNumber}
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-1.5 text-xs text-gray-500">
+                        <StatusDot status={save.companyStatus ?? undefined} />
+                        <span className="truncate">
+                            {save.companyNumber}
+                            {save.companyStatus &&
+                                ` · ${humanise(save.companyStatus)}`}
+                        </span>
+                    </div>
+                </button>
+                <StarToggle
+                    starred={isStarred(save.companyNumber)}
+                    onToggle={() =>
+                        toggleStar({
+                            companyNumber: save.companyNumber,
+                            companyName: save.companyName,
+                            companyStatus: save.companyStatus,
+                        })
+                    }
+                    className="mr-1"
+                />
+            </div>
+        );
+    }
 
     // Debounced search-as-you-type. All state updates happen inside the
     // debounce/promise callbacks, never synchronously in the effect body.
@@ -159,6 +373,24 @@ export default function CompanySearchPage() {
         setCompany(null);
         setCompanyError(null);
         setCompanyLoading(true);
+
+        // Best-effort: record the view for recents. Never blocks rendering and
+        // swallows errors — recents are an enhancement, not a requirement.
+        const companyName = item.title?.trim() || companyNumber;
+        recordCompanyView(companyNumber, {
+            companyName,
+            companyStatus: item.company_status ?? null,
+        }).catch((err) => {
+            console.error("[company-search] failed to record view", err);
+        });
+        bumpRecentLocally({
+            companyNumber,
+            companyName,
+            companyStatus: item.company_status ?? null,
+            starred: false,
+            lastViewedAt: null,
+        });
+
         chGetCompany(companyNumber)
             .then((bundle) => {
                 setCompany((bundle ?? {}) as CompanyPanelData);
@@ -269,7 +501,64 @@ export default function CompanySearchPage() {
                             />
                         </div>
                         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-                            {searching ? (
+                            {query.trim().length < 2 ? (
+                                savesLoading ? (
+                                    <div className="flex flex-col gap-3 px-2.5 py-3">
+                                        {["w-3/4", "w-1/2", "w-2/3"].map(
+                                            (widthClass, i) => (
+                                                <div
+                                                    key={i}
+                                                    className="flex flex-col gap-1.5"
+                                                >
+                                                    <SkeletonLine
+                                                        className={widthClass}
+                                                    />
+                                                    <SkeletonLine className="w-1/3" />
+                                                </div>
+                                            ),
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div className="py-1">
+                                        {starError && (
+                                            <p className="mb-1 px-2.5 text-xs text-red-600">
+                                                {starError}
+                                            </p>
+                                        )}
+                                        {!saves ||
+                                        (saves.starred.length === 0 &&
+                                            saves.recents.length === 0) ? (
+                                            <p className="px-2.5 py-3 text-xs text-gray-500">
+                                                Companies you view will appear
+                                                here.
+                                            </p>
+                                        ) : (
+                                            <>
+                                                {saves.starred.length > 0 && (
+                                                    <>
+                                                        <p className="px-2.5 pt-1 pb-1 text-[11px] font-semibold tracking-wide text-gray-400 uppercase">
+                                                            Starred
+                                                        </p>
+                                                        {saves.starred.map(
+                                                            renderSaveRow,
+                                                        )}
+                                                    </>
+                                                )}
+                                                {saves.recents.length > 0 && (
+                                                    <>
+                                                        <p className="px-2.5 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-gray-400 uppercase">
+                                                            Recent
+                                                        </p>
+                                                        {saves.recents.map(
+                                                            renderSaveRow,
+                                                        )}
+                                                    </>
+                                                )}
+                                            </>
+                                        )}
+                                    </div>
+                                )
+                            ) : searching ? (
                                 <div className="flex flex-col gap-3 px-2.5 py-3">
                                     {["w-3/4", "w-1/2", "w-2/3"].map(
                                         (widthClass, i) => (
@@ -387,6 +676,25 @@ export default function CompanySearchPage() {
                                                         {detailType}
                                                     </Badge>
                                                 )}
+                                                <StarToggle
+                                                    starred={isStarred(
+                                                        selected.company_number,
+                                                    )}
+                                                    onToggle={() =>
+                                                        toggleStar({
+                                                            companyNumber:
+                                                                selected.company_number,
+                                                            companyName:
+                                                                detailName ||
+                                                                (selected.company_number ??
+                                                                    ""),
+                                                            companyStatus:
+                                                                selectedProfile?.company_status ??
+                                                                selected.company_status ??
+                                                                null,
+                                                        })
+                                                    }
+                                                />
                                             </div>
                                         </div>
                                         <Button

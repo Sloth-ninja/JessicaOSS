@@ -32,6 +32,7 @@
 - 2026-07-23 — Relative `cd` in chained/background shell commands: use absolute paths
 - 2026-07-27 — Fail-open vs fail-safe is a per-operation choice; deletes fail SAFE
 - 2026-07-28 — CH document proxy: parse+exact-host allowlist (not startsWith); fetch drops Authorization on cross-origin 302; stream-cap the body
+- 2026-07-28 — `prettier --write` with no resolvable config reformats 4-space frontend files to 2-space wholesale — an unmergeable diff
 
 ## Lessons
 
@@ -320,3 +321,28 @@ surface it" lesson — here the field was fetched and typed but the behaviour wa
 never wired. When a raw API field encodes a lifecycle status (ceased/resigned/
 revoked), rendering the record without it is a correctness bug, not a cosmetic
 one.
+
+### 2026-07-28 — `prettier --write` with no resolvable config reformats the frontend wholesale
+
+Trigger: on the `company-search-saves` branch I ran `npx prettier --write` over
+changed frontend files to satisfy the "prettier clean" definition-of-done line.
+The frontend (`frontend/`) is authored in **4-space** indentation and its
+formatting is enforced by **ESLint** (`npm run lint`), NOT by a standalone
+prettier config — there is no `.prettierrc` and no `prettier` key in
+`frontend/package.json`. So `prettier --write` fell back to its **default
+2-space** style and rewrote `page.tsx` / `mikeApi.ts` end-to-end (≈1000-line
+diffs on ~700-line files). It passed local checks (ESLint doesn't police
+indent width), but when `origin/main` moved, the 2-space files could not merge
+against the 4-space upstream — every line was a conflict.
+
+Rule: **do not run `prettier --write` on frontend files.** Frontend formatting
+is ESLint's job; run `npm run lint` (or `eslint --fix`) instead. Only run
+prettier where a project actually defines a config — backend has none either
+(the `"prettier": "^3.x"` in `backend/package.json` is the devDependency, not a
+config block), so backend relies on its files already being 2-space and you
+only hand-match that style in new code. Debugging signature: a changed
+frontend file shows a diff far larger than your edit, with `-    ` / `+  `
+(4→2 space) churn on lines you never touched; or a routine merge explodes into
+whole-file conflicts right after a "format" step. Recovery: `git checkout
+origin/main -- <file>` to restore the upstream 4-space version, then re-apply
+only your semantic edits by hand.

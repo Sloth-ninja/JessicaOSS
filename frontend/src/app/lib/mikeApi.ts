@@ -1613,6 +1613,58 @@ export async function getFilingDocument(
     return blob;
 }
 
+// Company-search saves (starred + recent companies) — powers the rail shown
+// when the search box is empty. Best-effort: recents are an enhancement, so
+// callers swallow view/list failures rather than blocking the page.
+
+export interface ChCompanySave {
+    companyNumber: string;
+    companyName: string;
+    companyStatus: string | null;
+    starred: boolean;
+    lastViewedAt: string | null;
+}
+
+export interface ChCompanySaves {
+    starred: ChCompanySave[];
+    recents: ChCompanySave[];
+}
+
+export async function getCompanySaves(): Promise<ChCompanySaves> {
+    return apiRequest<ChCompanySaves>("/companies/saves");
+}
+
+/** Record that the user opened a company (fire-and-forget; recents best-effort). */
+export async function recordCompanyView(
+    companyNumber: string,
+    snapshot: { companyName: string; companyStatus?: string | null },
+): Promise<void> {
+    return apiRequest<void>(
+        `/companies/${encodeURIComponent(companyNumber)}/view`,
+        {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(snapshot),
+        },
+    );
+}
+
+/** Set/clear a company's starred flag (snapshot inserts a not-yet-saved company). */
+export async function setCompanyStar(
+    companyNumber: string,
+    starred: boolean,
+    snapshot?: { companyName?: string; companyStatus?: string | null },
+): Promise<void> {
+    return apiRequest<void>(
+        `/companies/${encodeURIComponent(companyNumber)}/star`,
+        {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ starred, ...snapshot }),
+        },
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Research — Citation Checker (WS7)
 // ---------------------------------------------------------------------------
