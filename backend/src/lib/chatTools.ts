@@ -7,6 +7,7 @@ import {
 } from "./storage";
 import { convertedPdfKey } from "./convert";
 import { createServerSupabase } from "./supabase";
+import { getTombstonedIds } from "./deletionGovernance";
 import {
   applyTrackedEdits,
   extractDocxBodyText,
@@ -3524,11 +3525,23 @@ export async function buildDocContext(
   }
 
   const ids = [...documentIds];
-  if (ids.length > 0) {
+  // Exclude tombstoned documents (WS8 PR G): a soft-deleted single document
+  // still referenced by this chat's message files or prior doc_created/doc_edited
+  // events must NOT be reloaded into the model's context — otherwise
+  // read_document/edit_document would keep a "deleted" document both readable and
+  // editable (creating new versions) through chat, breaking the hidden-immediately
+  // invariant. 42703-tolerant (getTombstonedIds → empty set on an unmigrated DB).
+  // See docs/DELETION_GOVERNANCE_SPEC.md.
+  const tombstonedIds =
+    ids.length > 0
+      ? await getTombstonedIds(db, "document", { ids })
+      : new Set<string>();
+  const visibleIds = ids.filter((id) => !tombstonedIds.has(id));
+  if (visibleIds.length > 0) {
     const { data: docs } = await db
       .from("documents")
       .select("id, current_version_id, status")
-      .in("id", ids)
+      .in("id", visibleIds)
       .eq("user_id", userId)
       .eq("status", "ready");
 
@@ -3606,6 +3619,14 @@ export async function buildProjectDocContext(
   }[];
   await attachActiveVersionPaths(db, docList);
 
+  // Exclude tombstoned documents (WS8 PR G). Project documents are not
+  // tombstoned in v1 (only single documents are), so this is defensive — but it
+  // keeps every chat doc-context entry point honouring the hidden-immediately
+  // invariant uniformly. 42703-tolerant. See docs/DELETION_GOVERNANCE_SPEC.md.
+  const tombstonedDocIds = await getTombstonedIds(db, "document", {
+    ids: docList.map((d) => d.id),
+  });
+
   // Build folder id → full path map
   const folderMap = new Map<
     string,
@@ -3635,6 +3656,7 @@ export async function buildProjectDocContext(
   for (let i = 0; i < docList.length; i++) {
     const doc = docList[i];
     if (!doc.storage_path) continue;
+    if (tombstonedDocIds.has(doc.id)) continue;
     const docLabel = `doc-${i}`;
     const filename = doc.filename?.trim() || "Untitled document";
     docIndex[docLabel] = {

@@ -12,6 +12,7 @@
  */
 
 import type { createServerSupabase } from "./supabase";
+import { getTombstonedIds } from "./deletionGovernance";
 
 type Db = ReturnType<typeof createServerSupabase>;
 
@@ -65,11 +66,21 @@ export async function checkProjectAccess(
  * project-membership check via `shared_with`.
  */
 export async function ensureDocAccess(
-    doc: { user_id: string; project_id: string | null },
+    doc: { id?: string; user_id: string; project_id: string | null },
     userId: string,
     userEmail: string | null | undefined,
     db: Db,
 ): Promise<{ ok: true; isOwner: boolean } | { ok: false }> {
+    // A tombstoned single document is hidden immediately (WS8 PR G): fetch-by-id
+    // routes return 404 so it cannot resurface while awaiting purge. Project
+    // documents are never tombstoned in v1. 42703-tolerant (empty set on an
+    // unmigrated DB) — see docs/DELETION_GOVERNANCE_SPEC.md.
+    if (doc.id) {
+        const tombstoned = await getTombstonedIds(db, "document", {
+            ids: [doc.id],
+        });
+        if (tombstoned.has(doc.id)) return { ok: false };
+    }
     if (doc.user_id === userId) return { ok: true, isOwner: true };
     if (!doc.project_id) return { ok: false };
     const access = await checkProjectAccess(
@@ -144,11 +155,20 @@ export async function filterAccessibleDocumentIds(
     }[];
     if (rows.length === 0) return [];
 
+    // Tombstoned documents are hidden immediately (WS8 PR G): the single choke
+    // point for every tabular doc-context path (create / update / generate /
+    // regenerate cell) — a soft-deleted single document must not be extractable
+    // into cells. 42703-tolerant. See docs/DELETION_GOVERNANCE_SPEC.md.
+    const tombstoned = await getTombstonedIds(db, "document", {
+        ids: documentIds,
+    });
+
     const accessibleProjectIds = new Set(
         await listAccessibleProjectIds(userId, userEmail, db),
     );
     const allowed: string[] = [];
     for (const doc of rows) {
+        if (tombstoned.has(doc.id)) continue;
         if (doc.user_id === userId) {
             allowed.push(doc.id);
         } else if (

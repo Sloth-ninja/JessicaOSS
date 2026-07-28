@@ -52,6 +52,7 @@ function membership(
       ...policies,
     },
     modelConfig: { defaultModel: null, offeredProviders: [] },
+    retentionDays: 30,
   };
 }
 

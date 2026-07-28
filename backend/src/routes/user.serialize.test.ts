@@ -35,6 +35,7 @@ const ARIA: OrganisationMembership = {
     memberModelPrefs: true,
   },
   modelConfig: { defaultModel: null, offeredProviders: [] },
+  retentionDays: 30,
 };
 
 describe("serializeProfile — organisation payload shape", () => {

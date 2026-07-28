@@ -136,6 +136,7 @@ describe("resolveUserOrganisation", () => {
         memberModelPrefs: false,
       },
       modelConfig: { defaultModel: null, offeredProviders: [] },
+      retentionDays: 30,
     });
   });
 

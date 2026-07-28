@@ -30,6 +30,7 @@
 - 2026-07-22 — Supabase SQL editor: UPDATE without RETURNING reports "Success. No rows returned" either way
 - 2026-07-22 — user_profiles.user_id is uuid; event tables' user_id is text — never cross-join raw
 - 2026-07-23 — Relative `cd` in chained/background shell commands: use absolute paths
+- 2026-07-27 — Fail-open vs fail-safe is a per-operation choice; deletes fail SAFE
 
 ## Lessons
 
@@ -243,3 +244,28 @@ notification-driven shell command, `cd` only to ABSOLUTE paths (or prefix
 tools with the absolute path); never assume the session cwd. Related, already
 recorded 19/07: never pipe a command through `tail`/`grep` when its exit code
 matters.
+
+### 2026-07-27 (WS8 PR G) — Fail-open vs fail-safe is a per-operation choice
+
+Trigger: WS8 PR B's `requireMemberPolicy` deliberately FAILS OPEN on an
+org-lookup error (calls `next()` as if the policy were ON) — availability beats
+a brief policy gap when the worst case is a blocked key write. WS8 PR G reuses
+the SAME org lookup to decide tombstone-vs-hard-delete, but copying the
+fail-open direction there would hard-delete a member's data on a transient DB
+hiccup — irreversible loss. Rule: the safe default on an infra error depends on
+what the operation does. For anything DESTRUCTIVE, fail SAFE toward the
+reversible outcome (`resolveDeletionMode` tombstones on lookup error, since a
+tombstone can be restored and a hard delete cannot); for read/availability
+gates, fail open. Never mechanically mirror a sibling seam's failure direction —
+re-derive it from the blast radius. (Same lesson in miniature: `getTombstonedIds`
+read-exclusion degrades to "show everything" on error — a member seeing their
+own soon-to-be-purged row is low-harm, so there availability wins.)
+
+Second gotcha from the same PR: adding a new named export to a lib that other
+route tests `vi.mock(...)` breaks those suites at IMPORT time ("No X export is
+defined on the mock") the moment any transitively-imported module statically
+imports the new symbol — even if the test never exercises it. When you add an
+export to a mocked module (`userDataCleanup` here), grep for every
+`vi.mock("…/thatModule"` and add the new name to each factory. Debugging
+signature: a whole test FILE fails to load with "No <newExport> export is
+defined on the … mock", not an assertion failure.

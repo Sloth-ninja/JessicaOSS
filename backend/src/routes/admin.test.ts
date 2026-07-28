@@ -54,9 +54,10 @@ vi.mock("../middleware/auth", () => ({
     next: () => void,
   ) => {
     if (!state.mfaOk) {
-      res
-        .status(403)
-        .json({ code: "mfa_verification_required", detail: "MFA verification required" });
+      res.status(403).json({
+        code: "mfa_verification_required",
+        detail: "MFA verification required",
+      });
       return;
     }
     next();
@@ -111,6 +112,28 @@ vi.mock("../lib/userApiKeys", () => ({
       : null,
 }));
 
+const listPendingDeletions = vi.fn();
+const restoreResource = vi.fn();
+const expediteResource = vi.fn();
+const getOrganisationMemberIds = vi.fn();
+const updateOrganisationRetention = vi.fn();
+const insertDeletionAudit = vi.fn();
+vi.mock("../lib/deletionGovernance", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../lib/deletionGovernance")>();
+  return {
+    ...actual,
+    listPendingDeletions: (...args: unknown[]) => listPendingDeletions(...args),
+    restoreResource: (...args: unknown[]) => restoreResource(...args),
+    expediteResource: (...args: unknown[]) => expediteResource(...args),
+    getOrganisationMemberIds: (...args: unknown[]) =>
+      getOrganisationMemberIds(...args),
+    updateOrganisationRetention: (...args: unknown[]) =>
+      updateOrganisationRetention(...args),
+    insertDeletionAudit: (...args: unknown[]) => insertDeletionAudit(...args),
+  };
+});
+
 import { adminRouter } from "./admin";
 
 let server: Server;
@@ -156,6 +179,16 @@ beforeEach(() => {
   setMemberRole.mockImplementation(() =>
     Promise.resolve(state.setMemberRoleResult),
   );
+  listPendingDeletions.mockReset().mockResolvedValue([]);
+  restoreResource.mockReset().mockResolvedValue("ok");
+  expediteResource.mockReset().mockResolvedValue("ok");
+  getOrganisationMemberIds.mockReset().mockResolvedValue(["u1", "u2"]);
+  updateOrganisationRetention
+    .mockReset()
+    .mockImplementation((_db: unknown, _orgId: unknown, days: number) =>
+      Promise.resolve(days),
+    );
+  insertDeletionAudit.mockReset().mockResolvedValue(undefined);
 });
 
 describe("admin authz", () => {
@@ -565,5 +598,161 @@ describe("PATCH /admin/connector-gallery", () => {
     const res = await patchCuration({ enabledConnectorIds: [] });
     expect(res.status).toBe(403);
     expect(setOrganisationEnabledConnectorIds).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /admin/pending-deletions", () => {
+  it("returns 403 for a non-admin caller", async () => {
+    state.isAdmin = false;
+    const res = await fetch(`${baseUrl}/admin/pending-deletions`);
+    expect(res.status).toBe(403);
+    expect(listPendingDeletions).not.toHaveBeenCalled();
+  });
+
+  it("returns the firm's pending deletions, scoped to the caller's org", async () => {
+    listPendingDeletions.mockResolvedValue([
+      { resourceType: "chat", id: "c1", daysRemaining: 5 },
+    ]);
+    const res = await fetch(`${baseUrl}/admin/pending-deletions`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      items: [{ resourceType: "chat", id: "c1", daysRemaining: 5 }],
+    });
+    expect(listPendingDeletions).toHaveBeenCalledWith(
+      expect.anything(),
+      "org-1",
+    );
+  });
+});
+
+describe("POST /admin/pending-deletions/:resourceType/:id/restore", () => {
+  const restore = (resourceType: string, id: string) =>
+    fetch(`${baseUrl}/admin/pending-deletions/${resourceType}/${id}/restore`, {
+      method: "POST",
+    });
+
+  it("returns 404 for an unknown resourceType (never reaches restoreResource)", async () => {
+    const res = await restore("not-a-real-type", "id1");
+    expect(res.status).toBe(404);
+    expect(restoreResource).not.toHaveBeenCalled();
+  });
+
+  it("restores a governed item and writes an audit row", async () => {
+    const res = await restore("chat", "c1");
+    expect(res.status).toBe(204);
+    expect(restoreResource).toHaveBeenCalledWith(
+      expect.anything(),
+      "chat",
+      "c1",
+      ["u1", "u2"],
+    );
+    expect(insertDeletionAudit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        organisationId: "org-1",
+        action: "restored",
+        resourceType: "chat",
+        resourceId: "c1",
+      }),
+    );
+  });
+
+  it("returns 404 when restoreResource reports not_found and skips the audit", async () => {
+    restoreResource.mockResolvedValue("not_found");
+    const res = await restore("chat", "c1");
+    expect(res.status).toBe(404);
+    expect(insertDeletionAudit).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 without MFA step-up", async () => {
+    state.mfaOk = false;
+    const res = await restore("chat", "c1");
+    expect(res.status).toBe(403);
+    expect(restoreResource).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /admin/pending-deletions/:resourceType/:id/expedite", () => {
+  const expedite = (resourceType: string, id: string) =>
+    fetch(`${baseUrl}/admin/pending-deletions/${resourceType}/${id}/expedite`, {
+      method: "POST",
+    });
+
+  it("returns 404 for an unknown resourceType (never reaches expediteResource)", async () => {
+    const res = await expedite("not-a-real-type", "id1");
+    expect(res.status).toBe(404);
+    expect(expediteResource).not.toHaveBeenCalled();
+  });
+
+  it("expedites a governed item and writes an audit row", async () => {
+    const res = await expedite("document", "d1");
+    expect(res.status).toBe(204);
+    expect(expediteResource).toHaveBeenCalledWith(
+      expect.anything(),
+      "document",
+      "d1",
+      ["u1", "u2"],
+    );
+    expect(insertDeletionAudit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: "expedited", resourceId: "d1" }),
+    );
+  });
+
+  it("returns 404 when expediteResource reports not_found", async () => {
+    expediteResource.mockResolvedValue("not_found");
+    const res = await expedite("document", "d1");
+    expect(res.status).toBe(404);
+    expect(insertDeletionAudit).not.toHaveBeenCalled();
+  });
+});
+
+describe("PATCH /admin/retention", () => {
+  const patchRetention = (body: unknown) =>
+    fetch(`${baseUrl}/admin/retention`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  it("returns 400 when retentionDays is not a number", async () => {
+    const res = await patchRetention({ retentionDays: "not-a-number" });
+    expect(res.status).toBe(400);
+    expect(updateOrganisationRetention).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when retentionDays is missing", async () => {
+    const res = await patchRetention({});
+    expect(res.status).toBe(400);
+    expect(updateOrganisationRetention).not.toHaveBeenCalled();
+  });
+
+  it("clamps out-of-range values and persists the clamped value", async () => {
+    const res = await patchRetention({ retentionDays: 4000 });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ retentionDays: 365 });
+    expect(updateOrganisationRetention).toHaveBeenCalledWith(
+      expect.anything(),
+      "org-1",
+      365,
+    );
+  });
+
+  it("persists a valid in-range value unchanged", async () => {
+    const res = await patchRetention({ retentionDays: 45 });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ retentionDays: 45 });
+    expect(updateOrganisationRetention).toHaveBeenCalledWith(
+      expect.anything(),
+      "org-1",
+      45,
+    );
+  });
+
+  it("returns 403 without MFA step-up", async () => {
+    state.mfaOk = false;
+    const res = await patchRetention({ retentionDays: 30 });
+    expect(res.status).toBe(403);
+    expect(updateOrganisationRetention).not.toHaveBeenCalled();
   });
 });

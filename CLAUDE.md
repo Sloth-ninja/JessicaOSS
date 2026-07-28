@@ -25,6 +25,7 @@ Mission: the first *substantive* UK version — real UK data integrations, UK le
 | Local/on-premises model mode | `docs/local-models.md` |
 | Eval harness: cases, gates, judge, baseline | `evals/README.md` |
 | Legal terms of art awaiting solicitor sign-off | `docs/LEGAL_LANGUAGE_REVIEW.md` |
+| Deletion governance (firm tombstones, retention, purge, admin restore/expedite) | `docs/DELETION_GOVERNANCE_SPEC.md` |
 
 Where docs conflict on status or scope, `docs/BUILD_LOG.md` (newest entry) wins over `docs/BUILD_PLAN.md`, which is kept as the historical plan of record.
 
@@ -47,7 +48,7 @@ Two independent npm projects, no shared workspace. Frontend calls backend over H
 | Legal sources | `src/lib/legalSourcesTools/` (CourtListener excised 07/07/2026; UK sources — Companies House WS1, legislation.gov.uk WS2 — land here per `docs/MIGRATION_SPEC.md`) |
 | Documents | `storage.ts`, `documentVersions.ts`, `docxTrackedChanges.ts`, `convert.ts`, `upload.ts`, `downloadTokens.ts` |
 | Users | `userSettings.ts`, `userApiKeys.ts` (key precedence user > firm > env), `userDataExport.ts`, `userDataCleanup.ts`, `access.ts`, `middleware/auth.ts` (`requireAdmin`, `requireMemberPolicy` — WS8 PR B firm-policy write gate, fail-open) |
-| Firm admin (WS8) | `organisations.ts` (membership, `isAdmin`, `getUserOrganisationId`, member list + `setMemberRole` last-admin guard, connector-gallery curation `get/setOrganisationEnabledConnectorIds` — PR E, model config `get/setOrganisationModelConfig` + `getUserOrganisationModelContext` — PR F), `organisationApiKeys.ts` (firm-shared keys CRUD), `apiKeyCrypto.ts` (shared AES-256-GCM for user + firm keys), `usageStats.ts` (PR D: org-scoped usage aggregation for `GET /admin/usage`) |
+| Firm admin (WS8) | `organisations.ts` (membership incl. `retentionDays`, `isAdmin`, `getUserOrganisationId`, member list + `setMemberRole` last-admin guard, connector-gallery curation `get/setOrganisationEnabledConnectorIds` — PR E, model config `get/setOrganisationModelConfig` + `getUserOrganisationModelContext` — PR F), `organisationApiKeys.ts` (firm-shared keys CRUD), `apiKeyCrypto.ts` (shared AES-256-GCM for user + firm keys), `usageStats.ts` (PR D: org-scoped usage aggregation for `GET /admin/usage`), `deletionGovernance.ts` (PR G: tombstone-vs-hard-delete decision, read exclusion, retention purge sweep, admin restore/expedite, `deletion_audit_logs` — self-contained seam, 42703-tolerant; boot + 6-hourly `setInterval` sweep in `index.ts`) |
 | MCP | `src/lib/mcp/` (client, oauth, servers) + `mcpConnectors.ts`; `mcpConnectorRegistry.ts` (WS8 PR E curated one-click connector shortlist — honesty-verified OAuth endpoints vs informational "custom" entries) + `mcpConnectorGallery.ts` (gallery build: per-caller status derivation, org-curation filtering) |
 | Seed workflows | `src/lib/builtinWorkflows.ts` (backend, 3 system workflows) and `frontend/src/app/components/workflows/builtinWorkflows.ts` (frontend, 14 templates) |
 

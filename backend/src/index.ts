@@ -15,6 +15,7 @@ import { downloadsRouter } from "./routes/downloads";
 import { companiesRouter } from "./routes/companies";
 import { citationsRouter } from "./routes/citations";
 import { legislationRouter } from "./routes/legislation";
+import { runDeletionPurge } from "./lib/deletionGovernance";
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
@@ -200,3 +201,31 @@ process.on("uncaughtException", (err) => {
 app.listen(PORT, () => {
   console.log(`JessicaOS backend running on port ${PORT}`);
 });
+
+// Deletion governance purge sweep (WS8 PR G): hard-delete tombstoned rows past
+// their firm's retention window. Best-effort — runs on boot and every 6 hours,
+// never blocks a request, and swallows/logs its own errors so a sweep can never
+// crash the process. Scheduling is in-process: if a boot sweep and the interval
+// ever overlapped they could each write a `purged` audit row for the same batch
+// (harmless double-count in the audit trail, not double deletion — the second
+// sweep finds the rows already gone); revisit if sweep scheduling moves to a
+// durable out-of-process job. See docs/DELETION_GOVERNANCE_SPEC.md.
+const DELETION_PURGE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+function scheduleDeletionPurge() {
+  const runOnce = () => {
+    runDeletionPurge()
+      .then((summary) => {
+        if (summary.total > 0) {
+          console.log("[deletion] purge sweep complete", summary);
+        }
+      })
+      .catch((err) => {
+        console.error("[deletion] purge sweep failed", err);
+      });
+  };
+  runOnce();
+  const timer = setInterval(runOnce, DELETION_PURGE_INTERVAL_MS);
+  // Do not keep the event loop alive solely for the sweep.
+  if (typeof timer.unref === "function") timer.unref();
+}
+scheduleDeletionPurge();

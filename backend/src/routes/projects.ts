@@ -17,6 +17,12 @@ import { docxToPdf, convertedPdfKey } from "../lib/convert";
 import { checkProjectAccess } from "../lib/access";
 import { singleFileUpload } from "../lib/upload";
 import { deleteUserProjects } from "../lib/userDataCleanup";
+import {
+  resolveDeletionMode,
+  tombstoneResource,
+  insertDeletionAudit,
+  getTombstonedIds,
+} from "../lib/deletionGovernance";
 
 export const projectsRouter = Router();
 const ALLOWED_TYPES = new Set(["pdf", "docx", "doc"]);
@@ -149,7 +155,13 @@ projectsRouter.get("/", requireAuth, asyncHandler(async (req, res) => {
   });
   if (error) return void res.status(500).json({ detail: error.message });
 
-  res.json(data ?? []);
+  // The overview RPC does not filter deleted_at (owner-frozen for v1); exclude
+  // tombstoned matters here (WS8 PR G, docs/DELETION_GOVERNANCE_SPEC.md).
+  const rows = (data ?? []) as { id: string }[];
+  const tombstoned = await getTombstonedIds(db, "project", {
+    ids: rows.map((row) => row.id),
+  });
+  res.json(rows.filter((row) => !tombstoned.has(row.id)));
 }));
 
 // POST /projects
@@ -217,6 +229,12 @@ projectsRouter.get("/:projectId", requireAuth, asyncHandler(async (req, res) => 
       Array.isArray(project.shared_with) &&
       project.shared_with.includes(userEmail));
   if (!canAccess)
+    return void res.status(404).json({ detail: "Matter not found" });
+
+  // A tombstoned matter is hidden immediately (WS8 PR G) — 404 so it cannot
+  // resurface via its detail route while awaiting purge.
+  const tombstoned = await getTombstonedIds(db, "project", { ids: [projectId] });
+  if (tombstoned.has(projectId))
     return void res.status(404).json({ detail: "Matter not found" });
 
   const [{ data: docs }, { data: folderData }] = await Promise.all([
@@ -381,20 +399,39 @@ projectsRouter.patch("/:projectId", requireAuth, asyncHandler(async (req, res) =
 }));
 
 // DELETE /projects/:projectId
-projectsRouter.delete("/:projectId", requireAuth, async (req, res) => {
+// Org members tombstone (reversible, purged after the firm's retention window);
+// orgless self-hosters hard-delete immediately (unchanged). See
+// docs/DELETION_GOVERNANCE_SPEC.md.
+projectsRouter.delete("/:projectId", requireAuth, asyncHandler(async (req, res) => {
   const userId = res.locals.userId as string;
   const { projectId } = req.params;
   const db = createServerSupabase();
-  try {
-    const deletedCount = await deleteUserProjects(db, userId, [projectId]);
-    if (deletedCount === 0)
+
+  const mode = await resolveDeletionMode(db, userId);
+  if (mode.tombstone) {
+    const outcome = await tombstoneResource(db, "project", projectId, userId, {
+      user_id: userId,
+    });
+    if (outcome === "tombstoned") {
+      await insertDeletionAudit(db, {
+        organisationId: mode.organisationId,
+        actorUserId: userId,
+        action: "requested",
+        resourceType: "project",
+        resourceId: projectId,
+      });
+      return void res.status(204).send();
+    }
+    if (outcome === "not_found")
       return void res.status(404).json({ detail: "Matter not found" });
-    res.status(204).send();
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ detail });
+    // "unsupported" (unmigrated) → fall through to the hard-delete path.
   }
-});
+
+  const deletedCount = await deleteUserProjects(db, userId, [projectId]);
+  if (deletedCount === 0)
+    return void res.status(404).json({ detail: "Matter not found" });
+  res.status(204).send();
+}));
 
 // GET /projects/:projectId/documents
 projectsRouter.get("/:projectId/documents", requireAuth, asyncHandler(async (req, res) => {
@@ -702,7 +739,15 @@ projectsRouter.get("/:projectId/chats", requireAuth, asyncHandler(async (req, re
     .eq("project_id", projectId)
     .order("created_at", { ascending: false });
   if (error) return void res.status(500).json({ detail: error.message });
-  const chats = data ?? [];
+  let chats = (data ?? []) as ({ id: string } & {
+    user_id?: string | null;
+  })[];
+  // Exclude tombstoned chats (WS8 PR G) — a project chat can be tombstoned via
+  // DELETE /chat/:chatId.
+  const tombstoned = await getTombstonedIds(db, "chat", {
+    ids: chats.map((chat) => chat.id),
+  });
+  chats = chats.filter((chat) => !tombstoned.has(chat.id));
   await attachChatCreatorLabels(db, chats);
   res.json(chats);
 }));

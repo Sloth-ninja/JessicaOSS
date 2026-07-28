@@ -22,6 +22,12 @@ import {
 } from "../lib/userSettings";
 import { checkProjectAccess } from "../lib/access";
 import { safeErrorLog, safeErrorMessage } from "../lib/safeError";
+import {
+    resolveDeletionMode,
+    tombstoneResource,
+    insertDeletionAudit,
+    getTombstonedIds,
+} from "../lib/deletionGovernance";
 
 export const chatRouter = Router();
 
@@ -168,7 +174,13 @@ chatRouter.get("/", requireAuth, asyncHandler(async (req, res) => {
         p_limit: limit,
     });
     if (error) return void res.status(500).json({ detail: error.message });
-    res.json(data ?? []);
+    // The overview RPC does not filter deleted_at (owner-frozen for v1); exclude
+    // tombstoned chats here (WS8 PR G, docs/DELETION_GOVERNANCE_SPEC.md).
+    const rows = (data ?? []) as { id: string }[];
+    const tombstoned = await getTombstonedIds(db, "chat", {
+        ids: rows.map((row) => row.id),
+    });
+    res.json(rows.filter((row) => !tombstoned.has(row.id)));
 }));
 
 // POST /chat/create
@@ -211,6 +223,11 @@ chatRouter.get("/:chatId", requireAuth, asyncHandler(async (req, res) => {
 
     const chat = await getAccessibleChat(chatId, userId, userEmail, db);
     if (!chat)
+        return void res.status(404).json({ detail: "Chat not found" });
+
+    // A tombstoned chat is hidden immediately (WS8 PR G) — 404 while awaiting purge.
+    const tombstoned = await getTombstonedIds(db, "chat", { ids: [chatId] });
+    if (tombstoned.has(chatId))
         return void res.status(404).json({ detail: "Chat not found" });
 
     const { data: messages } = await db
@@ -368,6 +385,30 @@ chatRouter.delete("/:chatId", requireAuth, asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     const { chatId } = req.params;
     const db = createServerSupabase();
+
+    // Org members tombstone (reversible); orgless self-hosters hard-delete
+    // (unchanged). WS8 PR G. Idempotent: an already-tombstoned/absent row still
+    // returns 204, matching the prior hard-delete behaviour.
+    const mode = await resolveDeletionMode(db, userId);
+    if (mode.tombstone) {
+        const outcome = await tombstoneResource(db, "chat", chatId, userId, {
+            user_id: userId,
+        });
+        if (outcome !== "unsupported") {
+            if (outcome === "tombstoned") {
+                await insertDeletionAudit(db, {
+                    organisationId: mode.organisationId,
+                    actorUserId: userId,
+                    action: "requested",
+                    resourceType: "chat",
+                    resourceId: chatId,
+                });
+            }
+            return void res.status(204).send();
+        }
+        // "unsupported" (unmigrated) → fall through to hard delete.
+    }
+
     const { error } = await db
         .from("chats")
         .delete()

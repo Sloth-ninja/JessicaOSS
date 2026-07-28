@@ -30,9 +30,20 @@ export interface OrganisationMembership {
     name: string;
     role: OrganisationRole;
     policies: OrganisationPolicies;
-    /** Firm model configuration (default model + offered providers). */
+    /** Firm model configuration (default model + offered providers) — PR F. */
     modelConfig: OrganisationModelConfig;
+    /**
+     * Firm retention window for soft-deleted items, in days (WS8 PR G). Exposed
+     * so the member privacy-data copy can honestly say how long the firm holds a
+     * deleted item before permanent removal. Defaults to 30 when the column is
+     * absent/unmigrated.
+     */
+    retentionDays: number;
 }
+
+// Default retention window (days) when a firm has no explicit value / the column
+// is missing. Mirrors organisations.retention_days DEFAULT 30 (migration 20260727_01).
+export const DEFAULT_RETENTION_DAYS = 30;
 
 // Columns embedded from the joined organisations row.
 type OrganisationEmbed = {
@@ -42,6 +53,7 @@ type OrganisationEmbed = {
     allow_member_mcp_connectors: boolean | null;
     allow_member_model_prefs: boolean | null;
     model_config: unknown;
+    retention_days: number | null;
 };
 
 type MembershipRow = {
@@ -54,7 +66,7 @@ type MembershipRow = {
 
 // One round-trip: the profile's membership columns plus the joined firm row.
 const MEMBERSHIP_SELECT =
-    "organisation_id, role, organisation:organisations(id, name, allow_member_api_keys, allow_member_mcp_connectors, allow_member_model_prefs, model_config)";
+    "organisation_id, role, organisation:organisations(id, name, allow_member_api_keys, allow_member_mcp_connectors, allow_member_model_prefs, model_config, retention_days)";
 
 /**
  * Coerce the raw `organisations.model_config` jsonb into the normalised
@@ -119,6 +131,10 @@ function toMembership(row: MembershipRow | null): OrganisationMembership | null 
             memberModelPrefs: org.allow_member_model_prefs === true,
         },
         modelConfig: normaliseModelConfig(org.model_config),
+        retentionDays:
+            typeof org.retention_days === "number" && org.retention_days > 0
+                ? org.retention_days
+                : DEFAULT_RETENTION_DAYS,
     };
 }
 

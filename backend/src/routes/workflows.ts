@@ -1,6 +1,12 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { requireAuth } from "../middleware/auth";
 import { createServerSupabase } from "../lib/supabase";
+import {
+  resolveDeletionMode,
+  tombstoneResource,
+  insertDeletionAudit,
+  getTombstonedIds,
+} from "../lib/deletionGovernance";
 
 export const workflowsRouter = Router();
 
@@ -86,7 +92,13 @@ workflowsRouter.get("/", requireAuth, asyncRoute(async (req, res) => {
   });
   if (error) return void res.status(500).json({ detail: error.message });
 
-  res.json(data ?? []);
+  // The overview RPC does not filter deleted_at (owner-frozen for v1); exclude
+  // tombstoned workflows here (WS8 PR G, docs/DELETION_GOVERNANCE_SPEC.md).
+  const rows = (data ?? []) as { id: string }[];
+  const tombstoned = await getTombstonedIds(db, "workflow", {
+    ids: rows.map((row) => row.id),
+  });
+  res.json(rows.filter((row) => !tombstoned.has(row.id)));
 }));
 
 // POST /workflows
@@ -172,6 +184,30 @@ workflowsRouter.delete("/:workflowId", requireAuth, asyncRoute(async (req, res) 
   const userId = res.locals.userId as string;
   const { workflowId } = req.params;
   const db = createServerSupabase();
+
+  // Org members tombstone (reversible); orgless self-hosters hard-delete
+  // (unchanged). WS8 PR G. System workflows are never owned/deletable.
+  const mode = await resolveDeletionMode(db, userId);
+  if (mode.tombstone) {
+    const outcome = await tombstoneResource(db, "workflow", workflowId, userId, {
+      user_id: userId,
+      is_system: false,
+    });
+    if (outcome !== "unsupported") {
+      if (outcome === "tombstoned") {
+        await insertDeletionAudit(db, {
+          organisationId: mode.organisationId,
+          actorUserId: userId,
+          action: "requested",
+          resourceType: "workflow",
+          resourceId: workflowId,
+        });
+      }
+      return void res.status(204).send();
+    }
+    // "unsupported" (unmigrated) → fall through to hard delete.
+  }
+
   const { error } = await db
     .from("workflows")
     .delete()
@@ -230,6 +266,10 @@ workflowsRouter.get("/:workflowId", requireAuth, asyncRoute(async (req, res) => 
   const db = createServerSupabase();
   const access = await resolveWorkflowAccess(workflowId, userId, userEmail, db);
   if (!access)
+    return void res.status(404).json({ detail: "Workflow not found" });
+  // A tombstoned workflow is hidden immediately (WS8 PR G) — 404 while awaiting purge.
+  const tombstoned = await getTombstonedIds(db, "workflow", { ids: [workflowId] });
+  if (tombstoned.has(workflowId))
     return void res.status(404).json({ detail: "Workflow not found" });
   res.json(
     withWorkflowAccess(access.workflow, {
