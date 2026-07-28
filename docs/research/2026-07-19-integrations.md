@@ -68,3 +68,22 @@ solicitor uploads the purchased PDF into JessicaOS's existing document pipeline.
 A "Land Registry — Connect account (coming soon)" nav stub ships with WS7.
 
 Sources (fetched 19/07/2026): [Business Gateway tech docs](https://landregistry.github.io/bgtechdoc/) incl. [REST developer guide](https://landregistry.github.io/bgtechdoc/rest/get_started/developer_guide/) and [FAQ](https://landregistry.github.io/bgtechdoc/support/FAQ/); [conditions of use (incl. clause 4.2)](https://www.gov.uk/government/publications/conditions-of-use-hm-land-registry-business-e-services/conditions-of-use-portal-and-business-gateway); [direct integration guidance + channel-partner contact](https://www.gov.uk/guidance/direct-integration-with-business-gateway); fees: [Dec 2024 changes](https://www.gov.uk/government/news/changes-to-fees-for-hm-land-registrys-information-services-from-december) and [current fee schedule](https://www.gov.uk/guidance/hm-land-registry-information-services-fees); open data: [Use land and property data API](https://use-land-property-data.service.gov.uk/api-documentation).
+
+## Addendum — 28 July 2026 (registration + endpoint verification)
+
+Verified live: the real platform domain is **`quill-interactive.co.uk`**
+(`app.myquill.com` is only the "i4" web front-end per Quill's own discovery
+document at `https://discovery.quill-interactive.co.uk/default.json`, which
+lists api/auth/docs/interactiveService/time/search hosts). Aria Grace Law's
+`tenantUri` is **`aria-grace-law-cic`** (from the Money API URL Quill supplied).
+The first app registration was unusable for a server integration: its redirect
+URI was `https://global.consent.azure-apim.net/redirect/unity-…` (Microsoft
+Power Platform's consent endpoint), so authorisation codes could never reach
+JessicaOS. Re-registered 28/07 via the Google form with **Authorisation Code
+Flow** and redirect URI `https://api.jessicaoss.com/quill/oauth/callback`
+(localhost variant requested; sandbox/rate-limit/multi-redirect questions
+asked). Env contract for the connector: `QUILL_CLIENT_ID`,
+`QUILL_CLIENT_SECRET`, `QUILL_TENANT_ID`, `QUILL_DOMAIN=quill-interactive.co.uk`,
+`QUILL_REDIRECT_URI`; `tenantUri` auto-discovered at runtime. Spike gated on
+the new credentials arriving; first spike test = two-user permissions
+comparison (the wiki is silent on permission bounding).
