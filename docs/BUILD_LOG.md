@@ -87,6 +87,28 @@ channel-partner authorisation.
 
 ---
 
+## 2026-07-28 — Company-search saves migration (branch `company-search-saves-migration`)
+
+**Scope:** the owner-authorised migration for starred companies + recent
+searches (`20260728_01_company_search_saves.sql`), its `schema.sql` mirror,
+and the allowlist entry the owner added in-session. No application code —
+additive table only, zero behaviour change until the feature PR lands.
+
+**Contents.** `company_search_saves`: per-user rows keyed
+`unique(user_id, company_number)` (`user_id` text, `hidden_workflows`
+precedent), name/status snapshot columns, `starred` flag,
+`last_viewed_at` for recents ordering + `(user_id, last_viewed_at desc)`
+index; RLS enabled; browser-role grants revoked. Feature PR to follow:
+`lib/companySearchSaves.ts` + `/companies` routes + company-search UI
+(starred/recent sections, star toggle), 25-recent prune, 42703-tolerant.
+
+**Verification:** migration ↔ schema.sql mirrored 1:1; idempotent
+(if-not-exists throughout); no code changes so backend/frontend checks
+unaffected. Owner must run it in production Supabase before the feature
+activates (code degrades gracefully until then).
+
+---
+
 ## 2026-07-27 — WS8 PR G: deletion governance (branch `ws8-deletion-governance`)
 
 **Scope:** firm members' destructive deletes become reversible **tombstones**

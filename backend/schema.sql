@@ -430,6 +430,24 @@ create table if not exists public.hidden_workflows (
 create index if not exists idx_hidden_workflows_user
   on public.hidden_workflows(user_id);
 
+-- Company search: starred companies + recent searches (per user).
+create table if not exists public.company_search_saves (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null,
+  company_number text not null,
+  company_name text not null,
+  company_status text,
+  starred boolean not null default false,
+  last_viewed_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  unique(user_id, company_number)
+);
+
+create index if not exists idx_company_search_saves_user_viewed
+  on public.company_search_saves(user_id, last_viewed_at desc);
+
+alter table public.company_search_saves enable row level security;
+
 create table if not exists public.workflow_shares (
   id uuid primary key default gen_random_uuid(),
   workflow_id uuid not null references public.workflows(id) on delete cascade,
@@ -869,6 +887,7 @@ revoke all on public.document_versions from anon, authenticated;
 revoke all on public.document_edits from anon, authenticated;
 revoke all on public.workflows from anon, authenticated;
 revoke all on public.hidden_workflows from anon, authenticated;
+revoke all on public.company_search_saves from anon, authenticated;
 revoke all on public.workflow_shares from anon, authenticated;
 revoke all on public.chats from anon, authenticated;
 revoke all on public.chat_messages from anon, authenticated;
