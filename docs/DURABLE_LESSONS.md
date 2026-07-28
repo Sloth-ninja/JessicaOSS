@@ -33,6 +33,7 @@
 - 2026-07-27 — Fail-open vs fail-safe is a per-operation choice; deletes fail SAFE
 - 2026-07-28 — CH document proxy: parse+exact-host allowlist (not startsWith); fetch drops Authorization on cross-origin 302; stream-cap the body
 - 2026-07-28 — `prettier --write` with no resolvable config reformats 4-space frontend files to 2-space wholesale — an unmergeable diff
+- 2026-07-28 — Soft-delete (tombstone) and access checks must compose: gate at the shared choke point, not per-route
 
 ## Lessons
 
@@ -346,3 +347,27 @@ frontend file shows a diff far larger than your edit, with `-    ` / `+  `
 whole-file conflicts right after a "format" step. Recovery: `git checkout
 origin/main -- <file>` to restore the upstream 4-space version, then re-apply
 only your semantic edits by hand.
+
+### 2026-07-28 — Soft-delete (tombstone) and access checks must compose at the choke point
+
+Trigger: WS8 deletion governance tombstones a row by setting `deleted_at` only
+(the row stays in its table for the retention window); WS9 firm visibility lets
+any firm member reach a matter/review through `checkProjectAccess` /
+`ensureReviewAccess`. These two seams shipped in separate trains and were never
+composed: the shared access helpers did NOT consult the tombstone, so only the
+per-route DETAIL guards (which each re-checked `getTombstonedIds` after the access
+call) hid a soft-deleted item. Every CONTENT sub-route (documents/chats/people/
+upload; tabular generate/chat/…) trusted the helper alone, so a firm member with a
+stale id could read — and via the write paths, mutate — a soft-deleted item for the
+whole retention window.
+
+Rule: when a lifecycle flag (tombstone, archived, suspended) must hide a resource,
+enforce it INSIDE the shared access predicate/helper, not in each route. A guard
+that lives in "the routes that happened to remember" is a guard that a new route
+silently omits. Corollary: after folding it in, confirm the reverse — the admin/
+system paths that MUST still see the hidden rows (restore, expedite, pending-list,
+purge sweep) do not route through that helper; here they query the tables directly
+with member scope, so they were unaffected. Debugging signature: a detail/GET route
+404s a deleted item but a sibling sub-route (`/:id/documents`, `/:id/generate`)
+returns 200/streams for the same id; grep shows the sub-routes calling the access
+helper but never `getTombstonedIds`.

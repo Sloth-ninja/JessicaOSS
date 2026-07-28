@@ -73,6 +73,11 @@ export async function setResourceVisibility(
         })
         .eq("id", id)
         .eq("user_id", ownerId)
+        // A tombstoned (soft-deleted) item must not be flip-able (WS8×WS9): the
+        // guard is in the predicate so a tombstoned row matches zero rows ⇒
+        // not_found, without a separate read. 42703/42P01 on deleted_at (an
+        // unmigrated deletion-governance DB) still routes through the catch below.
+        .is("deleted_at", null)
         .select("id");
     if (error) {
         if (isMissingColumnOrTable(error)) return "unsupported";

@@ -17,6 +17,16 @@ import type { AddressInfo } from "node:net";
 const state = vi.hoisted(() => ({
   orgId: "org-1" as string | null,
   outcome: "updated" as "updated" | "not_found" | "unsupported",
+  // Sub-route (people) fixtures: the matter the fake DB returns, and whether
+  // getTombstonedIds reports it soft-deleted (WS8×WS9 choke-point gate).
+  project: {
+    id: "p1",
+    user_id: "owner",
+    shared_with: [] as string[],
+    visibility: "private" as string | null,
+    organisation_id: null as string | null,
+  } as Record<string, unknown> | null,
+  projectTombstoned: false,
 }));
 
 vi.mock("../middleware/auth", () => ({
@@ -32,8 +42,23 @@ vi.mock("../middleware/auth", () => ({
   },
 }));
 
+// Minimal fake: the visibility route only threads `db` into mocked helpers, but
+// the /people sub-route reads the matter via .from(...).select(...).eq(...).single()
+// (twice — once directly, once inside checkProjectAccess's loadProjectAccessRow).
 vi.mock("../lib/supabase", () => ({
-  createServerSupabase: () => ({}),
+  createServerSupabase: () => ({
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          single: () =>
+            Promise.resolve({
+              data: state.project,
+              error: state.project ? null : { code: "PGRST116" },
+            }),
+        }),
+      }),
+    }),
+  }),
 }));
 
 const setResourceVisibility = vi.fn();
@@ -61,6 +86,13 @@ vi.mock("../lib/deletionGovernance", async (importOriginal) => {
   return {
     ...actual,
     insertDeletionAudit: (...args: unknown[]) => insertDeletionAudit(...args),
+    // checkProjectAccess (real) consults this to gate on the matter's tombstone.
+    getTombstonedIds: (_db: unknown, type: string) =>
+      Promise.resolve(
+        state.projectTombstoned && type === "project"
+          ? new Set([state.project?.id])
+          : new Set(),
+      ),
   };
 });
 
@@ -89,6 +121,14 @@ afterAll(
 beforeEach(() => {
   state.orgId = "org-1";
   state.outcome = "updated";
+  state.project = {
+    id: "p1",
+    user_id: "owner",
+    shared_with: [],
+    visibility: "private",
+    organisation_id: null,
+  };
+  state.projectTombstoned = false;
   getUserOrganisationId.mockReset().mockImplementation(() =>
     Promise.resolve(state.orgId),
   );
@@ -165,5 +205,20 @@ describe("PATCH /projects/:projectId/visibility", () => {
       expect.anything(),
       expect.objectContaining({ action: "firm_reverted" }),
     );
+  });
+});
+
+// Representative content sub-route: GET /:projectId/people must 404 on a
+// tombstoned matter, via checkProjectAccess's folded-in tombstone gate (WS8×WS9).
+// The owner is the caller, so a live matter would pass the access gate — proving
+// the 404 comes from the tombstone, not a membership miss or a missing row.
+describe("GET /projects/:projectId/people — tombstoned matter is denied", () => {
+  const people = (projectId: string) =>
+    fetch(`${baseUrl}/projects/${projectId}/people`);
+
+  it("404s the owner when the matter is tombstoned", async () => {
+    state.projectTombstoned = true;
+    const res = await people("p1");
+    expect(res.status).toBe(404);
   });
 });

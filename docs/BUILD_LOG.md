@@ -7,6 +7,63 @@
 
 ---
 
+## 2026-07-28 — WS9 fix wave: composed-range re-review of firm-visibility × deletion governance (branch `ws9-train-fixes`)
+
+**Scope:** five fixes surfaced by the composed-range multi-lens re-review of the
+whole WS9 train against `main` (c59adce), all in the **WS8×WS9 interaction class**
+— firm visibility (WS9) reads through the same rows deletion governance (WS8)
+tombstones, and the two seams had not been composed. No migrations/`.env`/
+`schema.sql`/LICENSE touched. Backend `tsc` clean; `vitest` 511/511 (500 baseline +
+11 new). Frontend `tsc` + `eslint` clean on the two changed files.
+
+**1 — Parent-tombstone gap (the important one).** Tombstoning sets only
+`deleted_at`; a tombstoned firm-visible matter still passed `checkProjectAccess`'s
+firm branch, and the content SUB-routes (projects `documents`/`chats`/`people`/
+upload/rename/folders; tabular `people`/`clear-cells`/`regenerate-cell`/`generate`/
+`chats`/`chats/:id/messages`/`chat`) never re-checked the parent tombstone — only
+the detail routes did. Any firm member with a stale id could read (and, via
+`/generate` and `/chat`, WRITE) a soft-deleted item for the whole retention window.
+**Fixed at the choke point:** folded the tombstone check into `checkProjectAccess`
+(project id) and `ensureReviewAccess` (the review's own id, plus the parent matter
+via `checkProjectAccess`) so a tombstoned parent is not-ok for EVERYONE incl. the
+owner — matching the detail routes' behaviour; owners manage tombstoned items only
+via admin Pending deletions. 42703-tolerant (empty set on an unmigrated DB). The
+now-redundant per-route guards on the two detail routes were LEFT in place as cheap
+defence-in-depth (one-line comments added). **Verified** deletion governance's
+restore/expedite/list paths (`restoreResource`, `expediteResource`,
+`listPendingDeletions`) do NOT route through these helpers — they query the tables
+directly with member scope, so they keep seeing tombstoned rows (as required).
+
+**2 — `setResourceVisibility` refuses a tombstoned item.** Added `.is("deleted_at",
+null)` to the predicate-encoded owner update, so flipping a soft-deleted item
+matches zero rows ⇒ existing `not_found` path (no separate read).
+
+**3 — Audit `resource_type` unification.** Firm audit rows wrote `"tabular_review"`
+while deletion governance writes `"tabular-review"`. Standardised both firm actions
+to the hyphenated form (tabular visibility flip route + admin revert route's param
+mapping). Decision: the URL segment and the `FirmResourceType`/`setResourceVisibility`
+API keep the underscore form; only the audit column value unifies. No production
+rows exist yet (migration unrun in prod), so no backfill needed.
+
+**4 — PeopleModal placeholder.** When `showFirmSurfaces && canEditMembers`, the
+add-member input reads "Add from your firm, or type any email…" (mock-up copy);
+orgless keeps "Add by email…".
+
+**5 — Firm-library row keyboard accessibility.** Rows were `div`/`tr onClick` only
+(the ProjectsOverview idiom is likewise click-only — no real link/button pattern to
+mirror), so applied the fallback: `role="button"` + `tabIndex={0}` + Enter/Space
+handler + `aria-label` naming the item, plus a focus style.
+
+**Tests (11 new).** access: tombstoned parent ⇒ not-ok for owner/sharee/firm-viewer
+on both helpers, incl. a project-scoped review whose parent matter is tombstoned;
+route: `GET /projects/:id/people` and the `POST /tabular-review/:id/generate` write
+path both 404 on a tombstoned parent via the helper (owner is the caller, so the
+404 provably comes from the tombstone gate); firmVisibility: flip-tombstoned
+rejection; tabular + admin: audit rows now hyphenated.
+
+**Credit:** the composed-range re-review (two lenses + adversarial verification)
+identified fix 1; the four promoted nits/minors were surfaced in the same pass.
+
 ## 2026-07-28 — WS9 PR 3: firm-visibility frontend (branch `ws9-firm-visibility-frontend`)
 
 **Scope:** the firm-library UI on top of WS9 PR 2's backend (#55). Frontend only —
