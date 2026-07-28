@@ -17,12 +17,24 @@
 import { SingleFlight, TokenBucket } from "./rateLimit";
 
 const BASE_URL = "https://api.company-information.service.gov.uk";
-const DOCUMENT_API_BASE =
-  "https://document-api.company-information.service.gov.uk";
+// The Companies House Document API lives on its own host. We only ever attach
+// the API key to a request whose parsed URL host EXACTLY equals this value —
+// never a substring/prefix match (see isDocumentApiUrl).
+const DOCUMENT_API_HOST = "document-api.company-information.service.gov.uk";
 
-// Reject any filing document larger than this — a guard against pathological
-// filings exhausting memory (we buffer the bytes before streaming them).
+// Reject any filing document larger than this. Enforced by streaming the body
+// with a running byte counter and aborting the moment the cap is exceeded, so
+// a lying Content-Length or a chunked response can never balloon memory.
 const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
+
+// Only these content types are ever echoed back with `Content-Disposition:
+// inline`. Anything else (an HTML error page, an unexpected type from a
+// tampered link) is forced to application/octet-stream so a browser never
+// renders untrusted upstream content inline.
+const ALLOWED_DOCUMENT_CONTENT_TYPES = new Set([
+  "application/pdf",
+  "application/octet-stream",
+]);
 
 // Real limit is 600 req / 5 min per key; act at 500 for headroom.
 const BUCKET_CAPACITY = 500;
@@ -326,6 +338,73 @@ function readLink(value: unknown, key: string): string | undefined {
   return typeof link === "string" && link.trim() ? link : undefined;
 }
 
+/**
+ * True only when `u` is an https URL whose host is EXACTLY the Companies House
+ * Document API host. Parses the URL rather than string-prefixing, so it
+ * rejects suffix-domain spoofs
+ * (`https://document-api.company-information.service.gov.uk.evil.com/…`) and
+ * userinfo tricks
+ * (`https://document-api.company-information.service.gov.uk@evil.com/…`) —
+ * both of which a naive `startsWith` would wave through, exfiltrating the API
+ * key attached to the initial request.
+ */
+function isDocumentApiUrl(u: string): boolean {
+  try {
+    const url = new URL(u);
+    return url.protocol === "https:" && url.host === DOCUMENT_API_HOST;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Reads a fetch Response body into a Buffer, aborting the transfer the moment
+ * the running byte count exceeds `maxBytes`. Streaming (rather than
+ * `arrayBuffer()` then checking) means a chunked or Content-Length-lying
+ * response can never buffer more than one chunk past the cap before we abort.
+ */
+async function readBodyWithCap(
+  res: Response,
+  maxBytes: number,
+  controller: AbortController,
+): Promise<Buffer> {
+  const body = res.body as ReadableStream<Uint8Array> | null;
+  if (!body) {
+    // No stream available — degrade to a buffered read, still size-checked.
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.byteLength > maxBytes) {
+      throw new CompaniesHouseError(
+        "This filing document is too large to retrieve.",
+        502,
+      );
+    }
+    return buf;
+  }
+  const reader = body.getReader();
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      controller.abort();
+      try {
+        await reader.cancel();
+      } catch {
+        /* best effort — the abort already tore down the transfer */
+      }
+      throw new CompaniesHouseError(
+        "This filing document is too large to retrieve.",
+        502,
+      );
+    }
+    chunks.push(Buffer.from(value));
+  }
+  return Buffer.concat(chunks);
+}
+
 /** Sanitises a filing type/date into a filename-safe token. */
 function filenameToken(value: unknown): string {
   if (typeof value !== "string") return "";
@@ -389,10 +468,10 @@ export async function getFilingDocument(
   );
   const metadataUrl = readLink(transaction, "document_metadata");
   // Only ever follow a metadata link that lives on the Companies House
-  // document API host — the URL comes from CH's own response, but a host
-  // check keeps a tampered upstream from redirecting our authenticated
-  // request anywhere else (defence in depth).
-  if (!metadataUrl || !metadataUrl.startsWith(DOCUMENT_API_BASE)) {
+  // document API host — the URL comes from CH's own response, but an exact
+  // host check keeps a tampered upstream from redirecting our authenticated
+  // request (and the API key on it) anywhere else.
+  if (!metadataUrl || !isDocumentApiUrl(metadataUrl)) {
     throw new CompaniesHouseError(
       "This filing has no associated document.",
       404,
@@ -425,15 +504,18 @@ export async function getFilingDocument(
 
   const contentUrl = readLink(metadata, "document");
   // No content link, or one pointing off the CH document API host, means
-  // there is no viewable document for this filing (defence in depth against
-  // a tampered upstream response).
-  if (!contentUrl || !contentUrl.startsWith(DOCUMENT_API_BASE)) {
+  // there is no viewable document for this filing (same exact-host guard as
+  // the metadata link — never key-attach to a spoofed host).
+  if (!contentUrl || !isDocumentApiUrl(contentUrl)) {
     throw new CompaniesHouseError(
       "This filing has no associated document.",
       404,
     );
   }
 
+  // The content fetch is abortable so the streaming size guard can tear the
+  // transfer down the instant the cap is exceeded.
+  const controller = new AbortController();
   let contentRes: Response;
   try {
     contentRes = await fetch(contentUrl, {
@@ -442,6 +524,7 @@ export async function getFilingDocument(
         Accept: "application/pdf",
       },
       redirect: "follow",
+      signal: controller.signal,
     });
   } catch {
     throw new CompaniesHouseError(
@@ -450,25 +533,35 @@ export async function getFilingDocument(
   }
   if (!contentRes.ok) throw documentError(contentRes.status);
 
+  // Fast path: reject an honestly-declared oversize before reading a byte.
   const declaredLength = Number(contentRes.headers.get("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > MAX_DOCUMENT_BYTES) {
+    controller.abort();
     throw new CompaniesHouseError(
       "This filing document is too large to retrieve.",
       502,
     );
   }
 
-  const buffer = Buffer.from(await contentRes.arrayBuffer());
-  if (buffer.byteLength > MAX_DOCUMENT_BYTES) {
-    throw new CompaniesHouseError(
-      "This filing document is too large to retrieve.",
-      502,
-    );
-  }
+  // Streamed read with a running cap — protects against a lying/absent
+  // Content-Length or a chunked response.
+  const buffer = await readBodyWithCap(
+    contentRes,
+    MAX_DOCUMENT_BYTES,
+    controller,
+  );
 
-  const contentType =
-    contentRes.headers.get("content-type")?.split(";")[0]?.trim() ||
-    "application/pdf";
+  // Never echo an arbitrary upstream content type back with an inline
+  // disposition — allowlist, else force a download-only octet-stream.
+  const rawContentType =
+    contentRes.headers
+      .get("content-type")
+      ?.split(";")[0]
+      ?.trim()
+      .toLowerCase() ?? "";
+  const contentType = ALLOWED_DOCUMENT_CONTENT_TYPES.has(rawContentType)
+    ? rawContentType
+    : "application/octet-stream";
 
   const tx = transaction as { date?: unknown; type?: unknown };
   const parts = [

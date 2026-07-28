@@ -35,14 +35,25 @@ component backing BOTH the assistant side panel and the `/company-search` tabs):
   the three-hop CH Document API chain (transaction → `links.document_metadata`
   on the document-api host → metadata `links.document` → `/content` with
   `Accept: application/pdf`, following CH's 302 to the signed S3 URL). Returns
-  `{ bytes, contentType, filename }`. **25 MB size guard** (declared
-  Content-Length then actual byteLength). **SSRF defence in depth:** the
-  metadata/content URLs come from CH's own response but are host-checked against
-  `document-api.company-information.service.gov.uk` before we ever fetch them
-  with the key attached; anything off-host is treated as "no document" (404).
-  Node's undici `fetch` drops the `Authorization` header on the cross-origin 302,
-  so the key never reaches the signed S3 host. Key never appears in any thrown
-  message (module invariant preserved).
+  `{ bytes, contentType, filename }`. **25 MB size guard, hardened after review:**
+  a fast-path check on a declared `Content-Length`, then a **streamed read with
+  a running byte counter that aborts the transfer (`AbortController` + reader
+  cancel) the instant the cap is exceeded** — so a lying/absent Content-Length
+  or a chunked response can't balloon memory. **SSRF guard, hardened after
+  review:** the metadata/content URLs come from CH's own response but are
+  validated with `isDocumentApiUrl` — `new URL(u)` then exact
+  `protocol === "https:" && host === "document-api.company-information.service.gov.uk"`.
+  The original `startsWith` guard was **bypassable** (reviewer-verified) by a
+  suffix-domain (`…service.gov.uk.evil.com`) or userinfo
+  (`…service.gov.uk@evil.com`) URL — either would have exfiltrated the API key
+  attached to the initial request; the parse+exact-host check rejects both.
+  Anything off-host is treated as "no document" (404). Node's undici `fetch`
+  drops the `Authorization` header on the cross-origin 302, so the key never
+  reaches the signed S3 host. Key never appears in any thrown message (module
+  invariant preserved). The response `Content-Type` is **allowlisted**
+  (`application/pdf` / `application/octet-stream`); anything else is forced to
+  `application/octet-stream` so an inline disposition never renders untrusted
+  upstream content.
 - `routes/companies.ts`: `GET /:companyNumber/filing-history/:transactionId/document`
   + a `validateTransactionId` guard (`[A-Za-z0-9_-]+`, rejects path/query
   metacharacters — the value is interpolated into an outgoing CH URL, same
@@ -61,35 +72,46 @@ component backing BOTH the assistant side panel and the `/company-search` tabs):
 - `FilingHistoryList.tsx`: per-item "View PDF" affordance, shown only when the
   item carries `links.document_metadata` + `transaction_id`. Fetches the blob,
   opens it via `URL.createObjectURL` in a new tab (revoked after a delay), with
-  a per-item busy spinner and an inline fixed error on failure. Existing
-  page-level "View on Companies House" link retained.
+  a per-item busy spinner and an inline fixed error on failure. If
+  `window.open` returns null (pop-up blocked) the blob URL is revoked
+  immediately and the inline error is shown (review nit). Existing page-level
+  "View on Companies House" link retained.
 - `legalSourcesTools/companiesHouseTools.ts`: one-line addition to the
   `companies_house_get_company` tool description instructing the model to state
   a resigned officer's / ceased PSC's status explicitly (raw data already
   carried the fields). Tools otherwise unchanged.
 
 **Verification:**
-- Backend `npx tsc --noEmit` clean; `npx vitest run` — **385/385** across 26
-  files (12 new tests: 6 for the metadata→content helper in
+- Backend `npx tsc --noEmit` clean; `npx vitest run` — **388/388** across 26
+  files (15 new tests: 9 for the metadata→content helper in
   `companiesHouse.test.ts` — happy chain, no-metadata 404, no-content-link 404,
-  oversize reject, off-host SSRF reject, empty-key 401 no-network; 6 in
-  `companies.test.ts` — `validateTransactionId` + the document route mounted on
-  a real HTTP server with the CH client mocked: streams bytes + headers,
-  no-document→404, key-missing→409, oversize→502-no-raw-text, invalid-txid→400).
-- Frontend `npx tsc --noEmit` clean; `npx eslint` clean on the three changed
-  files.
-- Prettier: changed files clean **except** two pre-existing lines in
+  declared-oversize reject, **streamed-oversize abort→502**, **content-type
+  allowlist→octet-stream**, **host-spoof bypass reject (suffix-domain +
+  userinfo, no key-attached fetch)**, off-host SSRF reject, empty-key 401
+  no-network; 6 in `companies.test.ts` — `validateTransactionId` + the document
+  route mounted on a real HTTP server with the CH client mocked: streams bytes +
+  headers, no-document→404, key-missing→409, oversize→502-no-raw-text,
+  invalid-txid→400).
+- Frontend `npx tsc --noEmit` clean; `npx eslint` clean on the changed files.
+- Prettier: changed backend files clean **except** two pre-existing lines in
   `routes/companies.ts` (verbatim in HEAD, outside this diff) — left untouched
-  to preserve minimal-diff discipline.
+  to preserve minimal-diff discipline. The frontend file follows the repo's
+  4-space house style (eslint is the enforced frontend gate and passes);
+  prettier's 2-space default is not applied so as not to reformat the whole file.
 
 **Deviation from DoD:** no UI screenshots attached (headless environment) — the
 frontend changes are verified by tsc + eslint only; **screenshots pending** a
 manual pass by the owner before the pilot. No unit-test framework on the
 frontend (repo-wide), so FE changes carry no tests, per CLAUDE.md.
 
-**Deferred / notes:** the size guard buffers the document in memory before
-streaming (bounded by the 25 MB cap) rather than piping — acceptable for filing
-PDFs; revisit if larger document types are ever surfaced.
+**Review round (REQUEST_CHANGES → addressed):** independent review flagged one
+security blocker (bypassable `startsWith` host check → parse+exact-host
+`isDocumentApiUrl`, with suffix-domain + userinfo regression tests), one
+should-fix (buffer-then-check size guard → streamed read with an aborting byte
+counter, + a streamed-oversize test), and two nits (content-type allowlist;
+`window.open` null / pop-up-blocked handling). All fixed on this branch; the
+DURABLE_LESSONS entry was corrected to prescribe URL-parse + exact host/protocol
+equality and name the two bypass shapes.
 
 ---
 

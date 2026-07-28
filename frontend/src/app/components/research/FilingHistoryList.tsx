@@ -100,7 +100,17 @@ export function FilingHistoryList({ companyNumber }: Props) {
         try {
             const blob = await getFilingDocument(companyNumber, transactionId);
             const url = URL.createObjectURL(blob);
-            window.open(url, "_blank", "noopener,noreferrer");
+            const opened = window.open(url, "_blank", "noopener,noreferrer");
+            if (!opened) {
+                // Popup blocked — nothing will consume the blob URL, so revoke
+                // it immediately and surface the inline error.
+                URL.revokeObjectURL(url);
+                setDocError({
+                    id: transactionId,
+                    message: "Could not open this document. Please allow pop-ups and try again.",
+                });
+                return;
+            }
             // Revoke once the new tab has had time to load the blob.
             setTimeout(() => URL.revokeObjectURL(url), 60_000);
         } catch (err) {

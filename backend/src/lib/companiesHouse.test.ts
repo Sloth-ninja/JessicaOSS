@@ -410,6 +410,99 @@ describe("getFilingDocument", () => {
     ).rejects.toBeInstanceOf(CompaniesHouseError);
   });
 
+  it("aborts and rejects a streamed body that exceeds the cap despite no honest Content-Length", async () => {
+    // 26 MB in a single chunk, streamed with NO content-length header — the
+    // fast-path check can't catch it, so the streaming counter must abort.
+    const oversizeChunk = new Uint8Array(26 * 1024 * 1024);
+    let streamCancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(oversizeChunk);
+        // Deliberately never close: we expect a cancel before the next read.
+      },
+      cancel() {
+        streamCancelled = true;
+      },
+    });
+    const fetchMock = vi.fn((url: string | URL) => {
+      const u = String(url);
+      if (u.includes("/filing-history/")) {
+        return Promise.resolve(
+          jsonResponse({ links: { document_metadata: METADATA_URL } }),
+        );
+      }
+      if (u === METADATA_URL) {
+        return Promise.resolve(
+          jsonResponse({ links: { document: CONTENT_URL } }),
+        );
+      }
+      return Promise.resolve(
+        new Response(stream, {
+          status: 200,
+          headers: { "content-type": "application/pdf" },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getFilingDocument(API_KEY, "13927967", "abc123"),
+    ).rejects.toMatchObject({ status: 502 });
+    // The transfer was torn down, not fully buffered.
+    expect(streamCancelled).toBe(true);
+  });
+
+  it("forces a non-allowlisted upstream content type to application/octet-stream", async () => {
+    const bytes = new Uint8Array([0x3c, 0x68, 0x74, 0x6d, 0x6c]); // "<html"
+    const fetchMock = vi.fn((url: string | URL) => {
+      const u = String(url);
+      if (u.includes("/filing-history/")) {
+        return Promise.resolve(
+          jsonResponse({ links: { document_metadata: METADATA_URL } }),
+        );
+      }
+      if (u === METADATA_URL) {
+        return Promise.resolve(
+          jsonResponse({ links: { document: CONTENT_URL } }),
+        );
+      }
+      return Promise.resolve(
+        pdfResponse(bytes, { "content-type": "text/html; charset=utf-8" }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getFilingDocument(API_KEY, "13927967", "abc123");
+    expect(result.contentType).toBe("application/octet-stream");
+  });
+
+  it("rejects host-spoofing metadata links (suffix-domain and userinfo bypass) without a key-attached fetch", async () => {
+    const bypassUrls = [
+      // Suffix-domain: real host is a prefix of an attacker domain.
+      "https://document-api.company-information.service.gov.uk.evil.com/doc",
+      // Userinfo trick: everything before '@' is credentials, real host is evil.com.
+      "https://document-api.company-information.service.gov.uk@evil.com/doc",
+    ];
+    for (const bypassUrl of bypassUrls) {
+      resetCompaniesHouseStateForTests();
+      const fetchMock = vi.fn((url?: string | URL) => {
+        void url;
+        return Promise.resolve(
+          jsonResponse({ links: { document_metadata: bypassUrl } }),
+        );
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(
+        getFilingDocument(API_KEY, "13927967", "abc123"),
+      ).rejects.toMatchObject({ status: 404 });
+      // The authenticated request must never reach the spoofed host.
+      expect(
+        fetchMock.mock.calls.some((c) => String(c[0]).includes("evil.com")),
+      ).toBe(false);
+    }
+  });
+
   it("rejects a metadata link that points off the document API host (SSRF guard)", async () => {
     const fetchMock = vi.fn((url?: string | URL) => {
       void url;
