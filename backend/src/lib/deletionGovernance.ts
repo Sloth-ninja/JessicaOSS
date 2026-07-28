@@ -250,7 +250,11 @@ export type DeletionAuditAction =
     | "restored"
     | "expedited"
     | "purged"
-    | "exported";
+    | "exported"
+    // WS9 firm visibility flips — deletion_audit_logs is the seed of the general
+    // admin audit log; these share the same append-only surface.
+    | "firm_shared"
+    | "firm_reverted";
 
 /**
  * Best-effort append to deletion_audit_logs — never throws, never blocks the

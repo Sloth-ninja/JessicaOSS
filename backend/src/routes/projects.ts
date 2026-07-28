@@ -23,6 +23,11 @@ import {
   insertDeletionAudit,
   getTombstonedIds,
 } from "../lib/deletionGovernance";
+import { getUserOrganisationId } from "../lib/organisations";
+import {
+  parseFirmVisibility,
+  setResourceVisibility,
+} from "../lib/firmVisibility";
 
 export const projectsRouter = Router();
 const ALLOWED_TYPES = new Set(["pdf", "docx", "doc"]);
@@ -149,9 +154,13 @@ projectsRouter.get("/", requireAuth, asyncHandler(async (req, res) => {
   const userEmail = res.locals.userEmail as string | undefined;
   const db = createServerSupabase();
 
+  // Firm-visible matters in the caller's organisation are surfaced via the RPC's
+  // firm predicate (WS9); orgless callers pass null ⇒ no firm branch (unchanged).
+  const userOrgId = await getUserOrganisationId(db, userId);
   const { data, error } = await db.rpc("get_projects_overview", {
     p_user_id: userId,
     p_user_email: userEmail ?? null,
+    p_user_org_id: userOrgId,
   });
   if (error) return void res.status(500).json({ detail: error.message });
 
@@ -223,12 +232,10 @@ projectsRouter.get("/:projectId", requireAuth, asyncHandler(async (req, res) => 
   if (error || !project)
     return void res.status(404).json({ detail: "Matter not found" });
 
-  const canAccess =
-    project.user_id === userId ||
-    (userEmail &&
-      Array.isArray(project.shared_with) &&
-      project.shared_with.includes(userEmail));
-  if (!canAccess)
+  // Access = owner OR email-sharee OR firm-visible-in-caller's-org (WS9), all
+  // via the shared helper so the firm predicate lives in one place.
+  const access = await checkProjectAccess(projectId, userId, userEmail, db);
+  if (!access.ok)
     return void res.status(404).json({ detail: "Matter not found" });
 
   // A tombstoned matter is hidden immediately (WS8 PR G) — 404 so it cannot
@@ -275,15 +282,14 @@ projectsRouter.get("/:projectId/people", requireAuth, asyncHandler(async (req, r
   if (!project)
     return void res.status(404).json({ detail: "Matter not found" });
 
-  const isOwner = project.user_id === userId;
+  // Owner, email-sharee, or firm viewer (WS9) may see the people roster.
+  const access = await checkProjectAccess(projectId, userId, userEmail, db);
+  if (!access.ok)
+    return void res.status(404).json({ detail: "Matter not found" });
   const sharedWith = (Array.isArray(project.shared_with)
     ? (project.shared_with as string[])
     : []
   ).map((e) => e.toLowerCase());
-  const isShared =
-    !!userEmail && sharedWith.includes(userEmail.toLowerCase());
-  if (!isOwner && !isShared)
-    return void res.status(404).json({ detail: "Matter not found" });
 
   // Pull every auth user (matching the lookup endpoint's pattern). For
   // larger deployments this should page or be replaced with a bulk-by-id
@@ -397,6 +403,54 @@ projectsRouter.patch("/:projectId", requireAuth, asyncHandler(async (req, res) =
   await attachDocumentOwnerLabels(db, docsTyped);
   res.json({ ...data, documents: docsTyped, folders: folderData ?? [] });
 }));
+
+// PATCH /projects/:projectId/visibility — flip a matter between 'private' and
+// 'firm' (WS9). OWNER only (the flip predicate enforces it), and only for a
+// caller who belongs to a firm — orgless callers get a fixed 403 because the
+// feature does not exist for them. Best-effort audited to deletion_audit_logs.
+projectsRouter.patch(
+  "/:projectId/visibility",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const userId = res.locals.userId as string;
+    const { projectId } = req.params;
+    const visibility = parseFirmVisibility(
+      (req.body as { visibility?: unknown } | null)?.visibility,
+    );
+    if (!visibility)
+      return void res
+        .status(400)
+        .json({ detail: "visibility must be 'private' or 'firm'." });
+
+    const db = createServerSupabase();
+    const orgId = await getUserOrganisationId(db, userId);
+    if (!orgId)
+      return void res
+        .status(403)
+        .json({ detail: "Firm visibility is not available for your account." });
+
+    const outcome = await setResourceVisibility(db, "project", projectId, userId, {
+      visibility,
+      organisationId: orgId,
+    });
+    if (outcome !== "updated")
+      return void res.status(404).json({ detail: "Matter not found" });
+
+    await insertDeletionAudit(db, {
+      organisationId: orgId,
+      actorUserId: userId,
+      action: visibility === "firm" ? "firm_shared" : "firm_reverted",
+      resourceType: "project",
+      resourceId: projectId,
+    });
+
+    res.json({
+      id: projectId,
+      visibility,
+      organisation_id: visibility === "firm" ? orgId : null,
+    });
+  }),
+);
 
 // DELETE /projects/:projectId
 // Org members tombstone (reversible, purged after the firm's retention window);

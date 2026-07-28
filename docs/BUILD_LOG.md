@@ -7,6 +7,61 @@
 
 ---
 
+## 2026-07-28 — WS9 PR 2: firm-visibility backend (branch `ws9-firm-visibility-backend`)
+
+**Scope:** backend enforcement + routes for the firm library, on top of WS9 PR 1's
+migration `20260728_02`. No frontend (that is PR 3). Self-contained seam
+`backend/src/lib/firmVisibility.ts` (flip / admin-revert / library-list logic);
+access branches added to the shared helpers in `lib/access.ts`.
+
+**Access branches (`lib/access.ts`).** `checkProjectAccess`, `ensureReviewAccess`,
+`ensureDocAccess`, `listAccessibleProjectIds`, `filterAccessibleDocumentIds` gain
+the firm branch: an item is accessible when `visibility='firm'` AND its
+`organisation_id` equals the caller's org id (resolved once via
+`getUserOrganisationId`, 42703-tolerant, threadable so a request resolves it once).
+Firm viewers are non-owners (`isOwner` stays owner-only). Project-scoped reviews
+inherit their matter's visibility (through `checkProjectAccess`); only standalone
+reviews carry their own firm flag. Missing columns (42703/42P01, unmigrated) ⇒
+firm branch silently absent — `checkProjectAccess` falls back to a legacy select so
+owner/sharee access never breaks. `GET /projects/:id` + `/people` now route their
+access decision through `checkProjectAccess` so firm viewers reach the matter the
+overview RPC already shows them.
+
+**RPC calls.** `GET /projects` and `GET /tabular-review` pass `p_user_org_id`
+(caller's org or null); the new `visibility` field passes through untyped.
+
+**Routes.** `PATCH /projects/:id/visibility` and `PATCH /tabular-review/:id/visibility`
+— owner-only (flip predicate is `.eq(id).eq(user_id)`; sharees/mere-admins get 404),
+firm members only (orgless ⇒ fixed 403); flip to 'firm' stamps the owner's org,
+revert clears it; project-scoped review flip rejected 400 (change the matter).
+`POST /admin/firm-library/:resourceType/:id/revert` (requireAdmin + MFA) reverts only
+an item whose `organisation_id` matches the caller's org (predicate-encoded cross-org
+exclusion); `GET /admin/firm-library` + `GET /firm-library` (member-facing, orgless ⇒
+empty) list firm-visible matters + standalone reviews. `GET /user/firm-members`
+returns displayName+email for the PeopleModal picker (no id/role leak). All flips
+best-effort audited to `deletion_audit_logs` (`firm_shared` / `firm_reverted`, the
+`DeletionAuditAction` union extended to match the migration's check constraint).
+
+**Decisions.** (1) Firm-library lists reuse the two overview RPCs filtered to
+`visibility='firm'` rather than re-deriving counts with direct queries — one code
+path, free counts + owner name, firm predicate already encoded; the reviews RPC omits
+owner display name so review owners are enriched with a single `user_profiles` lookup.
+(2) Firm-members picker is a small dedicated `GET /user/firm-members` returning only
+`{displayName, email}` (simplest correct shape; no role/userId beyond what the modal
+needs). (3) Firm resource types are `project` / `tabular_review` (underscore, matching
+the audit `resource_type`), distinct from deletion governance's `tabular-review`.
+
+**Verification.** `npx tsc --noEmit` clean; `npx vitest run` green — 500 passed
+(442 baseline + 58 new across `access.test.ts` [23: owner / email-sharee / same-org
+firm / other-org excluded / orgless / policy-independence / threaded vs internal org
+id / 42703 degradation, across all five helpers], `firmVisibility.test.ts` [15: flip
+predicate atomicity, revert clears org, cross-org revert exclusion, tombstone filter,
+orgless-empty, owner enrichment, 42703⇒unsupported], and route suites `projects` [5],
+`tabular` [7: owner-only, orgless 403, project-scoped 400, audit], `admin` [+8:
+firm-library scoping, cross-org revert, MFA gating], `user.firmMembers` [2]).
+
+---
+
 ## 2026-07-28 — WS9 PR 1: firm-visibility migration + spec (branch `ws9-firm-visibility-migration`)
 
 **Scope:** the owner-authorised migration `20260728_02_firm_visibility.sql`
