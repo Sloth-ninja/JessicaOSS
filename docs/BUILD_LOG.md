@@ -7,6 +7,86 @@
 
 ---
 
+## 2026-07-28 — WS7 Land Registry v1 panel (branch `land-registry-v1`)
+
+**Scope:** replace the inert "Land Registry — coming soon" sidebar stub (PR #30)
+with a real, clickable Research page: honest account-connection status, a free
+open-data Price Paid lookup by postcode, and outbound links to HM Land Registry's
+own chargeable services. v1 has **no account-connection path by design** — HMLR's
+conditions of use bar entering portal credentials into a third-party app until it
+is an authorised channel partner (CLAUDE.md data integration 4), so no HMLR
+credential field exists anywhere in this change. Built to the owner-approved
+mock-up (`https://claude.ai/code/artifact/ef7808ab-e788-4320-8d67-76ca43116888`).
+Self-contained seam per the 22/07 architectural rule.
+
+**New backend module `lib/landRegistry.ts`** (mirrors `lib/companiesHouse.ts`
+idiom):
+- `getPricePaidByPostcode` — queries the HM Land Registry Price Paid Linked Data
+  **SPARQL endpoint** (`landregistry.data.gov.uk/landregistry/query`; keyless,
+  Open Government Licence v3.0). **Endpoint choice:** SPARQL over the linked-data
+  REST facade because one request filters by postcode, joins address +
+  `lrppi:propertyType` + `lrppi:estateType`, orders by `transactionDate`, and
+  caps server-side — the REST facade would need several round trips and its own
+  pagination. Query text is FIXED; only a validated postcode literal is
+  interpolated. Verified live against the real endpoint while building (shape:
+  `amount` integer, `date` xsd:date, type/tenure as `.../def/common/{slug}`
+  URIs).
+- `normalizePostcode` — validates to the UK postcode shape and normalises to
+  uppercase single-space form **before** the value can reach any query string;
+  invalid → `null` → route 400. Results normalised to
+  `{address, propertyType, tenure ("Freehold"/"Leasehold"), price, date}`,
+  newest-first, capped at 25.
+- 10s `AbortController` timeout on the upstream fetch (never hang a request —
+  DURABLE_LESSONS); small TTL cache + single-flight de-dup + a politeness token
+  bucket (reuses `lib/rateLimit.ts`). Errors carry a fixed message only — raw
+  upstream text is never thrown.
+
+**New route `routes/landRegistry.ts`** — `GET /land-registry/price-paid?postcode=`,
+mounted at `/land-registry` in `index.ts` behind `requireAuth` + the shared
+`researchLimiter` (mirrors `/companies`, `/legislation`). Sibling try/catch shape;
+exported `landRegistryErrorResponse` maps invalid postcode → fixed 400 ("Enter a
+valid UK postcode.") and everything else → fixed generic 502 — never raw errors.
+
+**Frontend.**
+- New page `(pages)/land-registry/page.tsx` — three cards to the mock-up:
+  (1) Account-connection card with amber "Not yet connectable" pill + honest
+  explainer and available-now/coming-in-v2 list; (2) Price Paid lookup —
+  submit-on-enter postcode search, loading skeleton, error-with-retry (no
+  unbounded spinner), honest empty state ("No registered transactions found for
+  …"), results table (address, type · tenure, right-aligned tabular £ with
+  thousands separators, DD/MM/YYYY dates) + OGL attribution line; (3) Official
+  services — three outbound links (Search for land and property information ~£3;
+  order official copies £7; HMLR portal sign-in) + upload-the-PDF info footer.
+- `mikeApi.ts` — `getPricePaid(postcode, signal)` + `PricePaidEntry` type
+  (accepts an `AbortSignal`).
+- `AppSidebar.tsx` — Land Registry becomes a normal clickable Research item
+  (`/land-registry`, `MapPin` icon); the disabled "Connect account" stub
+  treatment (and its now-unused `renderDisabledNavItem` helper + `Lock` import)
+  removed. "v2 coming" messaging now lives inside the page's account card, not
+  the sidebar.
+
+**Verification:** backend `npx tsc --noEmit` clean; `npx vitest run` on the new
+suites green — **27 tests** (23 lib: postcode validation matrix, happy-path
+normalisation from a fixture, property/estate-type URI mapping + optional-field
+tolerance, cap-at-25 + newest-first sort, cache de-dup, upstream-non-2xx / network
+/ 10s-timeout-abort all → fixed `LandRegistryError`; 4 route: error-mapper 400 /
+502 / no-raw-leak). New backend files Prettier-clean. Frontend `npx tsc --noEmit`
+clean; `npx eslint` clean on changed files (the one `set-state-in-effect` finding
+in `AppSidebar` is pre-existing upstream debt on an untouched line — CI lint is
+`continue-on-error`). Frontend `npm run build` compiles + typechecks; static
+prerender of an unrelated existing page (`/account/api-keys`) fails only for lack
+of build-time Supabase env in this sandbox worktree (hard rule 2 forbids creating
+`.env*`) — CI provides those vars.
+
+**Deviations / deferred:** **screenshots pending** — this sandbox worktree has no
+Supabase env, so the app cannot be run to capture UI screenshots for the PR;
+built strictly to the approved mock-up. Official-service links point at current
+GOV.UK / HMLR service URLs. No new dependencies. Business Gateway (in-app official
+copies, per-solicitor credentials, per-matter cost audit) remains v2, gated on
+channel-partner authorisation.
+
+---
+
 ## 2026-07-28 — Company search: PSC/officer status + filing-history documents (branch `company-search-status-filings`)
 
 **Scope:** two owner-reported company-search defects. (1) Ceased PSCs and
