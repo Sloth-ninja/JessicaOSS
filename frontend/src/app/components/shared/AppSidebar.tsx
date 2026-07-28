@@ -16,6 +16,7 @@ import {
     MapPin,
     Settings,
     BarChart3,
+    Building,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUserProfile } from "@/contexts/UserProfileContext";
@@ -245,6 +246,27 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                 </div>
             )}
             {RESEARCH_NAV_ITEMS.map(renderNavItem)}
+
+            {/* Firm — visible to every member of a firm (WS9). Gates on firm
+                presence, NOT admin (contrast the Firm admin group below). */}
+            {profile?.firm && (
+                <>
+                    {isOpen && (
+                        <div
+                            className={`mt-2.5 mb-1 px-5 text-xs font-semibold text-gray-500 ${
+                                shouldAnimate ? "sidebar-fade-in" : ""
+                            }`}
+                        >
+                            Firm
+                        </div>
+                    )}
+                    {renderNavItem({
+                        href: "/firm-library",
+                        label: "Firm library",
+                        icon: Building,
+                    })}
+                </>
+            )}
 
             {/* Firm admin — only for organisation admins (profile.isAdmin). */}
             {profile?.isAdmin && (

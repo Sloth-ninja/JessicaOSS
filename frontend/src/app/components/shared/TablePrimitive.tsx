@@ -196,6 +196,7 @@ export function TablePrimaryCell({
     onSelectionChange,
     checkboxTitle,
     label,
+    adornment,
     editing = false,
     editValue,
     onEditValueChange,
@@ -208,6 +209,8 @@ export function TablePrimaryCell({
     onSelectionChange: () => void;
     checkboxTitle?: string;
     label?: ReactNode;
+    /** Rendered after the (truncating) label, e.g. a status badge. */
+    adornment?: ReactNode;
     editing?: boolean;
     editValue?: string;
     onEditValueChange?: (value: string) => void;
@@ -230,8 +233,11 @@ export function TablePrimaryCell({
                     className="min-w-0 flex-1 text-sm text-gray-800 bg-transparent outline-none"
                 />
             ) : (
-                <span className="min-w-0 flex-1 truncate text-sm text-gray-800">
-                    {label}
+                <span className="flex min-w-0 flex-1 items-center gap-2">
+                    <span className="min-w-0 truncate text-sm text-gray-800">
+                        {label}
+                    </span>
+                    {adornment}
                 </span>
             )
         ) : (

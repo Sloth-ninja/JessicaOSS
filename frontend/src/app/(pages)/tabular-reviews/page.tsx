@@ -17,6 +17,7 @@ import {
 import type { TabularReview, Project } from "@/app/components/shared/types";
 import { TableToolbar } from "@/app/components/shared/TableToolbar";
 import { AddNewTRModal } from "@/app/components/tabular/AddNewTRModal";
+import { FirmBadge } from "@/app/components/shared/FirmBadge";
 import { OwnerOnlyModal } from "@/app/components/shared/OwnerOnlyModal";
 import { useAuth } from "@/contexts/AuthContext";
 import { PageHeader } from "@/app/components/shared/PageHeader";
@@ -424,6 +425,11 @@ export default function TabularReviewsPage() {
                                         }
                                         label={
                                             review.title ?? "Untitled Review"
+                                        }
+                                        adornment={
+                                            review.visibility === "firm" ? (
+                                                <FirmBadge />
+                                            ) : undefined
                                         }
                                         editing={renamingId === review.id}
                                         editValue={renameValue}
