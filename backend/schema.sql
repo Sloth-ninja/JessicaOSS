@@ -125,7 +125,7 @@ create table if not exists public.deletion_audit_logs (
   id uuid primary key default gen_random_uuid(),
   organisation_id uuid not null references public.organisations(id) on delete cascade,
   actor_user_id uuid not null,
-  action text not null check (action in ('requested', 'restored', 'expedited', 'purged', 'exported')),
+  action text not null check (action in ('requested', 'restored', 'expedited', 'purged', 'exported', 'firm_shared', 'firm_reverted')),
   resource_type text not null,
   resource_id uuid,
   detail jsonb not null default '{}'::jsonb,
@@ -255,7 +255,11 @@ create table if not exists public.projects (
   user_id text not null,
   name text not null,
   cm_number text,
+  -- Firm visibility (WS9): 'private' | 'firm' (app-enforced). 'firm' makes
+  -- the matter readable by every member of organisation_id, which is
+  -- stamped at flip time and cleared on revert.
   visibility text not null default 'private',
+  organisation_id uuid references public.organisations(id) on delete set null,
   shared_with jsonb not null default '[]'::jsonb,
   -- Deletion governance (WS8 PR G): org members' deletes tombstone here and
   -- are purged after the firm's retention window. Orgless deletes stay hard.
@@ -273,6 +277,9 @@ create index if not exists projects_pending_purge_idx
 
 create index if not exists projects_shared_with_idx
   on public.projects using gin (shared_with);
+
+create index if not exists projects_firm_visible_idx
+  on public.projects(organisation_id) where visibility = 'firm';
 
 create table if not exists public.project_subfolders (
   id uuid primary key default gen_random_uuid(),
@@ -639,6 +646,9 @@ create table if not exists public.tabular_reviews (
   workflow_id uuid references public.workflows(id) on delete set null,
   practice text,
   shared_with jsonb not null default '[]'::jsonb,
+  -- Firm visibility (WS9) — see projects.visibility.
+  visibility text not null default 'private',
+  organisation_id uuid references public.organisations(id) on delete set null,
   -- Deletion governance (WS8 PR G) — see projects.deleted_at.
   deleted_at timestamptz,
   deleted_by uuid,
@@ -649,6 +659,9 @@ create table if not exists public.tabular_reviews (
 create index if not exists idx_tabular_reviews_user
   on public.tabular_reviews(user_id);
 
+create index if not exists tabular_reviews_firm_visible_idx
+  on public.tabular_reviews(organisation_id) where visibility = 'firm';
+
 create index if not exists tabular_reviews_pending_purge_idx
   on public.tabular_reviews(deleted_at) where deleted_at is not null;
 
@@ -658,9 +671,15 @@ create index if not exists idx_tabular_reviews_project
 create index if not exists tabular_reviews_shared_with_idx
   on public.tabular_reviews using gin (shared_with);
 
+-- Firm visibility (WS9): p_user_org_id null => no firm branch (orgless and
+-- legacy callers unchanged). Old two-arg signature dropped to avoid an
+-- ambiguous overload on upgraded installs.
+drop function if exists public.get_projects_overview(text, text);
+
 create or replace function public.get_projects_overview(
   p_user_id text,
-  p_user_email text default null
+  p_user_email text default null,
+  p_user_org_id uuid default null
 )
 returns table (
   id uuid,
@@ -668,6 +687,7 @@ returns table (
   name text,
   cm_number text,
   shared_with jsonb,
+  visibility text,
   created_at timestamptz,
   updated_at timestamptz,
   is_owner boolean,
@@ -688,6 +708,12 @@ as $$
         coalesce(p_user_email, '') <> ''
         and p.user_id <> p_user_id
         and p.shared_with @> jsonb_build_array(p_user_email)
+      )
+       or (
+        p_user_org_id is not null
+        and p.user_id <> p_user_id
+        and p.visibility = 'firm'
+        and p.organisation_id = p_user_org_id
       )
   ),
   document_counts as (
@@ -714,6 +740,7 @@ as $$
     vp.name,
     vp.cm_number,
     vp.shared_with,
+    vp.visibility,
     vp.created_at,
     vp.updated_at,
     vp.user_id = p_user_id as is_owner,
@@ -748,10 +775,14 @@ create table if not exists public.tabular_cells (
 create index if not exists idx_tabular_cells_review
   on public.tabular_cells(review_id, document_id, column_index);
 
+-- Firm visibility (WS9) — see get_projects_overview.
+drop function if exists public.get_tabular_reviews_overview(text, text, text);
+
 create or replace function public.get_tabular_reviews_overview(
   p_user_id text,
   p_user_email text default null,
-  p_project_id text default null
+  p_project_id text default null,
+  p_user_org_id uuid default null
 )
 returns table (
   id uuid,
@@ -762,6 +793,7 @@ returns table (
   document_ids jsonb,
   workflow_id uuid,
   shared_with jsonb,
+  visibility text,
   created_at timestamptz,
   updated_at timestamptz,
   is_owner boolean,
@@ -778,6 +810,12 @@ as $$
         coalesce(p_user_email, '') <> ''
         and p.user_id <> p_user_id
         and p.shared_with @> jsonb_build_array(p_user_email)
+      )
+       or (
+        p_user_org_id is not null
+        and p.user_id <> p_user_id
+        and p.visibility = 'firm'
+        and p.organisation_id = p_user_org_id
       )
   ),
   visible_reviews as (
@@ -804,6 +842,13 @@ as $$
           and tr.user_id <> p_user_id
           and tr.shared_with @> jsonb_build_array(p_user_email)
         )
+        or (
+          p_project_id is null
+          and p_user_org_id is not null
+          and tr.user_id <> p_user_id
+          and tr.visibility = 'firm'
+          and tr.organisation_id = p_user_org_id
+        )
       )
   ),
   cell_document_counts as (
@@ -823,6 +868,7 @@ as $$
     vr.document_ids,
     vr.workflow_id,
     vr.shared_with,
+    vr.visibility,
     vr.created_at,
     vr.updated_at,
     vr.user_id = p_user_id as is_owner,

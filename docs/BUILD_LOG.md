@@ -7,6 +7,36 @@
 
 ---
 
+## 2026-07-28 — WS9 PR 1: firm-visibility migration + spec (branch `ws9-firm-visibility-migration`)
+
+**Scope:** the owner-authorised migration `20260728_02_firm_visibility.sql`
+(allowlist entry added by the owner in-session), its `schema.sql` mirror, and
+the WS9 mini-spec (`docs/FIRM_LIBRARY_SPEC.md`). No application code — the
+firm branch in both overview functions requires a non-null `p_user_org_id`,
+which no caller passes yet, so behaviour is unchanged until WS9 PR 2.
+
+**Owner decisions (28/07, recorded in the spec):** share-to-firm = any owner
+flips their own matter/review, admins can revert, both audited; precedents
+live as firm-visible matters + a Firm library view; sharee rights stay
+single-level; invite picker shows firm members with external emails still
+allowed. Approved mock-ups:
+https://claude.ai/code/artifact/fa81165d-493c-4221-baec-a54ca2bf9703
+
+**Contents.** `projects.organisation_id` (the long-dead `visibility` column
+becomes live: 'private' | 'firm', app-enforced); `tabular_reviews.visibility`
++ `organisation_id`; partial firm-visible indexes on both;
+`deletion_audit_logs` action check extended with `firm_shared` /
+`firm_reverted`; both overview functions dropped (old signatures — avoids
+ambiguous overloads) and recreated with `p_user_org_id uuid default null`, a
+firm-visibility predicate, and `visibility` in the return set.
+
+**Verification:** migration ↔ schema.sql parity hand-checked (identical
+predicates/bodies); function bodies otherwise byte-identical to the previous
+definitions; all column/index additions `if not exists`; old-signature drops
+guarded `if exists`. Backend/frontend untouched.
+
+---
+
 ## 2026-07-28 — Company-search train: composed-range fix wave (branch `company-search-train-fixes`)
 
 **Scope:** four findings from the composed-range multi-lens review of the
