@@ -7,6 +7,121 @@
 
 ---
 
+## 2026-08-03 — Clio connector PR 2: backend (branch `clio-connector-backend`)
+
+**Scope:** the full backend for the Clio connector — a self-contained
+`lib/clio/` seam (per the 22/07 architectural rule), the `/clio` + `/clio-grow`
+routes, the chat-tool wiring, and profile serialization. No frontend (PR 3). No
+migration, `.env`, `schema.sql`, or LICENSE touched. Backend `tsc` clean;
+`vitest` 589/589 (513 baseline + 76 new); prettier clean on all new files.
+
+**Modules (`backend/src/lib/clio/`).**
+- `config.ts` — region-derived host maps (EU live; us/ca/au structured), OAuth
+  credentials, redirect-URI derivation from `API_PUBLIC_URL`/`BACKEND_URL`
+  (mirrors the MCP callback base; dev default is the registered
+  `http://127.0.0.1:3001` literal, not `localhost`), Grow scope list, and the
+  pinned Manage `X-API-VERSION`.
+- `connections.ts` — `user_clio_connections` CRUD over the shared
+  `apiKeyCrypto` AES-256-GCM path (REUSED, not duplicated). 42P01/42703-tolerant
+  (unmigrated ⇒ feature reads as unavailable, never errors). `persistRefreshedTokens`
+  writes by id predicate + selects back and treats zero rows as a hard failure —
+  the atomic-rotation primitive.
+- `oauth.ts` — start/callback for both products with a one-time, TTL'd,
+  in-process state store (opaque random state; the PKCE verifier is held
+  server-side only, never sent to the browser/Clio); Manage confidential-client
+  (no scope, no PKCE), Grow PKCE S256 + scope; live-verified `who_am_i` on
+  connect for BOTH products (Manage `/users/who_am_i.json`, Grow
+  `/users/who_am_i` — parsed defensively for shape drift); best-effort
+  deauthorize on disconnect (local delete proceeds even if revoke fails — the
+  permissions-reuse gotcha).
+- `client.ts` — per-user authed fetch: proactive refresh near expiry, single
+  refresh+retry on 401, atomic persistence of Grow's rotating refresh token
+  BEFORE the new access token is used, `X-API-VERSION` pin on Manage, `fields=`
+  helper, 429 Retry-After (single capped retry) + rate-limit buckets (Manage
+  50/min per user; Grow 3/s app-wide) + PROACTIVE backoff (a response reporting
+  zero remaining + a reset makes the next call for that bucket wait until reset,
+  capped at 5s, else fail fast), fixed generic error mapping, Manage
+  cursor-pagination helper.
+- `manageTools.ts` / `growTools.ts` — chat tools registered through the same
+  seam as `companiesHouseTools`, gated on the caller having the relevant product
+  connected (executor re-checks as defence in depth). Manage: `clio_find_matter`,
+  `clio_find_contact`, `clio_matter_financials`, `clio_record_time`
+  (minutes→seconds server-side, bounds-checked), `clio_list_matter_documents`,
+  `clio_save_document_to_matter` (JessicaOS doc → 3-step presigned upload; access
+  enforced via `ensureDocAccess`; 25 MB cap; the presigned PUT never carries the
+  bearer — no document download is implemented), `clio_delete_time_entry`. Grow:
+  `clio_intake_status`,
+  `clio_intake_notes`, `clio_add_intake_note` (255/65535 caps). System prompts
+  instruct the model to confirm writes with the user first.
+
+**Routes (`routes/clio.ts`, mounted `/clio` + `/clio-grow`).** `GET /oauth/start`
+(auth), `GET /oauth/callback` (no auth — Clio redirects the browser; validates
+state, redirects to the connectors page; the mount path equals the exact
+registered redirect URI), `GET /status` (both products + a cheap Manage matter
+count read from `meta.records` — no pagination), `POST /:product/disconnect`
+(auth + MFA-gated). Every handler is asyncHandler-wrapped with fixed generic
+`detail`s; tokens/secrets never logged (safeErrorLog redaction).
+
+**Chat wiring.** `ResearchSources` extended with `clioManage`/`clioGrow`;
+`chat.ts` + `projectChat.ts` gate the tools on `listConnectedProducts`; `runLLMStream`
+threads `userEmail` (needed by the save-document access check). Profile payload
+now carries `clioConnections {manage, grow}` for the frontend PR.
+
+**Design decisions.** (1) **X-API-VERSION = `4.0.11`** (env-overridable via
+`CLIO_MANAGE_API_VERSION`) — a defensible current v4 major; the 03/08 spike
+verified seconds semantics without pinning, so this is forward-safety and should
+be confirmed against the live Manage app. Grow's date-based version is sent ONLY
+when `CLIO_GROW_API_VERSION` is set (an unknown date could be rejected).
+(2) **Status matter-count** reads `meta.records` from a 1-row page (cheap),
+omitted on any error — never full pagination. (3) **OAuth state is in-process**
+(no migration for a seconds-long handshake on the single warm machine); the PKCE
+verifier stays server-side.
+
+**Verified facts built on (03/08 spike + write probe):** EU hosts + endpoints
+for both products; Manage `activities.quantity` in SECONDS (360→6 min); the
+verified 3-step document upload (POST multipart → presigned PUT → PATCH
+fully_uploaded); Manage 50/min, Grow 3/s-per-app; Grow refresh-token rotation on
+every use; deauthorize-on-disconnect required for a clean permissions reset.
+
+**Tests (76 new).** config (hosts/region/redirect/scopes/creds); connections
+(encryption round-trip, 42P01/42703 degradation, rotation atomicity incl.
+zero-row persist failure retaining the old token); oauth (state mismatch/replay/
+product-mismatch rejection, Manage-vs-Grow PKCE shape, code exchange, Grow
+who_am_i stored on connect + connect-survives-who_am_i-failure); client
+(Retry-After parsing, 401 single refresh+retry, 429 → rate-limit error, Grow
+bucket exhaustion, proactive backoff — reset parsing + over-cap fail-fast +
+within-cap wait-then-proceed, rotation retain-vs-replace); manage tools
+(minutes→seconds +
+bounds, happy path, not-connected gating, fixed-error mapping, record_time
+seconds/non_billable, save-document access deny + 25 MB cap); grow tools (happy
+path, not-connected, note caps); routes (start/503, status shape, disconnect
+deauthorize+delete, deauthorize-fail-still-deletes, bad-product 400, MFA 403);
+profile serialization (clioConnections default + surfaced).
+
+**Grow endpoint verification (spike 03/08, live token).** LIVE-VERIFIED (200):
+`GET /users/who_am_i`, `GET /matters` (200 rows, verbatim firm statuses
+"Engaged"/"Prospective Client"/"KYC"/"Conflict Check"/"Not Engaged",
+`status_category` hired/declined/intake, `clio_id` on converted matters,
+`is_locked` present), `GET /inbox_leads?state=untriaged`, `GET /users` (102
+users). STILL RESEARCH-BASED (not yet probed): the matter-note read/write
+endpoints (`GET`/`POST /matters/{id}/notes`) and `/contacts` — the two
+tools that touch them (`clio_intake_notes`, `clio_add_intake_note`) should be
+confirmed against a live note before production reliance.
+
+**Migration state.** `20260803_01_clio_connections` (PR 1) was ALREADY RUN in
+production Supabase by the owner on 03/08 — the `user_clio_connections` table
+exists in prod, so the connector activates as soon as this backend deploys and
+the `CLIO_*` env is set. The code stays 42P01/42703-tolerant regardless (inert
+for self-hosters on an unmigrated DB).
+
+**Owner-pending / deferred.** Owner completes both Clio app registrations + sets
+`CLIO_*` env (Grow registration was still pending per the research doc). The
+two-user permissions test runs at pilot onboarding via each solicitor's first
+connect (owner decision 03/08). Frontend (connectors UI + connect/disconnect
+flow) is PR 3. Do NOT merge without review.
+
+---
+
 ## 2026-08-03 — Clio connector PR 1: connections migration (branch `clio-connections-migration`)
 
 **Scope:** the owner-authorised migration `20260803_01_clio_connections.sql`

@@ -43,6 +43,26 @@ import {
   executeLegislationToolCall,
   type LegislationToolEvent,
 } from "./legalSourcesTools/legislationTools";
+import {
+  CLIO_MANAGE_TOOLS,
+  CLIO_MANAGE_SYSTEM_PROMPT,
+  executeClioManageToolCall,
+} from "./clio/manageTools";
+import {
+  CLIO_GROW_TOOLS,
+  CLIO_GROW_SYSTEM_PROMPT,
+  executeClioGrowToolCall,
+} from "./clio/growTools";
+import type { ClioToolEvent } from "./clio/toolShared";
+
+// Clio tool-name routing: which product each chat tool belongs to. Both product
+// tool-name sets share the `clio_` prefix; membership decides the executor.
+const CLIO_MANAGE_TOOL_NAMES = new Set(
+  CLIO_MANAGE_TOOLS.map((t) => t.function.name),
+);
+const CLIO_GROW_TOOL_NAMES = new Set(
+  CLIO_GROW_TOOLS.map((t) => t.function.name),
+);
 
 const STANDARD_FONT_DATA_URL = (() => {
   try {
@@ -172,6 +192,10 @@ GENERAL GUIDANCE:
 export type ResearchSources = {
   companiesHouse?: boolean;
   legislation?: boolean;
+  /** Clio Manage tools (offered only when the caller has Manage connected). */
+  clioManage?: boolean;
+  /** Clio Grow tools (offered only when the caller has Grow connected). */
+  clioGrow?: boolean;
 };
 
 /**
@@ -191,6 +215,12 @@ export function buildSystemPrompt(
   }
   if (includeResearchTools && sources.legislation) {
     researchBlocks.push(LEGISLATION_SYSTEM_PROMPT);
+  }
+  if (includeResearchTools && sources.clioManage) {
+    researchBlocks.push(CLIO_MANAGE_SYSTEM_PROMPT);
+  }
+  if (includeResearchTools && sources.clioGrow) {
+    researchBlocks.push(CLIO_GROW_SYSTEM_PROMPT);
   }
   if (!researchBlocks.length) {
     return `${SYSTEM_PROMPT_BEFORE_RESEARCH}\n\n${SYSTEM_PROMPT_AFTER_RESEARCH}`;
@@ -1970,6 +2000,7 @@ export async function runToolCalls(
   turnEditState?: TurnEditState,
   projectId?: string | null,
   companiesHouseApiKey?: string | null,
+  userEmail?: string | null,
 ): Promise<{
   toolResults: unknown[];
   docsRead: { filename: string; document_id?: string }[];
@@ -1981,6 +2012,7 @@ export async function runToolCalls(
   mcpEvents: McpToolEvent[];
   companiesHouseEvents: CompaniesHouseToolEvent[];
   legislationEvents: LegislationToolEvent[];
+  clioEvents: ClioToolEvent[];
 }> {
   const toolResults: unknown[] = [];
   const docsRead: { filename: string; document_id?: string }[] = [];
@@ -1996,6 +2028,7 @@ export async function runToolCalls(
   const mcpEvents: McpToolEvent[] = [];
   const companiesHouseEvents: CompaniesHouseToolEvent[] = [];
   const legislationEvents: LegislationToolEvent[] = [];
+  const clioEvents: ClioToolEvent[] = [];
   for (const tc of toolCalls) {
     let args: Record<string, unknown> = {};
     try {
@@ -2098,6 +2131,58 @@ export async function runToolCalls(
           url: event.url,
           outstanding_effects: event.outstanding_effects,
           provision: event.provision,
+        })}\n\n`,
+      );
+      continue;
+    }
+
+    if (tc.function.name.startsWith("clio_")) {
+      const isManage = CLIO_MANAGE_TOOL_NAMES.has(tc.function.name);
+      const isGrow = CLIO_GROW_TOOL_NAMES.has(tc.function.name);
+      write(
+        `data: ${JSON.stringify({
+          type: "clio_tool_start",
+          name: tc.function.name,
+          product: isGrow ? "grow" : "manage",
+        })}\n\n`,
+      );
+      const { content, event } = isManage
+        ? await executeClioManageToolCall(tc.function.name, args, {
+            db,
+            userId,
+            userEmail,
+          })
+        : isGrow
+          ? await executeClioGrowToolCall(tc.function.name, args, {
+              db,
+              userId,
+            })
+          : {
+              content: JSON.stringify({
+                error: `Unknown Clio tool '${tc.function.name}'.`,
+              }),
+              event: {
+                type: "clio_tool_call" as const,
+                product: "manage" as const,
+                tool_name: tc.function.name,
+                status: "error" as const,
+                error: `Unknown Clio tool '${tc.function.name}'.`,
+              },
+            };
+      toolResults.push({
+        role: "tool",
+        tool_call_id: tc.id,
+        content,
+      });
+      clioEvents.push(event);
+      write(
+        `data: ${JSON.stringify({
+          type: "clio_tool_result",
+          name: tc.function.name,
+          product: event.product,
+          status: event.status,
+          error: event.error,
+          result: event.result,
         })}\n\n`,
       );
       continue;
@@ -2805,6 +2890,7 @@ export async function runToolCalls(
     mcpEvents,
     companiesHouseEvents,
     legislationEvents,
+    clioEvents,
   };
 }
 
@@ -3020,6 +3106,7 @@ type AssistantEvent =
   | McpToolEvent
   | (CompaniesHouseToolEvent & { isStreaming?: boolean })
   | LegislationToolEvent
+  | ClioToolEvent
   | { type: "content"; text: string }
   | { type: "error"; message: string };
 
@@ -3062,6 +3149,9 @@ export async function runLLMStream(params: {
   docStore: DocStore;
   docIndex: DocIndex;
   userId: string;
+  /** The caller's email — needed for firm-visibility access checks (Clio
+   * save-document tool routes through `ensureDocAccess`). */
+  userEmail?: string | null;
   db: ReturnType<typeof createServerSupabase>;
   write: (s: string) => void;
   extraTools?: unknown[];
@@ -3089,6 +3179,7 @@ export async function runLLMStream(params: {
     docStore,
     docIndex,
     userId,
+    userEmail,
     db,
     write,
     extraTools,
@@ -3108,6 +3199,8 @@ export async function runLLMStream(params: {
     ? [
         ...(researchSources.companiesHouse ? COMPANIES_HOUSE_TOOLS : []),
         ...(researchSources.legislation ? LEGISLATION_TOOLS : []),
+        ...(researchSources.clioManage ? CLIO_MANAGE_TOOLS : []),
+        ...(researchSources.clioGrow ? CLIO_GROW_TOOLS : []),
       ]
     : [];
   const mcpTools = await buildUserMcpTools(userId, db);
@@ -3309,6 +3402,7 @@ export async function runLLMStream(params: {
           mcpEvents,
           companiesHouseEvents,
           legislationEvents,
+          clioEvents,
         } = await runToolCalls(
           toolCalls,
           docStore,
@@ -3321,6 +3415,7 @@ export async function runLLMStream(params: {
           turnEditState,
           projectId,
           apiKeys?.companies_house,
+          userEmail,
         );
         throwIfAborted(signal);
         for (const r of docsRead) {
@@ -3381,6 +3476,9 @@ export async function runLLMStream(params: {
           events.push(event);
         }
         for (const event of legislationEvents) {
+          events.push(event);
+        }
+        for (const event of clioEvents) {
           events.push(event);
         }
 

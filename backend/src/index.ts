@@ -17,6 +17,7 @@ import { companiesRouter } from "./routes/companies";
 import { citationsRouter } from "./routes/citations";
 import { legislationRouter } from "./routes/legislation";
 import { landRegistryRouter } from "./routes/landRegistry";
+import { clioManageRouter, clioGrowRouter } from "./routes/clio";
 import { runDeletionPurge } from "./lib/deletionGovernance";
 
 const app = express();
@@ -186,6 +187,10 @@ app.use("/companies", companiesRouter);
 app.use("/citations", citationsRouter);
 app.use("/legislation", legislationRouter);
 app.use("/land-registry", landRegistryRouter);
+// Clio connector: Manage at /clio, Grow at /clio-grow (the OAuth callback paths
+// therefore equal the exact registered redirect URIs).
+app.use("/clio", clioManageRouter);
+app.use("/clio-grow", clioGrowRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 

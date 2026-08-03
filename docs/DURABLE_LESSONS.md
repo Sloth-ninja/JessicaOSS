@@ -34,6 +34,7 @@
 - 2026-07-28 — CH document proxy: parse+exact-host allowlist (not startsWith); fetch drops Authorization on cross-origin 302; stream-cap the body
 - 2026-07-28 — `prettier --write` with no resolvable config reformats 4-space frontend files to 2-space wholesale — an unmergeable diff
 - 2026-07-28 — Soft-delete (tombstone) and access checks must compose: gate at the shared choke point, not per-route
+- 2026-08-03 — Continuous-refill rate-limit buckets make tests timing-flaky when the code does real CPU work between calls — freeze the clock
 
 ## Lessons
 
@@ -390,3 +391,26 @@ the head SHA matches origin before starting. Debugging signature: a verifier
 claiming reviewed code does not exist on `main`, or `git pull` output
 "Updating <sha>.." where `<sha>` is a feature-branch head, means the command
 ran in the wrong checkout — check `git worktree list` and your cwd.
+
+### 2026-08-03 (Clio connector) — Continuous-refill rate-limit buckets need a frozen clock in tests
+
+Trigger: the Clio client's Grow limiter (`TokenBucket`, capacity 3 /
+`refillIntervalMs` 1000ms, continuous proportional refill — `lib/rateLimit.ts`)
+has a test that fires 4 requests and expects the 4th to be refused. It passed in
+isolation but FLAKED under the full-suite run: each `clioRequest` decrypts the
+stored token with `scrypt` (real CPU, ~300-500ms), so enough wall-clock elapsed
+between the awaited calls for the bucket to refill a token — the 4th call
+succeeded and the assertion failed. The refill is time-proportional, so any
+real-time gap between acquisitions (CPU work, other suites contending for the
+thread) silently tops the bucket back up.
+
+Rule: when unit-testing a continuous-refill limiter, FREEZE the clock
+(`vi.useFakeTimers()`) and reconstruct the limiter under the frozen clock, so
+`Date.now()` is constant and elapsed-time refill is exactly zero between calls —
+then the "N succeed, N+1 refused" invariant is deterministic. (Reset the
+limiter's module state AFTER installing fake timers, since its constructor
+samples `Date.now()` for `lastRefill`.) Do NOT try to make it pass by spacing
+calls or widening the window — that just moves the flake. Debugging signature: a
+bucket-exhaustion test that passes alone but fails in the full suite, or whose
+pass/fail flips with unrelated CPU load, means the bucket refilled on wall-clock
+between acquisitions.

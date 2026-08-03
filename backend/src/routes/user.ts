@@ -48,6 +48,7 @@ import {
     startUserMcpConnectorOAuth,
     updateUserMcpConnector,
 } from "../lib/mcpConnectors";
+import { listConnectedProducts } from "../lib/clio/connections";
 import {
     deleteAllUserChats,
     deleteAllUserTabularReviews,
@@ -303,6 +304,10 @@ export function serializeProfile(
     row: UserProfileRow,
     apiKeyStatus?: ApiKeyStatus,
     membership: OrganisationMembership | null = null,
+    clioConnections: { manage: boolean; grow: boolean } = {
+        manage: false,
+        grow: false,
+    },
 ) {
     const creditsUsed = row.message_credits_used ?? 0;
     const titleFallback = apiKeyStatus?.gemini
@@ -343,6 +348,10 @@ export function serializeProfile(
         titleModel,
         tabularModel,
         mfaOnLogin: row.mfa_on_login === true,
+        // Clio connector status (WS Clio): which practice-management products
+        // the user has connected. Drives the connectors UI; all-false for
+        // orgless self-hosters / unmigrated databases.
+        clioConnections,
         ...(apiKeyStatus ? { apiKeyStatus } : {}),
     };
 }
@@ -486,7 +495,11 @@ async function ensureProfileRow(
 async function loadProfile(
     db: ReturnType<typeof createServerSupabase>,
     userId: string,
-    options: { repairMissing?: boolean; apiKeyStatus?: ApiKeyStatus } = {},
+    options: {
+        repairMissing?: boolean;
+        apiKeyStatus?: ApiKeyStatus;
+        clioConnections?: { manage: boolean; grow: boolean };
+    } = {},
 ) {
     let { data, error } = await selectProfile(db, userId, "maybe");
 
@@ -546,7 +559,12 @@ async function loadProfile(
     }
 
     return {
-        data: serializeProfile(row, options.apiKeyStatus, membership),
+        data: serializeProfile(
+            row,
+            options.apiKeyStatus,
+            membership,
+            options.clioConnections,
+        ),
         error: null,
     };
 }
@@ -565,9 +583,11 @@ userRouter.get("/profile", requireAuth, asyncHandler(async (_req, res) => {
     const userId = res.locals.userId as string;
     const db = createServerSupabase();
     const apiKeyStatus = await getUserApiKeyStatus(userId, db);
+    const clioConnections = await listConnectedProducts(db, userId);
     const { data, error } = await loadProfile(db, userId, {
         repairMissing: true,
         apiKeyStatus,
+        clioConnections,
     });
     if (error) return void res.status(500).json({ detail: error.message });
     res.json({ ...data, apiKeyStatus: withLocalStatus(apiKeyStatus) });
