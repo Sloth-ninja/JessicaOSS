@@ -6,10 +6,7 @@ import { Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUserProfile } from "@/contexts/UserProfileContext";
 import { accountTabButtonClassName } from "./accountStyles";
-import {
-    personalApiKeysBlocked,
-    personalConnectorsBlocked,
-} from "./firmPolicy";
+import { personalApiKeysBlocked } from "./firmPolicy";
 
 interface TabDef {
     id: string;
@@ -50,7 +47,13 @@ export default function AccountLayout({
     const firm = profile?.firm ?? null;
     const tabs = TABS.filter((tab) => {
         if (tab.id === "api-keys") return !personalApiKeysBlocked(firm);
-        if (tab.id === "connectors") return !personalConnectorsBlocked(firm);
+        // Connectors tab is ALWAYS visible: post-Clio the page always has
+        // meaningful content for org users (the Clio practice-management card,
+        // exempt from memberMcpConnectors per the owner decision 03/08, or its
+        // honest "not configured" line), so unconditional visibility no longer
+        // violates the absence-not-disabled rule. The MCP gallery stays
+        // policy-hidden inside the page (see connectors/page.tsx). Orgless users
+        // were never tab-gated, so their behaviour is unchanged.
         return true;
     });
 
