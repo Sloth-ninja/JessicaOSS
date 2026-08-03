@@ -9,7 +9,8 @@
 //     3 req/s shared across ALL users (one app-wide bucket) — be frugal,
 //     no polling loops in v1,
 //   - honouring 429 Retry-After with a single capped retry, and proactive
-//     backoff when the rate-limit headers say zero remaining,
+//     backoff — when a response reports zero remaining + a reset, the next call
+//     for that bucket waits until reset (capped) or fails fast,
 //   - fixed, generic error mapping (raw Clio errors never reach users;
 //     server-side logs are redacted via safeErrorLog).
 
@@ -78,11 +79,22 @@ const MAX_RETRY_AFTER_MS = 3000;
 
 let manageBuckets = new Map<string, TokenBucket>();
 let growBucket = new TokenBucket(GROW_BUCKET_CAPACITY, GROW_BUCKET_WINDOW_MS);
+// Proactive backoff: when a response reports zero requests remaining, the next
+// call for that same bucket must wait until the window resets rather than fire
+// into a guaranteed 429. Keyed the same way as the rate bucket (per-user for
+// Manage, app-wide for Grow); value is the absolute reset time (ms).
+let backoffUntil = new Map<string, number>();
 
 /** Test-only: reset all module-level client rate-limit state. */
 export function resetClioClientStateForTests(): void {
   manageBuckets = new Map<string, TokenBucket>();
   growBucket = new TokenBucket(GROW_BUCKET_CAPACITY, GROW_BUCKET_WINDOW_MS);
+  backoffUntil = new Map<string, number>();
+}
+
+/** Rate-bucket + backoff key: per-user for Manage, single app-wide for Grow. */
+function bucketKey(product: ClioProduct, userId: string): string {
+  return product === "grow" ? "grow" : `manage:${userId}`;
 }
 
 function acquireRateToken(product: ClioProduct, userId: string): boolean {
@@ -118,6 +130,46 @@ export function isRateLimitExhausted(headers: Headers): boolean {
   if (remaining == null) return false;
   const n = Number(remaining);
   return Number.isFinite(n) && n <= 0;
+}
+
+/**
+ * Parse an X-RateLimit-Reset header into an ABSOLUTE reset time (ms), or null
+ * when absent/unparseable. Tolerates the two shapes seen in the wild: a Unix
+ * epoch in seconds (large value → absolute) and a delta in seconds-until-reset
+ * (small value → now + delta). Exported for unit testing.
+ */
+export function parseRateLimitResetMs(
+  headers: Headers,
+  now: number = Date.now(),
+): number | null {
+  const raw = headers.get("x-ratelimit-reset");
+  if (!raw) return null;
+  const n = Number(raw.trim());
+  if (!Number.isFinite(n)) {
+    const dateMs = Date.parse(raw);
+    return Number.isFinite(dateMs) ? dateMs : null;
+  }
+  // Values that look like a Unix epoch (seconds) are absolute; smaller values
+  // are a delta in seconds from now.
+  return n > 1_000_000_000 ? n * 1000 : now + n * 1000;
+}
+
+/**
+ * After a response, record a proactive backoff for the bucket when the headers
+ * say zero remaining and carry a future reset — so the NEXT call for that
+ * bucket waits (or fails fast) instead of issuing a doomed request.
+ */
+function recordBackoff(
+  product: ClioProduct,
+  userId: string,
+  headers: Headers,
+  now: number,
+): void {
+  if (!isRateLimitExhausted(headers)) return;
+  const resetMs = parseRateLimitResetMs(headers, now);
+  if (resetMs != null && resetMs > now) {
+    backoffUntil.set(bucketKey(product, userId), resetMs);
+  }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -233,7 +285,9 @@ async function doFetch(
  * Make an authenticated request to a product's API and return the parsed JSON
  * body (or null for a 204). Auto-refreshes a near-expiry token before the call,
  * retries once after a 401 (single refresh + retry), honours a 429 Retry-After
- * once (capped), and maps every failure onto a fixed, generic error.
+ * once (capped), applies a PROACTIVE backoff when a prior response reported zero
+ * requests remaining (waits until the recorded reset, capped, else fails fast),
+ * and maps every failure onto a fixed, generic error.
  */
 export async function clioRequest(
   db: Db,
@@ -250,6 +304,22 @@ export async function clioRequest(
 
   const { apiBase } = clioHosts(product);
   const url = buildUrl(apiBase, path, opts);
+
+  // Proactive backoff: a prior response for this bucket reported zero remaining,
+  // so wait until its reset before issuing another request. If the wait exceeds
+  // the cap, fail fast with the fixed rate-limit message rather than block.
+  const key = bucketKey(product, userId);
+  const until = backoffUntil.get(key);
+  if (until !== undefined) {
+    const now = Date.now();
+    if (until > now) {
+      const wait = until - now;
+      if (wait > MAX_RETRY_AFTER_MS) throw new ClioRateLimitError();
+      await sleep(wait);
+    }
+    // One-shot: the window has (or will have) reset — clear and proceed.
+    backoffUntil.delete(key);
+  }
 
   if (!acquireRateToken(product, userId)) {
     throw new ClioRateLimitError();
@@ -304,6 +374,10 @@ export async function clioRequest(
     }
     if (res.status === 429) throw new ClioRateLimitError();
   }
+
+  // Record a proactive backoff for the NEXT call if this response drained the
+  // window (X-RateLimit-Remaining 0 + a future Reset).
+  recordBackoff(product, userId, res.headers, Date.now());
 
   if (res.status === 204) return null;
 

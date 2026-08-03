@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { makeClioDb } from "./fakeClioDb";
 import {
   deleteClioConnection,
@@ -12,6 +12,12 @@ import {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const asDb = (db: unknown) => db as any;
+
+// These tests perform real scrypt AES-256-GCM key derivation via
+// saveClioConnection/loadClioConnection. Under the full 43-file suite that CPU
+// work can blow vitest's 5s default and flake (same class as the #61
+// userApiKeys fix); raise the ceiling so the suite is deterministically green.
+vi.setConfig({ testTimeout: 20_000 });
 
 beforeEach(() => {
   process.env.USER_API_KEYS_ENCRYPTION_SECRET = "test-clio-secret-value";

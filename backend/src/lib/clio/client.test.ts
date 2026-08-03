@@ -6,6 +6,7 @@ import {
   ClioRateLimitError,
   clioRequest,
   isRateLimitExhausted,
+  parseRateLimitResetMs,
   parseRetryAfterMs,
   refreshClioConnection,
   resetClioClientStateForTests,
@@ -13,6 +14,13 @@ import {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const asDb = (db: unknown) => db as any;
+
+// Most tests here perform real scrypt AES-256-GCM key derivation via
+// saveClioConnection/loadClioConnection (the seed helper). Under the full
+// 43-file suite that CPU work can blow vitest's 5s default and flake (same
+// class as the #61 userApiKeys fix); raise the ceiling so the suite is
+// deterministically green.
+vi.setConfig({ testTimeout: 20_000 });
 
 function json(
   body: unknown,
@@ -173,6 +181,73 @@ describe("clioRequest — rate limiting", () => {
       await expect(
         clioRequest(asDb(db), "user-1", "grow", "/matters"),
       ).rejects.toBeInstanceOf(ClioRateLimitError);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("proactive rate-limit backoff", () => {
+  it("parseRateLimitResetMs handles epoch, delta, and absent", () => {
+    const now = 1_000_000_000_000;
+    expect(
+      parseRateLimitResetMs(
+        new Headers({ "x-ratelimit-reset": "1700000000" }),
+        now,
+      ),
+    ).toBe(1_700_000_000_000);
+    expect(
+      parseRateLimitResetMs(new Headers({ "x-ratelimit-reset": "30" }), now),
+    ).toBe(now + 30_000);
+    expect(parseRateLimitResetMs(new Headers(), now)).toBeNull();
+  });
+
+  it("pre-empts the next call after a response drains the window (fails fast over cap)", async () => {
+    const db = await seed("manage");
+    let dataCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        dataCalls += 1;
+        // remaining 0, reset in 10s (> 5s cap).
+        return json({ data: [] }, 200, {
+          "x-ratelimit-remaining": "0",
+          "x-ratelimit-reset": "10",
+        });
+      }),
+    );
+    await clioRequest(asDb(db), "user-1", "manage", "/matters.json");
+    expect(dataCalls).toBe(1);
+    // Next call is refused locally — no second request is issued.
+    await expect(
+      clioRequest(asDb(db), "user-1", "manage", "/matters.json"),
+    ).rejects.toBeInstanceOf(ClioRateLimitError);
+    expect(dataCalls).toBe(1);
+  });
+
+  it("waits out a within-cap reset then proceeds", async () => {
+    const db = await seed("manage");
+    let dataCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        dataCalls += 1;
+        return dataCalls === 1
+          ? json({ data: [] }, 200, {
+              "x-ratelimit-remaining": "0",
+              "x-ratelimit-reset": "2",
+            })
+          : json({ data: [1] });
+      }),
+    );
+    vi.useFakeTimers();
+    try {
+      await clioRequest(asDb(db), "user-1", "manage", "/matters.json");
+      const p = clioRequest(asDb(db), "user-1", "manage", "/matters.json");
+      await vi.advanceTimersByTimeAsync(2000);
+      const body = (await p) as { data: unknown[] };
+      expect(body.data).toHaveLength(1);
+      expect(dataCalls).toBe(2);
     } finally {
       vi.useRealTimers();
     }

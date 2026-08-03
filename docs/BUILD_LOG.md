@@ -13,7 +13,7 @@
 `lib/clio/` seam (per the 22/07 architectural rule), the `/clio` + `/clio-grow`
 routes, the chat-tool wiring, and profile serialization. No frontend (PR 3). No
 migration, `.env`, `schema.sql`, or LICENSE touched. Backend `tsc` clean;
-`vitest` 584/584 (513 baseline + 71 new); prettier clean on all new files.
+`vitest` 589/589 (513 baseline + 76 new); prettier clean on all new files.
 
 **Modules (`backend/src/lib/clio/`).**
 - `config.ts` — region-derived host maps (EU live; us/ca/au structured), OAuth
@@ -38,7 +38,9 @@ migration, `.env`, `schema.sql`, or LICENSE touched. Backend `tsc` clean;
   refresh+retry on 401, atomic persistence of Grow's rotating refresh token
   BEFORE the new access token is used, `X-API-VERSION` pin on Manage, `fields=`
   helper, 429 Retry-After (single capped retry) + rate-limit buckets (Manage
-  50/min per user; Grow 3/s app-wide), fixed generic error mapping, Manage
+  50/min per user; Grow 3/s app-wide) + PROACTIVE backoff (a response reporting
+  zero remaining + a reset makes the next call for that bucket wait until reset,
+  capped at 5s, else fail fast), fixed generic error mapping, Manage
   cursor-pagination helper.
 - `manageTools.ts` / `growTools.ts` — chat tools registered through the same
   seam as `companiesHouseTools`, gated on the caller having the relevant product
@@ -46,8 +48,9 @@ migration, `.env`, `schema.sql`, or LICENSE touched. Backend `tsc` clean;
   `clio_find_contact`, `clio_matter_financials`, `clio_record_time`
   (minutes→seconds server-side, bounds-checked), `clio_list_matter_documents`,
   `clio_save_document_to_matter` (JessicaOS doc → 3-step presigned upload; access
-  enforced via `ensureDocAccess`; 25 MB cap; presigned PUT/download never carry
-  the bearer), `clio_delete_time_entry`. Grow: `clio_intake_status`,
+  enforced via `ensureDocAccess`; 25 MB cap; the presigned PUT never carries the
+  bearer — no document download is implemented), `clio_delete_time_entry`. Grow:
+  `clio_intake_status`,
   `clio_intake_notes`, `clio_add_intake_note` (255/65535 caps). System prompts
   instruct the model to confirm writes with the user first.
 
@@ -80,12 +83,15 @@ verified 3-step document upload (POST multipart → presigned PUT → PATCH
 fully_uploaded); Manage 50/min, Grow 3/s-per-app; Grow refresh-token rotation on
 every use; deauthorize-on-disconnect required for a clean permissions reset.
 
-**Tests (71 new).** config (hosts/region/redirect/scopes/creds); connections
+**Tests (76 new).** config (hosts/region/redirect/scopes/creds); connections
 (encryption round-trip, 42P01/42703 degradation, rotation atomicity incl.
 zero-row persist failure retaining the old token); oauth (state mismatch/replay/
-product-mismatch rejection, Manage-vs-Grow PKCE shape, code exchange); client
+product-mismatch rejection, Manage-vs-Grow PKCE shape, code exchange, Grow
+who_am_i stored on connect + connect-survives-who_am_i-failure); client
 (Retry-After parsing, 401 single refresh+retry, 429 → rate-limit error, Grow
-bucket exhaustion, rotation retain-vs-replace); manage tools (minutes→seconds +
+bucket exhaustion, proactive backoff — reset parsing + over-cap fail-fast +
+within-cap wait-then-proceed, rotation retain-vs-replace); manage tools
+(minutes→seconds +
 bounds, happy path, not-connected gating, fixed-error mapping, record_time
 seconds/non_billable, save-document access deny + 25 MB cap); grow tools (happy
 path, not-connected, note caps); routes (start/503, status shape, disconnect
@@ -101,6 +107,12 @@ users). STILL RESEARCH-BASED (not yet probed): the matter-note read/write
 endpoints (`GET`/`POST /matters/{id}/notes`) and `/contacts` — the two
 tools that touch them (`clio_intake_notes`, `clio_add_intake_note`) should be
 confirmed against a live note before production reliance.
+
+**Migration state.** `20260803_01_clio_connections` (PR 1) was ALREADY RUN in
+production Supabase by the owner on 03/08 — the `user_clio_connections` table
+exists in prod, so the connector activates as soon as this backend deploys and
+the `CLIO_*` env is set. The code stays 42P01/42703-tolerant regardless (inert
+for self-hosters on an unmigrated DB).
 
 **Owner-pending / deferred.** Owner completes both Clio app registrations + sets
 `CLIO_*` env (Grow registration was still pending per the research doc). The
