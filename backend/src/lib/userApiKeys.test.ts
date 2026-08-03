@@ -171,6 +171,9 @@ describe("userApiKeys precedence (user > firm > env)", () => {
   });
 
   describe("getUserApiKeys — orgless (user > env, unchanged)", () => {
+    // 20s timeout: two scrypt key derivations (save) + decrypts make this the
+    // suite's slowest test; on a cold cache it can exceed vitest's 5s default
+    // (observed 6.7s), flaking full-suite runs while passing in isolation.
     it("prefers the user's decrypted key over the env key for every provider", async () => {
       vi.stubEnv("ANTHROPIC_API_KEY", "env-claude");
       vi.stubEnv("COMPANIES_HOUSE_API_KEY", "env-ch");
@@ -182,7 +185,7 @@ describe("userApiKeys precedence (user > firm > env)", () => {
       const keys = await getUserApiKeys(USER, db);
       expect(keys.claude).toBe("user-claude");
       expect(keys.companies_house).toBe("user-ch");
-    });
+    }, 20_000);
 
     it("falls back to the env key when the user has no key", async () => {
       vi.stubEnv("COMPANIES_HOUSE_API_KEY", "env-ch");
