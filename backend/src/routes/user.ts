@@ -49,6 +49,7 @@ import {
     updateUserMcpConnector,
 } from "../lib/mcpConnectors";
 import { listConnectedProducts } from "../lib/clio/connections";
+import { revokeAllClioGrants } from "../lib/clio/oauth";
 import {
     deleteAllUserChats,
     deleteAllUserTabularReviews,
@@ -1201,6 +1202,11 @@ userRouter.delete(
                     .json({ detail: ACCOUNT_MANAGED_BY_FIRM_DETAIL });
             }
             await deleteUserAccountData(db, userId, userEmail);
+            // Best-effort revoke any live Clio grants before the auth user is
+            // removed — mirrors disconnect's revoke-first contract so a deleted
+            // account never leaves a live Clio grant behind. Never blocks
+            // deletion (all failures are swallowed inside the helper).
+            await revokeAllClioGrants(db, userId);
             const { error } = await db.auth.admin.deleteUser(userId);
             if (error)
                 return void res.status(500).json({ detail: error.message });

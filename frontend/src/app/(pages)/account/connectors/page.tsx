@@ -723,9 +723,16 @@ export default function ConnectorsPage() {
     if (personalConnectorsBlocked(profile?.firm)) {
         return (
             <div>
+                {/* Page-level heading sits ABOVE the Clio card, matching the
+                    normal page's heading order (the Clio card is exempt from the
+                    connectors policy, so it always renders here). */}
+                <div className="mb-4 flex items-center gap-2">
+                    <h2 className="font-serif text-2xl font-medium text-gray-900">
+                        Connectors
+                    </h2>
+                </div>
                 <ClioConnectorCard />
                 <FirmManagedCard
-                    heading="Connectors"
                     title="Managed by your firm"
                     description={`Custom connectors are managed by ${profile?.firm?.name ?? "your firm"}. Ask your firm admin if you need a new connector added.`}
                 />

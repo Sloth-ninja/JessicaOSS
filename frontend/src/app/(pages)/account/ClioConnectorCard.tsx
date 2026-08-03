@@ -51,6 +51,17 @@ const PRODUCTS: ProductMeta[] = [
     },
 ];
 
+// Thrown when the 5-minute popup wait elapses without the popup landing back on
+// our origin. Distinguished from other failures so the caller can re-check the
+// connection status once before declaring failure — the backend callback can
+// outrace a slow popup, leaving us connected despite the wait timing out.
+class ClioPopupTimeout extends Error {
+    constructor() {
+        super("Connecting to Clio timed out.");
+        this.name = "ClioPopupTimeout";
+    }
+}
+
 // Opens the popup to the Clio authorise URL and resolves once it returns to our
 // own origin. The backend OAuth callback (routes/clio.ts) redirects the browser
 // back to /account/connectors?clio=<product>&clioStatus=<connected|error>, so —
@@ -62,7 +73,7 @@ function waitForClioPopup(popup: Window): Promise<void> {
         const timeout = window.setTimeout(
             () => {
                 cleanup();
-                reject(new Error("Connecting to Clio timed out."));
+                reject(new ClioPopupTimeout());
             },
             5 * 60 * 1000,
         );
@@ -214,6 +225,23 @@ export function ClioConnectorCard() {
             await reloadProfile();
         } catch (err) {
             popup?.close();
+            if (err instanceof ClioPopupTimeout) {
+                // The wait elapsed, but the backend callback may have completed
+                // the connection anyway. Re-check status once before declaring
+                // failure so a slow-but-successful connect self-heals.
+                try {
+                    const latest = await getClioStatus();
+                    setStatus(latest);
+                    if (latest[product]?.connected) {
+                        await reloadProfile();
+                        return;
+                    }
+                } catch {
+                    // Status re-check failed — fall through to the timeout message.
+                }
+                setActionError("Connecting to Clio timed out. Please try again.");
+                return;
+            }
             setActionError(
                 err instanceof Error
                     ? err.message

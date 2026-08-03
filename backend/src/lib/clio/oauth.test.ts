@@ -4,9 +4,10 @@ import {
   ClioOAuthError,
   completeClioOAuth,
   resetClioOAuthStateForTests,
+  revokeAllClioGrants,
   startClioOAuth,
 } from "./oauth";
-import { loadClioConnection } from "./connections";
+import { loadClioConnection, saveClioConnection } from "./connections";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const asDb = (db: unknown) => db as any;
@@ -202,5 +203,67 @@ describe("completeClioOAuth — happy path", () => {
     expect(result.connection.clioUserName).toBeNull();
     const loaded = await loadClioConnection(asDb(db), "user-1", "grow");
     expect(loaded).not.toBeNull();
+  });
+});
+
+describe("revokeAllClioGrants — account deletion", () => {
+  async function seedBoth(db: ReturnType<typeof makeClioDb>) {
+    for (const product of ["manage", "grow"] as const) {
+      await saveClioConnection(asDb(db), {
+        userId: "user-1",
+        product,
+        tokens: {
+          accessToken: `access-${product}`,
+          refreshToken: `refresh-${product}`,
+          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          scope: null,
+        },
+      });
+    }
+  }
+
+  it("attempts a remote deauthorize for each connected product", async () => {
+    const db = makeClioDb();
+    await seedBoth(db);
+    const revokeUrls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL) => {
+        revokeUrls.push(String(url));
+        return json({});
+      }),
+    );
+
+    await revokeAllClioGrants(asDb(db), "user-1");
+
+    expect(revokeUrls).toContain("https://eu.app.clio.com/oauth/deauthorize");
+    expect(revokeUrls).toContain("https://eu.auth.api.clio.com/oauth/revoke");
+    expect(revokeUrls).toHaveLength(2);
+  });
+
+  it("resolves (never blocks deletion) when the remote revoke throws", async () => {
+    const db = makeClioDb();
+    await seedBoth(db);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network down");
+      }),
+    );
+    await expect(
+      revokeAllClioGrants(asDb(db), "user-1"),
+    ).resolves.toBeUndefined();
+  });
+
+  it("resolves even when the connection load itself throws (outer guard)", async () => {
+    const throwingDb = {
+      from() {
+        throw new Error("db exploded");
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn());
+    await expect(
+      revokeAllClioGrants(asDb(throwingDb), "user-1"),
+    ).resolves.toBeUndefined();
   });
 });

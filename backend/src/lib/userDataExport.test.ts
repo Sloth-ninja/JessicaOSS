@@ -14,10 +14,12 @@ type Filter =
   | { op: "eq"; col: string; val: unknown }
   | { op: "in"; col: string; vals: unknown[] };
 
-function makeDb(config: {
-  rows?: Record<string, Row[]>;
-  errorFor?: (table: string) => { code?: string; message?: string } | null;
-} = {}) {
+function makeDb(
+  config: {
+    rows?: Record<string, Row[]>;
+    errorFor?: (table: string) => { code?: string; message?: string } | null;
+  } = {},
+) {
   const store: Record<string, Row[]> = {};
   for (const [table, rows] of Object.entries(config.rows ?? {})) {
     store[table] = rows.map((r) => ({ ...r }));
@@ -121,6 +123,66 @@ describe("buildUserAccountExport — company_search_saves", () => {
 
       const exported = await buildUserAccountExport(db, "user-1");
       expect(exported.company_search_saves).toEqual([]);
+    },
+  );
+});
+
+describe("buildUserAccountExport — clio_connections (SAR completeness)", () => {
+  // A raw connection row as stored: metadata AND encrypted token material. The
+  // export section must carry the metadata and NONE of the token material.
+  const CLIO_ROW: Row = {
+    id: "clio-1",
+    user_id: "user-1",
+    product: "manage",
+    encrypted_access_token: "ENCRYPTED-ACCESS",
+    access_token_iv: "iv-a",
+    access_token_tag: "tag-a",
+    encrypted_refresh_token: "ENCRYPTED-REFRESH",
+    refresh_token_iv: "iv-r",
+    refresh_token_tag: "tag-r",
+    token_expires_at: "2026-09-01T00:00:00.000Z",
+    scope: "grow_matter_read",
+    clio_user_id: "99",
+    clio_user_name: "Jane Solicitor",
+    created_at: "2026-08-03T00:00:00.000Z",
+    updated_at: "2026-08-03T01:00:00.000Z",
+  };
+
+  it("includes token-free connection metadata with all metadata fields and NO token material", async () => {
+    const { db } = makeDb({ rows: { user_clio_connections: [CLIO_ROW] } });
+
+    const exported = await buildUserAccountExport(db, "user-1");
+
+    expect(exported.clio_connections).toHaveLength(1);
+    expect(exported.clio_connections[0]).toEqual({
+      product: "manage",
+      clio_user_name: "Jane Solicitor",
+      clio_user_id: "99",
+      scope: "grow_matter_read",
+      token_expires_at: "2026-09-01T00:00:00.000Z",
+      created_at: "2026-08-03T00:00:00.000Z",
+      updated_at: "2026-08-03T01:00:00.000Z",
+    });
+    // No encrypted/token field survives into the export, even though the source
+    // row carries them.
+    expect(JSON.stringify(exported.clio_connections)).not.toContain(
+      "ENCRYPTED",
+    );
+  });
+
+  it.each(["42P01", "42703"])(
+    "tolerates an unmigrated database (%s) — section present but empty",
+    async (code) => {
+      const { db } = makeDb({
+        rows: { user_clio_connections: [CLIO_ROW] },
+        errorFor: (table) =>
+          table === "user_clio_connections"
+            ? { code, message: "unmigrated" }
+            : null,
+      });
+
+      const exported = await buildUserAccountExport(db, "user-1");
+      expect(exported.clio_connections).toEqual([]);
     },
   );
 });

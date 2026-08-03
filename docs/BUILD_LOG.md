@@ -7,6 +7,75 @@
 
 ---
 
+## 2026-08-03 — Clio train: composed-range fix wave (branch `clio-train-fixes`)
+
+**Scope:** the six findings from the composed-range multi-lens review of the Clio
+connector train (PRs 2/3 + the policy-exemption), plus one stale-comment nit from
+the per-PR reviews. Credit: the review caught all of these. No new deps; no
+migration/`.env`/`schema.sql`/LICENSE touched. Backend `tsc` clean, `vitest`
+600/600 (589 baseline + 11 new); frontend `tsc` clean, ESLint clean on changed
+files (the 3 pre-existing `connectors/page.tsx` warnings are unchanged and not
+mine); prettier clean on the backend 2-space files changed (the touched upstream
+4-space files `user.ts`/`userDataExport.ts` keep their existing style per the
+minimal-diff rule — the repo has no prettier config and the hook skips prettier).
+
+**Fixes.**
+1. **SAR completeness (continues the #52 pattern).** `buildUserAccountExport`
+   gains a token-free `clio_connections` section — `product`, `clio_user_name`,
+   `clio_user_id`, `scope`, `token_expires_at`, `created_at`/`updated_at` and
+   **never** any encrypted/token material. Sourced via a new
+   `getClioConnectionMetadata` (connections.ts) that selects only the non-secret
+   columns AND re-projects each row through a fixed allowlist, so token material
+   can never leak even if the query widened. 42P01/42703-tolerant (unmigrated ⇒
+   empty section, key present), exactly as `company_search_saves` was added in
+   #52.
+2. **Deauthorize on account deletion.** `DELETE /user/account` now best-effort
+   revokes each connected Clio product (new `revokeAllClioGrants`, reusing
+   `deauthorizeClio`) **before** `auth.admin.deleteUser` — mirrors disconnect's
+   revoke-first contract so a deleted account never leaves a live grant behind.
+   Every failure (load/decrypt/remote revoke) is swallowed + `safeErrorLog`'d, so
+   it can NEVER block deletion.
+3. **Connect-timeout honesty.** On the frontend `waitForClioPopup` 5-minute
+   timeout the card no longer declares failure outright — it re-fetches
+   `/clio/status` once (the backend redirect can outrace a slow popup) and treats
+   a now-connected result as success; otherwise it shows the fixed timeout
+   message. The 5-minute popup wait is unchanged.
+4. **Stale connected-pill self-heal.** When a `clioRequest` token refresh fails
+   because the **grant itself** was rejected (OAuth `invalid_grant`), the dead
+   connection row is deleted so status reports not-connected and the pill
+   self-heals. Detection: `postClioTokenRequest` now flags `invalidGrant` only on
+   an `error: "invalid_grant"` body; transient/5xx/network refresh failures are
+   NOT flagged and NOT pruned (the row is retained for a later retry). Applied at
+   both refresh sites (proactive near-expiry + the 401 retry).
+5. **Policy-OFF composition.** In `connectors/page.tsx`'s
+   `personalConnectorsBlocked` early return, the page-level "Connectors" heading
+   now sits **above** the Clio card (matching the normal page's heading order);
+   `FirmManagedCard`'s heading became optional so it no longer emits a second
+   "Connectors" heading below the card.
+6. **BUILD_LOG delimiter.** Added the missing `---` between the PR 3 (frontend)
+   and PR 2 (backend) entries — formatting only, entries untouched.
+
+Plus the per-PR nit: `client.test.ts`'s stale "5s cap" comment corrected to
+"3s cap (MAX_RETRY_AFTER_MS)"; no code change.
+
+**Decisions.** (a) `invalid_grant` detection is intentionally narrow — only an
+OAuth `error: "invalid_grant"` body prunes the row; an unparseable body or any
+network/5xx is treated as transient and left intact, so a flaky refresh never
+destroys a still-valid grant. (b) The SAR metadata read re-projects through an
+explicit allowlist rather than trusting column projection, so the token-free
+guarantee holds even against a mock/db that ignores `select(cols)`.
+
+**Tests (+11).** `connections.test.ts` (+3): metadata strips token fields even
+when present on the row, unmigrated ⇒ empty. `userDataExport.test.ts` (+3):
+`clio_connections` present with all metadata fields and no token material,
+unmigrated ⇒ empty. `oauth.test.ts` (+3): `revokeAllClioGrants` attempts a revoke
+per connected product, resolves when the remote revoke throws, resolves when the
+connection load itself throws. `client.test.ts` (+2): `invalid_grant` refresh ⇒
+row pruned ⇒ summaries disconnected; network refresh failure ⇒ row retained (and
+the existing non-`invalid_grant` 401 test now asserts the row is retained).
+
+---
+
 ## 2026-08-03 — Clio exempt from the connectors policy (branch `clio-policy-exemption`)
 
 **Scope:** implement the owner decision (03/08) that the "Members may add custom
@@ -106,6 +175,8 @@ absence-not-dead-button at the row level.
 Clio credentials in this worktree to exercise the live connected/pill states);
 the not-configured and skeleton/retry states render without credentials. To be
 attached during in-browser QA.
+
+---
 
 ## 2026-08-03 — Clio connector PR 2: backend (branch `clio-connector-backend`)
 

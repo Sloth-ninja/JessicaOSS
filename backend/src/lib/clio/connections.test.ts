@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { makeClioDb } from "./fakeClioDb";
 import {
   deleteClioConnection,
+  getClioConnectionMetadata,
   getClioConnectionSummaries,
   isClioSchemaMissing,
   listConnectedProducts,
@@ -205,4 +206,66 @@ describe("deleteClioConnection", () => {
       deleteClioConnection(asDb(missingDb), "user-1", "manage"),
     ).resolves.toBeUndefined();
   });
+});
+
+describe("getClioConnectionMetadata (SAR/export)", () => {
+  it("returns token-free metadata, omitting encrypted/token fields even when present on the row", async () => {
+    // Seed a raw row carrying encrypted token material alongside the metadata.
+    const db = makeClioDb({
+      seed: [
+        {
+          id: "row-1",
+          user_id: "user-1",
+          product: "manage",
+          encrypted_access_token: "ENCRYPTED-ACCESS",
+          access_token_iv: "iv-a",
+          access_token_tag: "tag-a",
+          encrypted_refresh_token: "ENCRYPTED-REFRESH",
+          refresh_token_iv: "iv-r",
+          refresh_token_tag: "tag-r",
+          token_expires_at: "2026-09-01T00:00:00.000Z",
+          scope: "grow_matter_read",
+          clio_user_id: "99",
+          clio_user_name: "Jane Solicitor",
+          created_at: "2026-08-03T00:00:00.000Z",
+          updated_at: "2026-08-03T01:00:00.000Z",
+        },
+      ],
+    });
+
+    const meta = await getClioConnectionMetadata(asDb(db), "user-1");
+    expect(meta).toHaveLength(1);
+    expect(meta[0]).toEqual({
+      product: "manage",
+      clio_user_name: "Jane Solicitor",
+      clio_user_id: "99",
+      scope: "grow_matter_read",
+      token_expires_at: "2026-09-01T00:00:00.000Z",
+      created_at: "2026-08-03T00:00:00.000Z",
+      updated_at: "2026-08-03T01:00:00.000Z",
+    });
+    // No token material of any kind leaks through.
+    const asRecord = meta[0] as unknown as Record<string, unknown>;
+    for (const key of [
+      "encrypted_access_token",
+      "access_token_iv",
+      "access_token_tag",
+      "encrypted_refresh_token",
+      "refresh_token_iv",
+      "refresh_token_tag",
+    ]) {
+      expect(asRecord[key]).toBeUndefined();
+    }
+    expect(JSON.stringify(meta)).not.toContain("ENCRYPTED");
+  });
+
+  it.each(["42P01", "42703"] as const)(
+    "returns an empty array on an unmigrated database (%s)",
+    async (code) => {
+      const db = makeClioDb({ missing: code });
+      await expect(
+        getClioConnectionMetadata(asDb(db), "user-1"),
+      ).resolves.toEqual([]);
+    },
+  );
 });

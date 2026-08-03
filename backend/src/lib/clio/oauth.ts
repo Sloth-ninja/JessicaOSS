@@ -25,6 +25,7 @@ import {
   type ClioProduct,
 } from "./config";
 import {
+  loadClioConnection,
   saveClioConnection,
   type ClioConnection,
   type ClioTokens,
@@ -34,9 +35,20 @@ type Db = ReturnType<typeof createServerSupabase>;
 
 /** A user-safe OAuth failure — never carries raw provider text to the client. */
 export class ClioOAuthError extends Error {
-  constructor(message = "Clio authorisation failed. Please try again.") {
+  /**
+   * True when the token endpoint rejected the GRANT itself (OAuth
+   * `invalid_grant` class) — the refresh/authorization grant is dead, not a
+   * transient or network failure. Callers use this to prune a now-unusable
+   * stored connection so status self-heals to "not connected".
+   */
+  invalidGrant: boolean;
+  constructor(
+    message = "Clio authorisation failed. Please try again.",
+    invalidGrant = false,
+  ) {
     super(message);
     this.name = "ClioOAuthError";
+    this.invalidGrant = invalidGrant;
   }
 }
 
@@ -131,7 +143,19 @@ export async function postClioTokenRequest(
     throw new ClioOAuthError("Could not reach Clio. Please try again.");
   }
   if (!res.ok) {
-    throw new ClioOAuthError();
+    // Distinguish a rejected GRANT (OAuth `invalid_grant` — the refresh/auth
+    // code is dead, so the caller should prune the connection) from a transient
+    // or server-side failure (retryable; the grant may still be good). The
+    // body is read only to read the machine `error` code; it is never surfaced.
+    let invalidGrant = false;
+    try {
+      const body = (await res.json()) as { error?: unknown };
+      invalidGrant =
+        typeof body?.error === "string" && body.error === "invalid_grant";
+    } catch {
+      // Unparseable body — treat as transient (do NOT prune).
+    }
+    throw new ClioOAuthError(undefined, invalidGrant);
   }
   let json: unknown;
   try {
@@ -366,5 +390,31 @@ export async function deauthorizeClio(
       product,
       error: safeErrorLog(err),
     });
+  }
+}
+
+/**
+ * Best-effort revoke of ALL of a user's connected Clio grants across both
+ * products — called on account deletion so a removed account never leaves a
+ * live Clio grant behind (mirrors disconnect's revoke-first contract). Every
+ * failure (load, decrypt, or the remote revoke) is swallowed and logged only,
+ * so this can NEVER block the deletion it precedes.
+ */
+export async function revokeAllClioGrants(
+  db: Db,
+  userId: string,
+): Promise<void> {
+  for (const product of ["manage", "grow"] as ClioProduct[]) {
+    try {
+      const connection = await loadClioConnection(db, userId, product);
+      if (connection) {
+        await deauthorizeClio(product, connection.tokens.accessToken);
+      }
+    } catch (err) {
+      console.error(
+        "[clio/oauth] account-deletion revoke failed (best-effort)",
+        { product, error: safeErrorLog(err) },
+      );
+    }
   }
 }
