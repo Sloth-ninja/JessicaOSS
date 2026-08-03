@@ -7,6 +7,37 @@
 
 ---
 
+## 2026-08-03 — Clio connector PR 1: connections migration (branch `clio-connections-migration`)
+
+**Scope:** the owner-authorised migration `20260803_01_clio_connections.sql`
+(allowlist entry added by the owner in-session), its `schema.sql` mirror, and
+the owner's allowlist diff. No application code — additive table only; zero
+behaviour change until the connector lands.
+
+**Contents.** `user_clio_connections`: one row per user per product
+(`unique(user_id, product)`, product check `'manage'|'grow'`), AES-256-GCM
+column triplets for access + refresh tokens (`user_mcp_oauth_tokens`
+precedent), `token_expires_at`/`scope`, `clio_user_id`/`clio_user_name`
+snapshot for the connection-status display; RLS enabled; browser-role grants
+revoked. Design note in both files: Grow refresh tokens rotate on every use,
+so the app layer must persist replacements atomically.
+
+**Context.** Spike results (03/08): both EU OAuth flows verified live
+(Manage 30-day token at eu.app.clio.com; Grow 24-h PKCE token at
+eu.auth.api.clio.com); firm pipeline statuses readable verbatim; `clio_id`
+join key confirmed on converted matters. Owner decisions: the two-user
+permissions verification runs at pilot onboarding via the connector's
+"matters visible" surface (each solicitor's first connect is the check);
+write probes approved against the dummy test matter. Approved mock-ups:
+https://claude.ai/code/artifact/a3e31e95-4efd-4b76-9ded-d14abea955af
+
+**Verification:** migration ↔ schema.sql mirrored 1:1; idempotent
+(if-not-exists throughout); no code changes so backend/frontend checks
+unaffected. Owner runs it in production Supabase before the connector
+activates (connector code will be 42P01-tolerant regardless).
+
+---
+
 ## 2026-08-03 — Clio pivot: research + decision record (branch `clio-pivot-research`)
 
 **Scope:** docs-only. Records the owner's 03/08 decision to cancel the

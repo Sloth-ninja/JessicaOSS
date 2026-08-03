@@ -246,6 +246,33 @@ create index if not exists idx_user_mcp_tool_audit_logs_user_created
 
 alter table public.user_mcp_tool_audit_logs enable row level security;
 
+-- Clio connector: per-user encrypted OAuth tokens for Clio Manage and Clio
+-- Grow (separate products, separate token sets — one row per user per
+-- product). Grow refresh tokens rotate on every use.
+create table if not exists public.user_clio_connections (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  product text not null check (product in ('manage', 'grow')),
+  encrypted_access_token text,
+  access_token_iv text,
+  access_token_tag text,
+  encrypted_refresh_token text,
+  refresh_token_iv text,
+  refresh_token_tag text,
+  token_expires_at timestamptz,
+  scope text,
+  clio_user_id text,
+  clio_user_name text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(user_id, product)
+);
+
+create index if not exists idx_user_clio_connections_user
+  on public.user_clio_connections(user_id);
+
+alter table public.user_clio_connections enable row level security;
+
 -- ---------------------------------------------------------------------------
 -- Projects and documents
 -- ---------------------------------------------------------------------------
@@ -947,3 +974,4 @@ revoke all on public.user_mcp_oauth_tokens from anon, authenticated;
 revoke all on public.user_mcp_oauth_states from anon, authenticated;
 revoke all on public.user_mcp_connector_tools from anon, authenticated;
 revoke all on public.user_mcp_tool_audit_logs from anon, authenticated;
+revoke all on public.user_clio_connections from anon, authenticated;

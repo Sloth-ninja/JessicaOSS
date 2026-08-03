@@ -6,6 +6,7 @@
     "20260721_01_firm_administration.sql",
     "20260727_01_firm_models_and_deletion_governance.sql",
     "20260728_01_company_search_saves.sql",
-    "20260728_02_firm_visibility.sql"
+    "20260728_02_firm_visibility.sql",
+    "20260803_01_clio_connections.sql"
   ]
 }
