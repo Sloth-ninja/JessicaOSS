@@ -25,11 +25,12 @@ import {
   type ClioProduct,
 } from "./config";
 import {
+  deleteClioConnection,
   loadClioConnection,
   persistRefreshedTokens,
   type ClioConnection,
 } from "./connections";
-import { postClioTokenRequest } from "./oauth";
+import { ClioOAuthError, postClioTokenRequest } from "./oauth";
 
 type Db = ReturnType<typeof createServerSupabase>;
 
@@ -219,6 +220,31 @@ export async function refreshClioConnection(
   });
 }
 
+/**
+ * Delete the stored connection when a refresh failed because the GRANT itself
+ * was rejected (OAuth `invalid_grant`) — the refresh token is dead, so keeping
+ * an unusable encrypted row only leaves a stale "connected" pill that never
+ * self-heals. A transient/network refresh failure is NOT pruned (the grant may
+ * still be good on the next attempt). Best-effort: a delete failure is swallowed
+ * so it never masks the original auth error the caller is about to throw.
+ */
+async function pruneDeadClioGrant(
+  db: Db,
+  userId: string,
+  product: ClioProduct,
+  err: unknown,
+): Promise<void> {
+  if (!(err instanceof ClioOAuthError) || !err.invalidGrant) return;
+  try {
+    await deleteClioConnection(db, userId, product);
+  } catch (delErr) {
+    console.error("[clio/client] prune of dead grant failed", {
+      product,
+      error: safeErrorLog(delErr),
+    });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Authenticated request.
 // ---------------------------------------------------------------------------
@@ -299,7 +325,15 @@ export async function clioRequest(
   let connection = await loadClioConnection(db, userId, product);
   if (!connection) throw new ClioAuthError();
   if (isNearExpiry(connection)) {
-    connection = await refreshClioConnection(db, connection);
+    try {
+      connection = await refreshClioConnection(db, connection);
+    } catch (err) {
+      // A dead refresh grant here means the stored connection can never be
+      // used again — prune it so status self-heals; transient failures rethrow
+      // unchanged (the grant may still be good next time).
+      await pruneDeadClioGrant(db, userId, product, err);
+      throw err;
+    }
   }
 
   const { apiBase } = clioHosts(product);
@@ -340,7 +374,11 @@ export async function clioRequest(
   if (res.status === 401) {
     try {
       connection = await refreshClioConnection(db, connection);
-    } catch {
+    } catch (err) {
+      // Prune the connection when the refresh grant itself was rejected (dead
+      // token) so the stale "connected" pill self-heals; transient failures
+      // just surface as a reconnect prompt without deleting the row.
+      await pruneDeadClioGrant(db, userId, product, err);
       throw new ClioAuthError();
     }
     if (!acquireRateToken(product, userId)) throw new ClioRateLimitError();

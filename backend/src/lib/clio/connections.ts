@@ -325,6 +325,56 @@ export async function getClioConnectionSummaries(
   return result;
 }
 
+/**
+ * Token-free connection metadata, one object per stored product, for the
+ * subject-access/export path (right of access). ONLY non-secret columns — never
+ * any encrypted token material — and built by an explicit allowlist so a token
+ * field present on the underlying row can never leak into the export.
+ */
+export interface ClioConnectionMetadata {
+  product: ClioProduct;
+  clio_user_name: string | null;
+  clio_user_id: string | null;
+  scope: string | null;
+  token_expires_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+/**
+ * Read the token-free connection metadata for a user (SAR/export). Selects only
+ * the non-secret columns AND re-projects each row through a fixed allowlist, so
+ * the result can never carry token material even if a caller widened the query.
+ * 42P01/42703-tolerant: an unmigrated database yields an empty array (the export
+ * section is present but empty), never a throw.
+ */
+export async function getClioConnectionMetadata(
+  db: Db,
+  userId: string,
+): Promise<ClioConnectionMetadata[]> {
+  const { data, error } = await db
+    .from("user_clio_connections")
+    .select(
+      "product, clio_user_name, clio_user_id, scope, token_expires_at, created_at, updated_at",
+    )
+    .eq("user_id", userId);
+  if (error) {
+    if (isClioSchemaMissing(error)) return [];
+    throw error;
+  }
+  const rows = (data as Array<Record<string, unknown>>) ?? [];
+  const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+  return rows.map((row) => ({
+    product: row.product as ClioProduct,
+    clio_user_name: str(row.clio_user_name),
+    clio_user_id: str(row.clio_user_id),
+    scope: str(row.scope),
+    token_expires_at: str(row.token_expires_at),
+    created_at: str(row.created_at),
+    updated_at: str(row.updated_at),
+  }));
+}
+
 export interface ClioConnectedProducts {
   manage: boolean;
   grow: boolean;

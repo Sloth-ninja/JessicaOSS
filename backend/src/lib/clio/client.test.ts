@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeClioDb } from "./fakeClioDb";
-import { saveClioConnection, loadClioConnection } from "./connections";
+import {
+  saveClioConnection,
+  loadClioConnection,
+  getClioConnectionSummaries,
+} from "./connections";
 import {
   ClioAuthError,
   ClioRateLimitError,
@@ -147,6 +151,51 @@ describe("clioRequest — auth", () => {
     await expect(
       clioRequest(asDb(db), "user-1", "manage", "/matters.json"),
     ).rejects.toBeInstanceOf(ClioAuthError);
+    // A non-invalid_grant refresh failure is treated as transient — the row is
+    // retained so a later attempt can recover.
+    expect(
+      await loadClioConnection(asDb(db), "user-1", "manage"),
+    ).not.toBeNull();
+  });
+
+  it("prunes the stored connection when the refresh grant is rejected (invalid_grant)", async () => {
+    const db = await seed("manage");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL) => {
+        const u = String(url);
+        if (u.includes("/oauth/token")) {
+          return json({ error: "invalid_grant" }, 400);
+        }
+        return json({ error: "expired" }, 401);
+      }),
+    );
+    await expect(
+      clioRequest(asDb(db), "user-1", "manage", "/matters.json"),
+    ).rejects.toBeInstanceOf(ClioAuthError);
+    // The dead grant is deleted so status self-heals to disconnected.
+    expect(await loadClioConnection(asDb(db), "user-1", "manage")).toBeNull();
+    const summaries = await getClioConnectionSummaries(asDb(db), "user-1");
+    expect(summaries.manage.connected).toBe(false);
+  });
+
+  it("does NOT prune when the refresh fails on a network error (transient)", async () => {
+    const db = await seed("manage");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL) => {
+        const u = String(url);
+        if (u.includes("/oauth/token")) throw new Error("network down");
+        return json({ error: "expired" }, 401);
+      }),
+    );
+    await expect(
+      clioRequest(asDb(db), "user-1", "manage", "/matters.json"),
+    ).rejects.toBeInstanceOf(ClioAuthError);
+    // A transient/network refresh failure must leave the connection intact.
+    expect(
+      await loadClioConnection(asDb(db), "user-1", "manage"),
+    ).not.toBeNull();
   });
 });
 
@@ -209,7 +258,7 @@ describe("proactive rate-limit backoff", () => {
       "fetch",
       vi.fn(async () => {
         dataCalls += 1;
-        // remaining 0, reset in 10s (> 5s cap).
+        // remaining 0, reset in 10s (> 3s cap — MAX_RETRY_AFTER_MS).
         return json({ data: [] }, 200, {
           "x-ratelimit-remaining": "0",
           "x-ratelimit-reset": "10",

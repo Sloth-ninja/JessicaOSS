@@ -51,15 +51,20 @@ export function FirmManagedCard({
     title,
     description,
 }: {
-    heading: string;
+    /** Optional page heading. Omit when the caller renders its own heading. */
+    heading?: string;
     title: string;
     description: string;
 }) {
     return (
         <div>
-            <div className="mb-4 flex items-center gap-2">
-                <h2 className="font-serif text-2xl font-medium">{heading}</h2>
-            </div>
+            {heading && (
+                <div className="mb-4 flex items-center gap-2">
+                    <h2 className="font-serif text-2xl font-medium">
+                        {heading}
+                    </h2>
+                </div>
+            )}
             <AccountSection>
                 <div className="flex items-start gap-3 px-4 py-5">
                     <Info className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />

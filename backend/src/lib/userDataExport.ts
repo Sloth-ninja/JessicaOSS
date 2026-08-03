@@ -1,5 +1,6 @@
 import { createServerSupabase } from "./supabase";
 import { isMissingTableOrColumn } from "./companySearchSaves";
+import { getClioConnectionMetadata } from "./clio/connections";
 
 type Db = ReturnType<typeof createServerSupabase>;
 
@@ -187,6 +188,7 @@ export async function buildUserAccountExport(
         tabularChats,
         tabularReviews,
         companySearchSaves,
+        clioConnections,
         sharedProjects,
         sharedTabularReviews,
     ] = await Promise.all([
@@ -237,6 +239,11 @@ export async function buildUserAccountExport(
             "*",
             { tolerateMissing: true },
         ),
+        // The user's Clio connection metadata — TOKEN-FREE (product, display
+        // name/id, scope, expiry, timestamps only; never any encrypted token
+        // material). Tolerant of an unmigrated DB: a missing table yields an
+        // empty section, never a failed export (migration 20260803_01).
+        getClioConnectionMetadata(db, userId),
         userEmail
             ? selectAll(db, "projects", (query) =>
                   query
@@ -294,6 +301,7 @@ export async function buildUserAccountExport(
         tabular_cells: tabularCells,
         tabular_review_chats: tabularChats,
         company_search_saves: companySearchSaves,
+        clio_connections: clioConnections,
         shared_access: {
             projects: sharedProjects,
             tabular_reviews: sharedTabularReviews,
