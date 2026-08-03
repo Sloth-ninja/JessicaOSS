@@ -18,8 +18,16 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-/** Records every token-endpoint request body so PKCE presence can be asserted. */
-function stubClioFetch(tokenBodies: string[]) {
+/**
+ * Records every token-endpoint request body so PKCE presence can be asserted.
+ * `whoAmI` overrides the who_am_i response (default: the Manage {data:{id,name}}
+ * shape) so identity-on-connect and who_am_i-failure paths can be exercised.
+ */
+function stubClioFetch(
+  tokenBodies: string[],
+  whoAmI: () => Response = () =>
+    json({ data: { id: 99, name: "Jane Solicitor" } }),
+) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string | URL, init?: RequestInit) => {
@@ -33,7 +41,7 @@ function stubClioFetch(tokenBodies: string[]) {
         });
       }
       if (u.includes("who_am_i")) {
-        return json({ data: { id: 99, name: "Jane Solicitor" } });
+        return whoAmI();
       }
       return json({}, 404);
     }),
@@ -161,5 +169,32 @@ describe("completeClioOAuth — happy path", () => {
     const state = stateFromAuthorizeUrl(authorizationUrl);
     await completeClioOAuth("grow", state, "the-code", asDb(db));
     expect(bodies[0]).toContain("code_verifier=");
+  });
+
+  it("stores the Grow user identity from who_am_i on connect (defensive shape)", async () => {
+    const db = makeClioDb();
+    // Grow's who_am_i shape differs from Manage's: a top-level record with a
+    // first/last name pair rather than a nested {data:{name}}.
+    stubClioFetch([], () =>
+      json({ id: 5150, first_name: "Ezana", last_name: "Haddis" }),
+    );
+    const { authorizationUrl } = startClioOAuth("user-1", "grow");
+    const state = stateFromAuthorizeUrl(authorizationUrl);
+    const result = await completeClioOAuth("grow", state, "the-code", asDb(db));
+    expect(result.connection.clioUserId).toBe("5150");
+    expect(result.connection.clioUserName).toBe("Ezana Haddis");
+  });
+
+  it("still connects (with a null identity) when who_am_i fails", async () => {
+    const db = makeClioDb();
+    stubClioFetch([], () => json({ error: "boom" }, 500));
+    const { authorizationUrl } = startClioOAuth("user-1", "grow");
+    const state = stateFromAuthorizeUrl(authorizationUrl);
+    const result = await completeClioOAuth("grow", state, "the-code", asDb(db));
+    // The connection is saved regardless of the who_am_i hiccup.
+    expect(result.connection.tokens.accessToken).toBe("access-tok");
+    expect(result.connection.clioUserName).toBeNull();
+    const loaded = await loadClioConnection(asDb(db), "user-1", "grow");
+    expect(loaded).not.toBeNull();
   });
 });

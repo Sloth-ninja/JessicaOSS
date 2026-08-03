@@ -147,34 +147,63 @@ export async function postClioTokenRequest(
 // ---------------------------------------------------------------------------
 
 /**
+ * Pull an {id, name} identity out of a who_am_i object, tolerating shape drift:
+ * a top-level record OR one under `data`/`user`, a single `name` OR a
+ * first_name/last_name pair. Returns null when neither an id nor a name is
+ * present so the caller can fall through to the next candidate shape.
+ */
+function pickIdentity(
+  source: unknown,
+): { id: string | null; name: string | null } | null {
+  if (!source || typeof source !== "object") return null;
+  const o = source as Record<string, unknown>;
+  const id = o.id != null ? String(o.id) : null;
+  let name = typeof o.name === "string" && o.name.trim() ? o.name : null;
+  if (!name) {
+    const first = typeof o.first_name === "string" ? o.first_name : "";
+    const last = typeof o.last_name === "string" ? o.last_name : "";
+    const combined = `${first} ${last}`.trim();
+    name = combined || null;
+  }
+  return id || name ? { id, name } : null;
+}
+
+/**
  * Best-effort identity fetch after a fresh connect, to snapshot
  * clio_user_id/clio_user_name for the connection-status display. Never throws:
- * a failure just leaves the snapshot null (the connection is still valid). Only
- * Manage exposes a verified who_am_i; Grow's is left null (no verified Platform
- * user endpoint at build time — see docs/research/2026-08-03-clio.md).
+ * a who_am_i hiccup just leaves the snapshot null (the connection is still
+ * valid). Both products expose a live-verified who_am_i (spike 03/08):
+ *   - Manage: GET /users/who_am_i.json?fields=id,name  ({data:{id,name}}),
+ *   - Grow:   GET /users/who_am_i  (Platform shape — parsed defensively; the
+ *             response carries the user + account/firm, so shape is tolerated).
  */
 export async function fetchClioIdentity(
   product: ClioProduct,
   accessToken: string,
 ): Promise<{ id: string | null; name: string | null }> {
-  if (product !== "manage") return { id: null, name: null };
   try {
     const { apiBase } = clioHosts(product);
-    const res = await fetch(`${apiBase}/users/who_am_i.json?fields=id,name`, {
+    const url =
+      product === "manage"
+        ? `${apiBase}/users/who_am_i.json?fields=id,name`
+        : `${apiBase}/users/who_am_i`;
+    const res = await fetch(url, {
       headers: {
         Accept: "application/json",
         Authorization: `Bearer ${accessToken}`,
       },
     });
     if (!res.ok) return { id: null, name: null };
-    const json = (await res.json()) as {
-      data?: { id?: unknown; name?: unknown };
-    };
-    const data = json?.data ?? {};
-    return {
-      id: data.id != null ? String(data.id) : null,
-      name: typeof data.name === "string" ? data.name : null,
-    };
+    const json = (await res.json()) as unknown;
+    const obj =
+      json && typeof json === "object" ? (json as Record<string, unknown>) : {};
+    // Manage nests under `data`; Grow may return the user at the top level or
+    // under `data`/`user` — try each, defensively.
+    return (
+      pickIdentity(obj.data) ??
+      pickIdentity(obj.user) ??
+      pickIdentity(obj) ?? { id: null, name: null }
+    );
   } catch (err) {
     console.error("[clio/oauth] who_am_i failed", safeErrorLog(err));
     return { id: null, name: null };

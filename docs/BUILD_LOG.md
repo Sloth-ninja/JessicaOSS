@@ -29,10 +29,11 @@ migration, `.env`, `schema.sql`, or LICENSE touched. Backend `tsc` clean;
 - `oauth.ts` — start/callback for both products with a one-time, TTL'd,
   in-process state store (opaque random state; the PKCE verifier is held
   server-side only, never sent to the browser/Clio); Manage confidential-client
-  (no scope, no PKCE), Grow PKCE S256 + scope; best-effort `who_am_i` on connect
-  (Manage only — no verified Grow user endpoint); best-effort deauthorize on
-  disconnect (local delete proceeds even if revoke fails — the permissions-reuse
-  gotcha).
+  (no scope, no PKCE), Grow PKCE S256 + scope; live-verified `who_am_i` on
+  connect for BOTH products (Manage `/users/who_am_i.json`, Grow
+  `/users/who_am_i` — parsed defensively for shape drift); best-effort
+  deauthorize on disconnect (local delete proceeds even if revoke fails — the
+  permissions-reuse gotcha).
 - `client.ts` — per-user authed fetch: proactive refresh near expiry, single
   refresh+retry on 401, atomic persistence of Grow's rotating refresh token
   BEFORE the new access token is used, `X-API-VERSION` pin on Manage, `fields=`
@@ -91,13 +92,21 @@ path, not-connected, note caps); routes (start/503, status shape, disconnect
 deauthorize+delete, deauthorize-fail-still-deletes, bad-product 400, MFA 403);
 profile serialization (clioConnections default + surfaced).
 
+**Grow endpoint verification (spike 03/08, live token).** LIVE-VERIFIED (200):
+`GET /users/who_am_i`, `GET /matters` (200 rows, verbatim firm statuses
+"Engaged"/"Prospective Client"/"KYC"/"Conflict Check"/"Not Engaged",
+`status_category` hired/declined/intake, `clio_id` on converted matters,
+`is_locked` present), `GET /inbox_leads?state=untriaged`, `GET /users` (102
+users). STILL RESEARCH-BASED (not yet probed): the matter-note read/write
+endpoints (`GET`/`POST /matters/{id}/notes`) and `/contacts` — the two
+tools that touch them (`clio_intake_notes`, `clio_add_intake_note`) should be
+confirmed against a live note before production reliance.
+
 **Owner-pending / deferred.** Owner completes both Clio app registrations + sets
-`CLIO_*` env (Grow registration was still pending per the research doc). Grow
-data-endpoint PATHS are best-effort (only the OAuth flow was live-probed) —
-worth a Grow spike before relying on intake tools in production. The two-user
-permissions test runs at pilot onboarding via each solicitor's first connect
-(owner decision 03/08). Frontend (connectors UI + connect/disconnect flow) is
-PR 3. Do NOT merge without review.
+`CLIO_*` env (Grow registration was still pending per the research doc). The
+two-user permissions test runs at pilot onboarding via each solicitor's first
+connect (owner decision 03/08). Frontend (connectors UI + connect/disconnect
+flow) is PR 3. Do NOT merge without review.
 
 ---
 

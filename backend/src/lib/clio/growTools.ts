@@ -4,10 +4,12 @@
 // leave is a matter note (e.g. a Companies House conflict/KYB summary).
 //
 // Gated on the caller having Clio Grow connected (absent connection => the
-// tools are never offered; the executor re-checks). Grow's data endpoints were
-// not live-probed at build time (only the OAuth flow was) — paths here follow
-// the research doc and are best-effort; failures return a fixed, friendly error
-// rather than leaking raw Clio text.
+// tools are never offered; the executor re-checks). Endpoint verification
+// (spike 03/08, live token): `GET /matters` is LIVE-VERIFIED (verbatim firm
+// statuses, status_category, clio_id). The matter-note read/write endpoints
+// (`GET`/`POST /matters/{id}/notes`) remain research-based — not yet probed
+// against a live note — so those two tools follow the research doc. All
+// failures return a fixed, friendly error rather than leaking raw Clio text.
 
 import type { OpenAIToolSchema } from "../llm";
 import { createServerSupabase } from "../supabase";
