@@ -7,6 +7,22 @@
 
 ---
 
+## 2026-08-03 — Clio pivot: research + decision record (branch `clio-pivot-research`)
+
+**Scope:** docs-only. Records the owner's 03/08 decision to cancel the
+Quill/Unity integration and adopt Clio as the first practice-management
+connector, plus the full two-API research (`docs/research/2026-08-03-clio.md`:
+Manage capability matrix — 7/8 wishlist incl. the documents API Unity lacked,
+honest gaps = no bill creation, no AML service; Grow/"Clio Platform" —
+separate app/portal/OAuth, 19 read-heavy operations, watch/feed/annotate/embed
+against the firm's intake pipeline; EU hosts, scopes, rate limits, spike
+plan). CLAUDE.md Current status updated. Verified against both official
+OpenAPI specs; the firm's "Client Intake in Clio Grow Process" guide informed
+the pipeline mapping. Build gates: owner completes both registrations + env;
+read-only spike (two-user permissions test) is the go/no-go.
+
+---
+
 ## 2026-07-28 — WS9 fix wave: composed-range re-review of firm-visibility × deletion governance (branch `ws9-train-fixes`)
 
 **Scope:** five fixes surfaced by the composed-range multi-lens re-review of the
