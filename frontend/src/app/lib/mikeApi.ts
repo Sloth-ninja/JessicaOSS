@@ -721,6 +721,53 @@ export async function updateConnectorGalleryCuration(
     return data.enabledConnectorIds;
 }
 
+// ── Clio practice-management connector ──────────────────────────────────────
+// Two products (Manage, Grow), each a per-user OAuth connection. Status reports
+// both products; connect and disconnect take a product. Mounts: Manage at
+// `/clio`, Grow at `/clio-grow` (the OAuth start legs are product-bound); the
+// product-agnostic status/disconnect are reachable under either mount.
+
+export type ClioProduct = "manage" | "grow";
+
+export interface ClioProductStatus {
+    connected: boolean;
+    clioUserName: string | null;
+    /** Whether Clio is configured for this product on this deployment. */
+    configured: boolean;
+    /** Manage-only, and omitted when the count could not be read. */
+    mattersVisible?: number;
+}
+
+export interface ClioStatus {
+    manage: ClioProductStatus;
+    grow: ClioProductStatus;
+}
+
+const CLIO_PRODUCT_MOUNT: Record<ClioProduct, string> = {
+    manage: "/clio",
+    grow: "/clio-grow",
+};
+
+export async function getClioStatus(): Promise<ClioStatus> {
+    return apiRequest<ClioStatus>("/clio/status");
+}
+
+/** Mint an authorise URL to begin connecting the user's own Clio login. */
+export async function startClioConnect(
+    product: ClioProduct,
+): Promise<{ authorizationUrl: string }> {
+    return apiRequest<{ authorizationUrl: string }>(
+        `${CLIO_PRODUCT_MOUNT[product]}/oauth/start`,
+    );
+}
+
+/** Disconnect a Clio product (MFA-gated server-side). */
+export async function disconnectClio(product: ClioProduct): Promise<void> {
+    return apiRequest<void>(`/clio/${product}/disconnect`, {
+        method: "POST",
+    });
+}
+
 // ── Firm model configuration (WS8 PR F) ─────────────────────────────────────
 // GET/PATCH /admin/model-config — admin-gated (+ MFA on writes) server-side.
 

@@ -44,6 +44,7 @@ import {
 } from "../accountStyles";
 import { AccountSection } from "../AccountSection";
 import { AccountToggle } from "../AccountToggle";
+import { ClioConnectorCard } from "../ClioConnectorCard";
 import { useUserProfile } from "@/contexts/UserProfileContext";
 import { FirmManagedCard, personalConnectorsBlocked } from "../firmPolicy";
 
@@ -765,6 +766,8 @@ export default function ConnectorsPage() {
                     )}
                 </div>
             </div>
+
+            <ClioConnectorCard />
 
             {error && (
                 <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
