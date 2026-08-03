@@ -37,7 +37,9 @@ remains policy-hidden inside the page. Orgless users were never tab-gated (the
 policy only applies inside a firm), so their behaviour is unchanged; only
 org + policy-OFF users regain the tab, and their page has real content either way.
 
+---
 
+## 2026-08-03 — Clio connector PR 3: frontend (branch `clio-connector-frontend`)
 
 **Scope:** the frontend for the Clio connector — a "Practice management — Clio"
 card at the top of Account › Connectors (above the MCP gallery), per the approved
