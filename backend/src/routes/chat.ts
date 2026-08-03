@@ -21,6 +21,7 @@ import {
     resolveOrgChatModel,
 } from "../lib/userSettings";
 import { checkProjectAccess } from "../lib/access";
+import { listConnectedProducts } from "../lib/clio/connections";
 import { safeErrorLog, safeErrorMessage } from "../lib/safeError";
 import {
     resolveDeletionMode,
@@ -586,12 +587,19 @@ chatRouter.post("/", requireAuth, asyncHandler(async (req, res) => {
         docIndex,
     );
     const { api_keys: apiKeys } = await getUserModelSettings(userId, db);
+    // Clio tools are offered only for products the user has actually connected
+    // (mirrors the researchSources gating). 42P01/42703-tolerant — all-false on
+    // an unmigrated DB, so this never breaks chat.
+    const clioProducts = await listConnectedProducts(db, userId);
     // Research sources: Companies House whenever a key is configured (server
     // env or user key) — no feature toggle; legislation.gov.uk needs no key,
-    // so it's always available (docs/MIGRATION_SPEC.md §6.3).
+    // so it's always available (docs/MIGRATION_SPEC.md §6.3). Clio Manage/Grow
+    // are gated on a live connection.
     const researchSources = {
       companiesHouse: !!apiKeys.companies_house?.trim(),
       legislation: true,
+      clioManage: clioProducts.manage,
+      clioGrow: clioProducts.grow,
     };
     const includeResearchTools = Object.values(researchSources).some(Boolean);
     const apiMessages = buildMessages(
@@ -632,6 +640,7 @@ chatRouter.post("/", requireAuth, asyncHandler(async (req, res) => {
             docStore,
             docIndex,
             userId,
+            userEmail,
             db,
             write,
             workflowStore,

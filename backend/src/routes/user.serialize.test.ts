@@ -68,6 +68,19 @@ describe("serializeProfile — organisation payload shape", () => {
     expect(out.organisation).toBe("Aria Grace Law");
   });
 
+  it("defaults clioConnections to all-disconnected when omitted", () => {
+    const out = serializeProfile(baseRow, undefined, ARIA);
+    expect(out.clioConnections).toEqual({ manage: false, grow: false });
+  });
+
+  it("surfaces the caller's Clio connection status when provided", () => {
+    const out = serializeProfile(baseRow, undefined, ARIA, {
+      manage: true,
+      grow: false,
+    });
+    expect(out.clioConnections).toEqual({ manage: true, grow: false });
+  });
+
   it("carries the firm's policy flags through unchanged", () => {
     const out = serializeProfile(baseRow, undefined, {
       ...ARIA,
