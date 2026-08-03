@@ -715,15 +715,21 @@ export default function ConnectorsPage() {
     );
 
     // Firm policy (WS8 PR B): members whose firm disables custom connectors have
-    // this tab hidden; a direct navigation renders a neutral card rather than the
-    // gallery or an error. Placed after all hooks to respect the rules of hooks.
+    // the MCP gallery hidden; a direct navigation renders a neutral card rather
+    // than the gallery or an error. Placed after all hooks to respect the rules
+    // of hooks. The Clio practice-management card is EXEMPT from this policy
+    // (owner decision 03/08): `memberMcpConnectors` governs custom MCP servers
+    // only, so the Clio card renders above the neutral card for all org users.
     if (personalConnectorsBlocked(profile?.firm)) {
         return (
-            <FirmManagedCard
-                heading="Connectors"
-                title="Managed by your firm"
-                description={`Connectors are managed by ${profile?.firm?.name ?? "your firm"}. Ask your firm admin if you need a new connector added.`}
-            />
+            <div>
+                <ClioConnectorCard />
+                <FirmManagedCard
+                    heading="Connectors"
+                    title="Managed by your firm"
+                    description={`Custom connectors are managed by ${profile?.firm?.name ?? "your firm"}. Ask your firm admin if you need a new connector added.`}
+                />
+            </div>
         );
     }
 

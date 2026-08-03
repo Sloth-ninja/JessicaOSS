@@ -7,7 +7,37 @@
 
 ---
 
-## 2026-08-03 — Clio connector PR 3: frontend (branch `clio-connector-frontend`)
+## 2026-08-03 — Clio exempt from the connectors policy (branch `clio-policy-exemption`)
+
+**Scope:** implement the owner decision (03/08) that the "Members may add custom
+connectors" firm policy (`memberMcpConnectors`) governs **custom MCP servers
+only** — decided pre-Clio — so the Practice management — Clio card must be
+reachable for all org users regardless of that policy. Resolves the open owner
+decision recorded in the PR #64 entry (now TAKEN: exempt). Frontend only; two
+files; backend untouched. `tsc` clean, ESLint clean on changed files.
+
+**Changes.**
+- `connectors/page.tsx` — the `personalConnectorsBlocked` early-return now renders
+  `<ClioConnectorCard />` **above** the neutral `FirmManagedCard` (which stays for
+  the MCP-gallery part), so policy-OFF org users still see the Clio card. The
+  neutral card's copy is narrowed to "Custom connectors are managed by …".
+  Policy-ON and orgless behaviour unchanged (Clio card already rendered inline
+  above the gallery).
+- `account/layout.tsx` — the Connectors tab is now **always visible** (the
+  `personalConnectorsBlocked` filter branch and its import are removed).
+
+**Layout decision — (a) tab always visible.** Chosen over keying tab visibility
+on a clio-configured signal: the profile does not carry configured-ness (the dead
+`clioConnections` field was removed in #64's review), and the layout must not
+fetch `/clio/status` per render. Post-Clio the Connectors page **always** has
+meaningful content for org users — the Clio card when configured, or its honest
+"Clio is not configured on this deployment." line when not — so unconditional
+visibility no longer violates the absence-not-disabled rule; the MCP gallery
+remains policy-hidden inside the page. Orgless users were never tab-gated (the
+policy only applies inside a firm), so their behaviour is unchanged; only
+org + policy-OFF users regain the tab, and their page has real content either way.
+
+
 
 **Scope:** the frontend for the Clio connector — a "Practice management — Clio"
 card at the top of Account › Connectors (above the MCP gallery), per the approved
@@ -64,7 +94,8 @@ Reachability of the Clio card therefore depends on the firm's **live**
 the production DB row — not code-verifiable here); when it is OFF the tab and
 card are hidden for **all** org users, including admins. Whether Clio (a
 practice-management login) should be **exempt** from the custom-connectors policy
-is an **OPEN OWNER DECISION**, recorded here for the deploy gate. (3) A product
+was an open owner decision at the time of this PR — **now TAKEN (exempt),
+implemented in the 03/08 policy-exemption entry above.** (3) A product
 row whose product is not `configured` (while the other is) shows a "Not
 available" pill (title/aria: "Not configured on this deployment.") and no button —
 absence-not-dead-button at the row level.
