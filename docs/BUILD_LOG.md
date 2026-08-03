@@ -7,6 +7,70 @@
 
 ---
 
+## 2026-08-03 — Clio connector PR 3: frontend (branch `clio-connector-frontend`)
+
+**Scope:** the frontend for the Clio connector — a "Practice management — Clio"
+card at the top of Account › Connectors (above the MCP gallery), per the approved
+mock-up (screen 1). Frontend only; no backend/migration/`.env`/LICENSE touched
+(diff is three frontend files). Frontend `tsc` clean; ESLint clean on changed
+files (the 3 pre-existing warnings in `connectors/page.tsx` are unchanged and not
+mine). Backend left untouched and re-verified green: `tsc` clean, `vitest`
+589/589.
+
+**Files.**
+- `frontend/src/app/(pages)/account/ClioConnectorCard.tsx` — NEW, self-contained
+  card (per the 22/07 licensing-optionality rule). Header + two product rows
+  (Clio Manage, Clio Grow) + info strip, copy verbatim from the mock-up. Each
+  row: a coloured-initial tile (Clio blue/teal — a letter tile, not a logo
+  asset), a state pill (green "Connected as {name} · {N} matters visible" —
+  Manage-only count, omitted when the backend omits it; Grow "Connected as
+  {name}"/"Connected"; neutral "Not connected"), and a Connect (primary) or
+  Disconnect (ghost) action. Loading skeleton + a LoadErrorRow-style "Try again"
+  retry (no unbounded spinner). When neither product reports `configured`, the
+  card renders a single honest line ("Clio is not configured on this
+  deployment.") — absence of buttons, not dead buttons. `aria-label`s on the
+  action buttons; UK English throughout.
+- `frontend/src/app/lib/mikeApi.ts` — `getClioStatus`, `startClioConnect(product)`,
+  `disconnectClio(product)` + `ClioProduct`/`ClioProductStatus`/`ClioStatus`
+  types matching the real route shapes; `clioConnections?` added (optional) to
+  `UserProfile`.
+- `frontend/src/app/(pages)/account/connectors/page.tsx` — import + render
+  `<ClioConnectorCard />` at the top of the main return, above the gallery
+  (2-line diff + import).
+
+**Connect flow.** Opens an OAuth popup to the `/oauth/start` authorise URL, then
+resolves by polling `popup.location` for the return to our own origin. **Mock-up
+/ spec deviation (with reason):** the task specified reusing the MCP
+`waitForOAuthPopup` helper as-is, but that helper awaits an `mcp_oauth_result`
+postMessage from the backend origin, whereas the merged backend
+(`routes/clio.ts`) completes the OAuth callback with a server-side **redirect**
+to `/account/connectors?clio=<product>&clioStatus=<connected|error>` — no bridge
+message. A dedicated `waitForClioPopup` therefore keys off that redirect
+(same-origin `popup.location` read; cross-origin reads mid-flow are swallowed),
+which needs no change to the connectors page and matches the real backend
+contract. On success the card re-fetches `/clio/status` and calls
+`reloadProfile()`.
+
+**Disconnect flow.** Ghost button → confirm dialogue (shared `Modal`, danger
+variant) → MFA guard via the existing `needsMfaVerification` + `MfaVerificationPopup`
+pattern; optimistic row flip with rollback on failure and an inline fixed error;
+a server `mfa_verification_required` 403 is caught and replayed after step-up.
+
+**Decisions / deviations.** (1) Popup return-polling instead of the MCP
+postMessage helper — see above. (2) The card lives in the standard connectors
+view; a firm that has switched member connectors OFF replaces the whole tab with
+the existing `FirmManagedCard`, so the Clio card is hidden there too. The pilot
+firm's policy is ON (fail-open default), so no practical impact; flagged for the
+owner in case practice-management logins should be exempt from the MCP-connector
+policy in a follow-up. (3) A product row whose product is not `configured` (while
+the other is) shows the pill only, no Connect button — absence-not-dead-button at
+the row level.
+
+**Deferred:** screenshots for the PR are pending in-browser capture (no local
+Clio credentials in this worktree to exercise the live connected/pill states);
+the not-configured and skeleton/retry states render without credentials. To be
+attached during in-browser QA.
+
 ## 2026-08-03 — Clio connector PR 2: backend (branch `clio-connector-backend`)
 
 **Scope:** the full backend for the Clio connector — a self-contained
