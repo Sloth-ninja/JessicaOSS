@@ -117,6 +117,17 @@ function StatePill({
     status: ClioProductStatus;
 }) {
     if (!status.connected) {
+        if (!status.configured) {
+            return (
+                <span
+                    title="Not configured on this deployment."
+                    aria-label="Not available: not configured on this deployment."
+                    className="inline-flex flex-none items-center rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-medium whitespace-nowrap text-gray-500"
+                >
+                    Not available
+                </span>
+            );
+        }
         return (
             <span className="inline-flex flex-none items-center rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-medium whitespace-nowrap text-gray-500">
                 Not connected

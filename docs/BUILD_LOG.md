@@ -32,8 +32,7 @@ mine). Backend left untouched and re-verified green: `tsc` clean, `vitest`
   action buttons; UK English throughout.
 - `frontend/src/app/lib/mikeApi.ts` — `getClioStatus`, `startClioConnect(product)`,
   `disconnectClio(product)` + `ClioProduct`/`ClioProductStatus`/`ClioStatus`
-  types matching the real route shapes; `clioConnections?` added (optional) to
-  `UserProfile`.
+  types matching the real route shapes.
 - `frontend/src/app/(pages)/account/connectors/page.tsx` — import + render
   `<ClioConnectorCard />` at the top of the main return, above the gallery
   (2-line diff + import).
@@ -59,12 +58,16 @@ a server `mfa_verification_required` 403 is caught and replayed after step-up.
 **Decisions / deviations.** (1) Popup return-polling instead of the MCP
 postMessage helper — see above. (2) The card lives in the standard connectors
 view; a firm that has switched member connectors OFF replaces the whole tab with
-the existing `FirmManagedCard`, so the Clio card is hidden there too. The pilot
-firm's policy is ON (fail-open default), so no practical impact; flagged for the
-owner in case practice-management logins should be exempt from the MCP-connector
-policy in a follow-up. (3) A product row whose product is not `configured` (while
-the other is) shows the pill only, no Connect button — absence-not-dead-button at
-the row level.
+the existing `FirmManagedCard`, so the Clio card is hidden there too.
+Reachability of the Clio card therefore depends on the firm's **live**
+`memberMcpConnectors` policy value (a required boolean on the profile, read from
+the production DB row — not code-verifiable here); when it is OFF the tab and
+card are hidden for **all** org users, including admins. Whether Clio (a
+practice-management login) should be **exempt** from the custom-connectors policy
+is an **OPEN OWNER DECISION**, recorded here for the deploy gate. (3) A product
+row whose product is not `configured` (while the other is) shows a "Not
+available" pill (title/aria: "Not configured on this deployment.") and no button —
+absence-not-dead-button at the row level.
 
 **Deferred:** screenshots for the PR are pending in-browser capture (no local
 Clio credentials in this worktree to exercise the live connected/pill states);

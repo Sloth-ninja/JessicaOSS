@@ -261,9 +261,6 @@ export interface UserProfile {
     tabularModel: string;
     mfaOnLogin: boolean;
     apiKeyStatus: ApiKeyStatus;
-    /** Clio practice-management connection flags (per product). Optional so an
-     * older backend that does not emit them still typechecks. */
-    clioConnections?: { manage: boolean; grow: boolean };
 }
 
 export async function getUserProfile(
