@@ -11,7 +11,8 @@ vi.mock("../lib/llm", () => ({
   resolveModel: (value: string | null, fallback: string) => value ?? fallback,
 }));
 
-import { serializeProfile } from "./user";
+import { errorMessage, serializeProfile } from "./user";
+import { GENERIC_ERROR_DETAIL } from "../lib/safeError";
 import type { OrganisationMembership } from "../lib/organisations";
 
 const baseRow = {
@@ -131,5 +132,36 @@ describe("serializeProfile — firm model policy (WS8 PR F)", () => {
     const out = serializeProfile(baseRow, undefined, ARIA);
     // ARIA has memberModelPrefs on → personal tabular_model applies (echoed).
     expect(out.tabularModel).toBe("gemini-3-flash-preview");
+  });
+});
+
+describe("errorMessage (MCP-connector client detail)", () => {
+  it("keeps a crafted Error's actionable message, redacted, without a code suffix", () => {
+    const err = Object.assign(
+      new Error("Authorisation expired — reconnect the connector."),
+      { code: "mcp_oauth_required" },
+    );
+    // No "(code)" suffix: responses that need a machine-readable code carry
+    // it as a sibling field (the oauth_required 401), so appending it here
+    // would duplicate it in user-visible copy.
+    expect(errorMessage(err)).toBe(
+      "Authorisation expired — reconnect the connector.",
+    );
+
+    const leaky = new Error("Incorrect API key provided: sk-abc123def456ghij.");
+    expect(errorMessage(leaky)).not.toContain("sk-abc123def456ghij");
+  });
+
+  it("degrades raw Supabase plain objects (and other non-Errors) to the fixed generic detail", () => {
+    expect(
+      errorMessage({
+        message: "permission denied for table user_mcp_connectors",
+        details: "Key (user_id)=(0b7c…) is not present",
+        hint: "constraint user_mcp_connectors_user_id_fkey",
+        code: "23503",
+      }),
+    ).toBe(GENERIC_ERROR_DETAIL);
+    expect(errorMessage("raw string")).toBe(GENERIC_ERROR_DETAIL);
+    expect(errorMessage(undefined)).toBe(GENERIC_ERROR_DETAIL);
   });
 });

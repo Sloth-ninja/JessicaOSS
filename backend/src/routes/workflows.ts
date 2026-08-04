@@ -1,6 +1,7 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { requireAuth } from "../middleware/auth";
 import { createServerSupabase } from "../lib/supabase";
+import { failRequest } from "../lib/safeError";
 import {
   resolveDeletionMode,
   tombstoneResource,
@@ -90,7 +91,8 @@ workflowsRouter.get("/", requireAuth, asyncRoute(async (req, res) => {
     p_user_email: userEmail ?? null,
     p_type: typeof type === "string" && type ? type : null,
   });
-  if (error) return void res.status(500).json({ detail: error.message });
+  if (error)
+    return void failRequest(res, "[workflows] overview RPC failed", error);
 
   // The overview RPC does not filter deleted_at (owner-frozen for v1); exclude
   // tombstoned workflows here (WS8 PR G, docs/DELETION_GOVERNANCE_SPEC.md).
@@ -132,7 +134,8 @@ workflowsRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
     })
     .select("*")
     .single();
-  if (error) return void res.status(500).json({ detail: error.message });
+  if (error)
+    return void failRequest(res, "[workflows] workflow insert failed", error);
   res.status(201).json(data);
 }));
 
@@ -214,7 +217,8 @@ workflowsRouter.delete("/:workflowId", requireAuth, asyncRoute(async (req, res) 
     .eq("id", workflowId)
     .eq("user_id", userId)
     .eq("is_system", false);
-  if (error) return void res.status(500).json({ detail: error.message });
+  if (error)
+    return void failRequest(res, "[workflows] workflow delete failed", error);
   res.status(204).send();
 }));
 
@@ -226,7 +230,8 @@ workflowsRouter.get("/hidden", requireAuth, asyncRoute(async (req, res) => {
     .from("hidden_workflows")
     .select("workflow_id")
     .eq("user_id", userId);
-  if (error) return void res.status(500).json({ detail: error.message });
+  if (error)
+    return void failRequest(res, "[workflows] hidden list query failed", error);
   res.json((data ?? []).map((r) => r.workflow_id));
 }));
 
@@ -240,7 +245,8 @@ workflowsRouter.post("/hidden", requireAuth, asyncRoute(async (req, res) => {
   const { error } = await db
     .from("hidden_workflows")
     .upsert({ user_id: userId, workflow_id }, { onConflict: "user_id,workflow_id" });
-  if (error) return void res.status(500).json({ detail: error.message });
+  if (error)
+    return void failRequest(res, "[workflows] hide upsert failed", error);
   res.status(204).send();
 }));
 
@@ -254,7 +260,8 @@ workflowsRouter.delete("/hidden/:workflowId", requireAuth, asyncRoute(async (req
     .delete()
     .eq("user_id", userId)
     .eq("workflow_id", workflowId);
-  if (error) return void res.status(500).json({ detail: error.message });
+  if (error)
+    return void failRequest(res, "[workflows] unhide delete failed", error);
   res.status(204).send();
 }));
 
@@ -299,7 +306,8 @@ workflowsRouter.get("/:workflowId/shares", requireAuth, asyncRoute(async (req, r
     .select("id, shared_with_email, allow_edit, created_at")
     .eq("workflow_id", workflowId)
     .order("created_at", { ascending: true });
-  if (error) return void res.status(500).json({ detail: error.message });
+  if (error)
+    return void failRequest(res, "[workflows] shares query failed", error);
 
   res.json(shares ?? []);
 }));
@@ -369,7 +377,8 @@ workflowsRouter.post("/:workflowId/share", requireAuth, asyncRoute(async (req, r
   const { error } = await db
     .from("workflow_shares")
     .upsert(rows, { onConflict: "workflow_id,shared_with_email" });
-  if (error) return void res.status(500).json({ detail: error.message });
+  if (error)
+    return void failRequest(res, "[workflows] shares upsert failed", error);
 
   res.status(204).send();
 }));

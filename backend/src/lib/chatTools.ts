@@ -30,7 +30,7 @@ import {
   type LlmMessage,
   type OpenAIToolSchema,
 } from "./llm";
-import { safeErrorMessage } from "./safeError";
+import { safeErrorLog, safeErrorMessage } from "./safeError";
 import {
   COMPANIES_HOUSE_SYSTEM_PROMPT,
   COMPANIES_HOUSE_TOOLS,
@@ -3509,6 +3509,11 @@ export async function runLLMStream(params: {
       throw new AssistantStreamAbortError(fullText, events);
     }
     flushPartialTurn();
+    // Log the ORIGINAL error before it is flattened into the client-safe
+    // AssistantStreamError — a Postgrest plain object thrown by a tool would
+    // otherwise be invisible in production logs (the outer routes only log
+    // the wrapper). Error-visibility incident 04/08/2026.
+    console.error("[chat/tools] stream error", safeErrorLog(err));
     const message = safeErrorMessage(err, "Stream error");
     events.push({ type: "error", message });
     throw new AssistantStreamError(message, fullText, events);

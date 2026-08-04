@@ -22,7 +22,7 @@ import {
 } from "../lib/userSettings";
 import { checkProjectAccess } from "../lib/access";
 import { listConnectedProducts } from "../lib/clio/connections";
-import { safeErrorLog, safeErrorMessage } from "../lib/safeError";
+import { failRequest, safeErrorLog, safeErrorMessage } from "../lib/safeError";
 import {
     resolveDeletionMode,
     tombstoneResource,
@@ -174,7 +174,8 @@ chatRouter.get("/", requireAuth, asyncHandler(async (req, res) => {
         p_user_id: userId,
         p_limit: limit,
     });
-    if (error) return void res.status(500).json({ detail: error.message });
+    if (error)
+        return void failRequest(res, "[chat] chats overview RPC failed", error);
     // The overview RPC does not filter deleted_at (owner-frozen for v1); exclude
     // tombstoned chats here (WS8 PR G, docs/DELETION_GOVERNANCE_SPEC.md).
     const rows = (data ?? []) as { id: string }[];
@@ -211,7 +212,7 @@ chatRouter.post("/create", requireAuth, asyncHandler(async (req, res) => {
         .select("id")
         .single();
 
-    if (error) return void res.status(500).json({ detail: error.message });
+    if (error) return void failRequest(res, "[chat] chat insert failed", error);
     res.json({ id: data.id });
 }));
 
@@ -416,7 +417,7 @@ chatRouter.delete("/:chatId", requireAuth, asyncHandler(async (req, res) => {
         .eq("id", chatId)
         .eq("user_id", userId);
 
-    if (error) return void res.status(500).json({ detail: error.message });
+    if (error) return void failRequest(res, "[chat] chat delete failed", error);
     res.status(204).send();
 }));
 

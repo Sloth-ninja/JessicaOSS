@@ -6,6 +6,12 @@ import {
     requireMfaIfEnrolled,
 } from "../middleware/auth";
 import { asyncHandler } from "../lib/asyncHandler";
+import {
+    GENERIC_ERROR_DETAIL,
+    failRequest,
+    redactSensitiveText,
+    safeErrorLog,
+} from "../lib/safeError";
 import { createServerSupabase } from "../lib/supabase";
 import {
     DEFAULT_TABULAR_MODEL,
@@ -113,25 +119,21 @@ type UserProfileRow = {
     mfa_on_login: boolean | null;
 };
 
-function errorMessage(error: unknown): string {
-    if (error instanceof Error && error.message) return error.message;
-    if (error && typeof error === "object") {
-        const record = error as {
-            message?: unknown;
-            details?: unknown;
-            hint?: unknown;
-            code?: unknown;
-        };
-        return (
-            [record.message, record.details, record.hint, record.code]
-                .filter(
-                    (value): value is string =>
-                        typeof value === "string" && !!value,
-                )
-                .join(" ") || JSON.stringify(error)
-        );
+// Client-facing error text for the MCP-connector routes — CLIENT `detail`
+// ONLY, never the log argument (logs use safeErrorLog, which extracts full
+// diagnostics from plain objects). Crafted Error instances (our MCP/OAuth
+// errors) keep their actionable message, redacted; ANYTHING else (raw
+// Supabase plain objects rethrown by libs, strings, primitives) degrades to
+// the fixed generic detail. Never join details/hint from plain objects and
+// never JSON.stringify: constraint names and caller uuids must not reach the
+// browser. No code suffix: responses that need a machine-readable code carry
+// it as a sibling field (e.g. the oauth_required 401). Exported for tests.
+// TODO(follow-up): retire this in favour of the shared safeError helpers.
+export function errorMessage(error: unknown): string {
+    if (error instanceof Error && error.message) {
+        return redactSensitiveText(error.message);
     }
-    return String(error);
+    return GENERIC_ERROR_DETAIL;
 }
 
 function backendPublicUrl(req: {
@@ -555,7 +557,7 @@ async function loadProfile(
     } catch (err) {
         console.error("[user/profile] organisation resolve failed", {
             userId,
-            error: errorMessage(err),
+            error: safeErrorLog(err),
         });
     }
 
@@ -575,7 +577,8 @@ userRouter.post("/profile", requireAuth, asyncHandler(async (_req, res) => {
     const userId = res.locals.userId as string;
     const db = createServerSupabase();
     const error = await ensureProfileRow(db, userId);
-    if (error) return void res.status(500).json({ detail: error.message });
+    if (error)
+        return void failRequest(res, "[user] profile ensure failed", error);
     res.json({ ok: true });
 }));
 
@@ -590,7 +593,8 @@ userRouter.get("/profile", requireAuth, asyncHandler(async (_req, res) => {
         apiKeyStatus,
         clioConnections,
     });
-    if (error) return void res.status(500).json({ detail: error.message });
+    if (error)
+        return void failRequest(res, "[user] profile load failed", error);
     res.json({ ...data, apiKeyStatus: withLocalStatus(apiKeyStatus) });
 }));
 
@@ -640,18 +644,19 @@ userRouter.patch(
     const db = createServerSupabase();
     const ensureError = await ensureProfileRow(db, userId);
     if (ensureError)
-        return void res.status(500).json({ detail: ensureError.message });
+        return void failRequest(res, "[user] profile ensure failed", ensureError);
 
     const { error: updateError } = await db
         .from("user_profiles")
         .update(parsed.update)
         .eq("user_id", userId);
     if (updateError)
-        return void res.status(500).json({ detail: updateError.message });
+        return void failRequest(res, "[user] profile update failed", updateError);
 
     const apiKeyStatus = await getUserApiKeyStatus(userId, db);
     const { data, error } = await loadProfile(db, userId, { apiKeyStatus });
-    if (error) return void res.status(500).json({ detail: error.message });
+    if (error)
+        return void failRequest(res, "[user] profile load failed", error);
     res.json({ ...data, apiKeyStatus: withLocalStatus(apiKeyStatus) });
 }));
 
@@ -670,9 +675,11 @@ userRouter.patch(
         if (parsed.value) {
             const factorCheck = await userHasVerifiedTotpFactor(db, userId);
             if (!factorCheck.ok) {
-                return void res.status(500).json({
-                    detail: factorCheck.error.message,
-                });
+                return void failRequest(
+                    res,
+                    "[user] TOTP factor lookup failed",
+                    factorCheck.error,
+                );
             }
             if (!factorCheck.hasVerifiedTotp) {
                 return void res.status(400).json({
@@ -683,7 +690,11 @@ userRouter.patch(
 
         const ensureError = await ensureProfileRow(db, userId);
         if (ensureError)
-            return void res.status(500).json({ detail: ensureError.message });
+            return void failRequest(
+                res,
+                "[user] profile ensure failed",
+                ensureError,
+            );
 
         const { error: updateError } = await db
             .from("user_profiles")
@@ -693,11 +704,16 @@ userRouter.patch(
             })
             .eq("user_id", userId);
         if (updateError)
-            return void res.status(500).json({ detail: updateError.message });
+            return void failRequest(
+                res,
+                "[user] mfa_on_login update failed",
+                updateError,
+            );
 
         const apiKeyStatus = await getUserApiKeyStatus(userId, db);
         const { data, error } = await loadProfile(db, userId, { apiKeyStatus });
-        if (error) return void res.status(500).json({ detail: error.message });
+        if (error)
+            return void failRequest(res, "[user] profile load failed", error);
         res.json({ ...data, apiKeyStatus: withLocalStatus(apiKeyStatus) });
     },
 ));
@@ -711,7 +727,7 @@ userRouter.get("/api-keys", requireAuth, async (_req, res) => {
         res.json(withLocalStatus(status));
     } catch (err) {
         console.error("[user/api-keys] status failed", {
-            error: errorMessage(err),
+            error: safeErrorLog(err),
         });
         res.status(500).json({ detail: "Could not load API key status." });
     }
@@ -754,7 +770,7 @@ userRouter.put(
         } catch (err) {
             console.error("[user/api-keys] save failed", {
                 provider,
-                error: errorMessage(err),
+                error: safeErrorLog(err),
             });
             // Fixed message only — raw provider/DB errors never reach the client.
             res.status(500).json({ detail: "Could not update API key." });
@@ -848,7 +864,7 @@ userRouter.post(
             console.error("[user/connector-gallery] connect failed", {
                 userId,
                 registryId: entry.id,
-                error: errorMessage(err),
+                error: safeErrorLog(err),
             });
             res.status(400).json({
                 detail: "Could not start connecting this connector.",
@@ -866,12 +882,11 @@ userRouter.get("/mcp-connectors", requireAuth, async (_req, res) => {
             await listUserMcpConnectors(userId, db, { includeTools: false }),
         );
     } catch (err) {
-        const detail = errorMessage(err);
         console.error("[user/mcp-connectors] list failed", {
             userId,
-            error: detail,
+            error: safeErrorLog(err),
         });
-        res.status(500).json({ detail });
+        res.status(500).json({ detail: GENERIC_ERROR_DETAIL });
     }
 });
 
@@ -891,7 +906,7 @@ userRouter.get(
             console.error("[user/mcp-connectors] get failed", {
                 userId,
                 connectorId: req.params.connectorId,
-                error: detail,
+                error: safeErrorLog(err),
             });
             res.status(404).json({ detail });
         }
@@ -937,7 +952,7 @@ userRouter.post(
             const detail = errorMessage(err);
             console.error("[user/mcp-connectors] create failed", {
                 userId,
-                error: detail,
+                error: safeErrorLog(err),
             });
             res.status(400).json({ detail });
         }
@@ -1001,7 +1016,7 @@ userRouter.patch(
             console.error("[user/mcp-connectors] update failed", {
                 userId,
                 connectorId: req.params.connectorId,
-                error: detail,
+                error: safeErrorLog(err),
             });
             res.status(400).json({ detail });
         }
@@ -1024,13 +1039,12 @@ userRouter.delete(
             await deleteUserMcpConnector(userId, req.params.connectorId, db);
             res.status(204).send();
         } catch (err) {
-            const detail = errorMessage(err);
             console.error("[user/mcp-connectors] delete failed", {
                 userId,
                 connectorId: req.params.connectorId,
-                error: detail,
+                error: safeErrorLog(err),
             });
-            res.status(500).json({ detail });
+            res.status(500).json({ detail: GENERIC_ERROR_DETAIL });
         }
     },
 );
@@ -1061,7 +1075,7 @@ userRouter.post(
             console.error("[user/mcp-connectors] oauth start failed", {
                 userId,
                 connectorId: req.params.connectorId,
-                error: detail,
+                error: safeErrorLog(err),
             });
             res.status(400).json({ detail });
         }
@@ -1098,7 +1112,7 @@ userRouter.get("/mcp-connectors/oauth/callback", async (req, res) => {
     } catch (err) {
         const detail = errorMessage(err);
         console.error("[user/mcp-connectors] oauth callback failed", {
-            error: detail,
+            error: safeErrorLog(err),
             stateHash: shortHash(state),
             hasCode: !!code,
             hasError: !!error,
@@ -1136,7 +1150,7 @@ userRouter.post(
             console.error("[user/mcp-connectors] refresh failed", {
                 userId,
                 connectorId: req.params.connectorId,
-                error: detail,
+                error: safeErrorLog(err),
             });
             if (err instanceof McpOAuthRequiredError) {
                 return void res.status(401).json({
@@ -1176,7 +1190,7 @@ userRouter.patch(
                 userId,
                 connectorId: req.params.connectorId,
                 toolId: req.params.toolId,
-                error: detail,
+                error: safeErrorLog(err),
             });
             res.status(400).json({ detail });
         }
@@ -1209,15 +1223,18 @@ userRouter.delete(
             await revokeAllClioGrants(db, userId);
             const { error } = await db.auth.admin.deleteUser(userId);
             if (error)
-                return void res.status(500).json({ detail: error.message });
+                return void failRequest(
+                    res,
+                    "[user] auth user delete failed",
+                    error,
+                );
             res.status(204).send();
         } catch (err) {
-            const detail = errorMessage(err);
             console.error("[user/account] delete failed", {
                 userId,
-                error: detail,
+                error: safeErrorLog(err),
             });
-            res.status(500).json({ detail });
+            res.status(500).json({ detail: GENERIC_ERROR_DETAIL });
         }
     },
 );
@@ -1252,12 +1269,11 @@ userRouter.delete(
             await deleteAllUserChats(db, userId);
             res.status(204).send();
         } catch (err) {
-            const detail = errorMessage(err);
             console.error("[user/chats] delete failed", {
                 userId,
-                error: detail,
+                error: safeErrorLog(err),
             });
-            res.status(500).json({ detail });
+            res.status(500).json({ detail: GENERIC_ERROR_DETAIL });
         }
     },
 );
@@ -1292,12 +1308,11 @@ userRouter.delete(
             await deleteUserProjects(db, userId);
             res.status(204).send();
         } catch (err) {
-            const detail = errorMessage(err);
             console.error("[user/projects] delete failed", {
                 userId,
-                error: detail,
+                error: safeErrorLog(err),
             });
-            res.status(500).json({ detail });
+            res.status(500).json({ detail: GENERIC_ERROR_DETAIL });
         }
     },
 );
@@ -1336,12 +1351,11 @@ userRouter.delete(
             await deleteAllUserTabularReviews(db, userId);
             res.status(204).send();
         } catch (err) {
-            const detail = errorMessage(err);
             console.error("[user/tabular-reviews] delete failed", {
                 userId,
-                error: detail,
+                error: safeErrorLog(err),
             });
-            res.status(500).json({ detail });
+            res.status(500).json({ detail: GENERIC_ERROR_DETAIL });
         }
     },
 );
@@ -1373,9 +1387,11 @@ userRouter.get(
             );
             res.json(data);
         } catch (err) {
-            const detail = errorMessage(err);
-            console.error("[user/export] failed", { userId, error: detail });
-            res.status(500).json({ detail });
+            console.error("[user/export] failed", {
+                userId,
+                error: safeErrorLog(err),
+            });
+            res.status(500).json({ detail: GENERIC_ERROR_DETAIL });
         }
     },
 );
@@ -1405,12 +1421,11 @@ userRouter.get(
             );
             res.json(data);
         } catch (err) {
-            const detail = errorMessage(err);
             console.error("[user/chats/export] failed", {
                 userId,
-                error: detail,
+                error: safeErrorLog(err),
             });
-            res.status(500).json({ detail });
+            res.status(500).json({ detail: GENERIC_ERROR_DETAIL });
         }
     },
 );
@@ -1444,12 +1459,11 @@ userRouter.get(
             );
             res.json(data);
         } catch (err) {
-            const detail = errorMessage(err);
             console.error("[user/tabular-reviews/export] failed", {
                 userId,
-                error: detail,
+                error: safeErrorLog(err),
             });
-            res.status(500).json({ detail });
+            res.status(500).json({ detail: GENERIC_ERROR_DETAIL });
         }
     },
 );

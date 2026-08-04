@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
-import { safeErrorLog } from "./safeError";
+import { GENERIC_ERROR_DETAIL, safeErrorLog } from "./safeError";
 
 /**
  * Wraps an async Express route handler so a rejected promise can never escape
@@ -37,9 +37,7 @@ export function asyncHandler(
         safeErrorLog(err),
       );
       if (!res.headersSent) {
-        res
-          .status(500)
-          .json({ detail: "Something went wrong. Please try again." });
+        res.status(500).json({ detail: GENERIC_ERROR_DETAIL });
       }
     });
   };

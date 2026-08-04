@@ -6,7 +6,7 @@ import {
   resolveUserOrganisation,
   type OrganisationPolicies,
 } from "../lib/organisations";
-import { safeErrorLog } from "../lib/safeError";
+import { GENERIC_ERROR_DETAIL, safeErrorLog } from "../lib/safeError";
 
 const isDev = process.env.NODE_ENV !== "production";
 const devLog = (...args: Parameters<typeof console.log>) => {
@@ -48,15 +48,27 @@ async function enforceLoginMfaIfEnabled(
     .maybeSingle();
 
   if (error) {
-    devLog("[auth/mfa] login preference lookup failed", {
+    // 42703 = mfa_on_login column missing (pre-migration self-hosters): a
+    // tolerated state, logged at dev level only so production isn't spammed
+    // with one console.error per request.
+    if (error.code === "42703") {
+      devLog("[auth/mfa] login preference lookup failed", {
+        method: req.method,
+        path: req.originalUrl,
+        userId: res.locals.userId,
+        error: safeErrorLog(error),
+      });
+      return true;
+    }
+    // console.error (not devLog): this failure path must stay visible in
+    // production logs (error-visibility incident 04/08/2026).
+    console.error("[auth/mfa] login preference lookup failed", {
       method: req.method,
       path: req.originalUrl,
       userId: res.locals.userId,
-      error: error.message,
-      code: error.code,
+      error: safeErrorLog(error),
     });
-    if (error.code === "42703") return true;
-    res.status(500).json({ detail: error.message });
+    res.status(500).json({ detail: GENERIC_ERROR_DETAIL });
     return false;
   }
 
@@ -67,13 +79,13 @@ async function enforceLoginMfaIfEnabled(
     await admin.auth.mfa.getAuthenticatorAssuranceLevel(token);
 
   if (assuranceError) {
-    devLog("[auth/mfa] login assurance lookup failed", {
+    console.error("[auth/mfa] login assurance lookup failed", {
       method: req.method,
       path: req.originalUrl,
       userId: res.locals.userId,
-      error: assuranceError.message,
+      error: safeErrorLog(assuranceError),
     });
-    res.status(401).json({ detail: assuranceError.message });
+    res.status(401).json({ detail: "Invalid or expired token" });
     return false;
   }
 
@@ -198,13 +210,13 @@ export async function requireMfaIfEnrolled(
     await admin.auth.mfa.getAuthenticatorAssuranceLevel(token);
 
   if (error) {
-    devLog("[auth/mfa] assurance lookup failed", {
+    console.error("[auth/mfa] assurance lookup failed", {
       method: req.method,
       path: req.originalUrl,
       userId: res.locals.userId,
-      error: error.message,
+      error: safeErrorLog(error),
     });
-    res.status(401).json({ detail: error.message });
+    res.status(401).json({ detail: "Invalid or expired token" });
     return;
   }
 

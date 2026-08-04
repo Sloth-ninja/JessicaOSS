@@ -7,6 +7,90 @@
 
 ---
 
+## 2026-08-04 — Error-visibility hardening (branch `error-visibility-hardening`)
+
+**Scope:** fix the two defects behind today's production incident where real
+Supabase errors were invisible: (1) `safeErrorLog`/`safeErrorMessage` flattened
+non-`Error` throws (supabase-js PostgrestError plain objects) to the literal
+"Unexpected error" — observed as `[asyncHandler] GET /firm-library failed
+{ name: null, message: 'Unexpected error' }` while the true cause was a missing
+RPC signature; (2) dozens of route sites sent the RAW Supabase/provider error
+message to the browser (`detail: error.message` — a state-leak-rule violation)
+while logging NOTHING server-side, so today's Matters failure was invisible in
+Fly logs. No new deps; no migrations/`.env`/schema/LICENSE touched.
+
+**Key changes.**
+1. **`backend/src/lib/safeError.ts`** — new `messageBearingParts()` extractor,
+   used by **`safeErrorLog` ONLY** (review-forced: extraction is log-only —
+   every `safeErrorMessage` call site is client-facing SSE/persisted-message
+   text, and libs rethrow raw Supabase plain objects into those try blocks, so
+   `safeErrorMessage` keeps its fallback for non-Error objects). For a
+   non-null object with a string `message`, `safeErrorLog` now logs that
+   message, sets `name` from a string `code`, and appends string
+   `details`/`hint` — message, code, details and hint all redacted via
+   `redactSensitiveText`. Only these known string fields are read — the object
+   is never logged wholesale. Behaviour for `Error` instances, strings, and
+   truly unknown shapes is unchanged. Also new: `GENERIC_ERROR_DETAIL`
+   ("Something went wrong. Please try again." — the wording asyncHandler
+   already used, now shared) and `failRequest(res, scope, error, status?,
+   detail?)`, which logs the redacted error server-side and sends a FIXED
+   `detail`. Typed against a structural `JsonResponder` subset so the lib
+   stays dependency-free.
+2. **Backend-wide audit of raw-error-to-client sends** — 56 sites converted to
+   log-server-side + fixed generic detail: `middleware/auth.ts` (3 — the
+   failure-path `devLog`s were also dev-only, so these 401/500 paths logged
+   nothing in production; now `console.error` + fixed details, statuses
+   unchanged; the tolerated 42703 pre-migration case stays at dev-level logging
+   so production isn't spammed per-request), `routes/chat.ts` (3),
+   `routes/projects.ts` (8, incl. the incident's `GET /` overview RPC site),
+   `routes/documents.ts` (6), `routes/tabular.ts` (9), `routes/workflows.ts`
+   (8), `routes/user.ts` (19 — ten `detail: <db error>.message` sites plus
+   nine 500-status catch blocks that sent un-redacted `errorMessage(err)` to
+   the client). `lib/asyncHandler.ts` now uses the shared constant.
+3. **`routes/user.ts` `errorMessage()` hardened at source** (review-forced —
+   the earlier claim that the MCP-connector 400/404 sites were safe was wrong:
+   the helper joined message+details+hint+code from ANY object and fell back
+   to `JSON.stringify`, so raw Postgrest constraint names/uuids could reach
+   the browser). Now CLIENT-`detail`-only: `Error` instances keep their
+   actionable message, redacted (no code suffix — responses needing a
+   machine-readable code carry it as a sibling field, e.g. the oauth_required
+   401); anything else degrades to the fixed generic detail. Crafted MCP/OAuth
+   errors are `Error` instances, so their user-actionable text survives; raw
+   Supabase plain objects rethrown by libs degrade safely. Covers all its call
+   sites (400/404/401 details + OAuth popup HTML). Second-review fix: all 11
+   user.ts sites that used `errorMessage(err)` as the LOG argument now log
+   `safeErrorLog(err)` instead — otherwise plain-object errors would have
+   logged the literal generic sentence, blinding the logs. Exported for tests;
+   follow-up: retire it in favour of the shared safeError helpers.
+   Same-theme: `lib/chatTools.ts` tool-loop catch now
+   `console.error("[chat/tools] stream error", safeErrorLog(err))` before the
+   `AssistantStreamError` rethrow, so a Postgrest object thrown by a tool is
+   visible in production logs (the outer routes only log the wrapper).
+4. **Deliberately left** (hand-written/actionable, not DB/provider text):
+   validation strings ("name is required" etc.), `lib/upload.ts` multer 400s
+   (closed set of request-shape messages), SSE stream error events (already
+   `safeErrorMessage`-redacted by design), `requireMemberPolicy`'s fixed
+   policy `detail` parameter.
+
+**Verification evidence:** `npx tsc --noEmit` clean; full `npx vitest run` 44
+files / **624 tests passing** (604 baseline + 17 new `lib/safeError.test.ts`
+tests — log-path extraction incl. details/hint appending and redaction of
+message/details/hint/code, client-path fallback preservation for object
+errors, unknown-shape fallbacks, `failRequest` log+generic-detail behaviour
+incl. headersSent — + 2 new `routes/user.serialize.test.ts` tests on
+`errorMessage` for both shapes + 1 new `routes/user.test.ts` route-level test
+asserting a representative log site (`GET /user/api-keys`) receives the
+extracted Postgrest diagnostics via `safeErrorLog` while the client gets only
+the fixed detail). Prettier clean on `lib/safeError.ts`,
+`lib/safeError.test.ts`, `lib/asyncHandler.ts`,
+`routes/user.serialize.test.ts`, `routes/user.test.ts`; the 7 touched
+route/middleware files plus `lib/chatTools.ts` already fail `prettier --check`
+at HEAD (upstream 4-space style — verified by stash-check), so hunks were
+hand-matched to each file's existing style rather than reformatting wholesale
+(minimal-diff rule; DURABLE_LESSONS 2026-07-28).
+
+---
+
 ## 2026-08-04 — Clio matter search: status filter + real pagination (branch `clio-matter-search-fix`)
 
 **Scope:** fix the pilot bug found today (screenshot-verified): a solicitor asked

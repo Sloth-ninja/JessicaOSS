@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../lib/asyncHandler";
+import { failRequest } from "../lib/safeError";
 import { createServerSupabase } from "../lib/supabase";
 import { createClient } from "@supabase/supabase-js";
 import {
@@ -162,7 +163,8 @@ projectsRouter.get("/", requireAuth, asyncHandler(async (req, res) => {
     p_user_email: userEmail ?? null,
     p_user_org_id: userOrgId,
   });
-  if (error) return void res.status(500).json({ detail: error.message });
+  if (error)
+    return void failRequest(res, "[projects] overview RPC failed", error);
 
   // The overview RPC does not filter deleted_at (owner-frozen for v1); exclude
   // tombstoned matters here (WS8 PR G, docs/DELETION_GOVERNANCE_SPEC.md).
@@ -213,7 +215,8 @@ projectsRouter.post("/", requireAuth, asyncHandler(async (req, res) => {
     })
     .select("*")
     .single();
-  if (error) return void res.status(500).json({ detail: error.message });
+  if (error)
+    return void failRequest(res, "[projects] matter insert failed", error);
   res.status(201).json({ ...data, documents: [] });
 }));
 
@@ -793,7 +796,8 @@ projectsRouter.get("/:projectId/chats", requireAuth, asyncHandler(async (req, re
     .select("*")
     .eq("project_id", projectId)
     .order("created_at", { ascending: false });
-  if (error) return void res.status(500).json({ detail: error.message });
+  if (error)
+    return void failRequest(res, "[projects] matter chats query failed", error);
   let chats = (data ?? []) as ({ id: string } & {
     user_id?: string | null;
   })[];
@@ -833,7 +837,8 @@ projectsRouter.post("/:projectId/folders", requireAuth, asyncHandler(async (req,
     name: name.trim(),
     parent_folder_id: parent_folder_id ?? null,
   }).select("*").single();
-  if (error) return void res.status(500).json({ detail: error.message });
+  if (error)
+    return void failRequest(res, "[projects] subfolder insert failed", error);
   res.status(201).json(data);
 }));
 
@@ -890,7 +895,11 @@ projectsRouter.delete("/:projectId/folders/:folderId", requireAuth, asyncHandler
     .select("id, parent_folder_id")
     .eq("project_id", projectId);
   if (foldersError)
-    return void res.status(500).json({ detail: foldersError.message });
+    return void failRequest(
+      res,
+      "[projects] subfolder list query failed",
+      foldersError,
+    );
   if (!(allFolders ?? []).some((f) => f.id === folderId))
     return void res.status(404).json({ detail: "Folder not found" });
 
@@ -917,7 +926,12 @@ projectsRouter.delete("/:projectId/folders/:folderId", requireAuth, asyncHandler
     .select("id")
     .eq("project_id", projectId)
     .in("folder_id", [...folderIds]);
-  if (docsError) return void res.status(500).json({ detail: docsError.message });
+  if (docsError)
+    return void failRequest(
+      res,
+      "[projects] folder documents query failed",
+      docsError,
+    );
 
   const docIds = (docs ?? []).map((d) => d.id as string);
   const deleteDocsError = await deleteProjectDocumentsAndVersionFiles(
@@ -926,11 +940,16 @@ projectsRouter.delete("/:projectId/folders/:folderId", requireAuth, asyncHandler
     docIds,
   );
   if (deleteDocsError)
-    return void res.status(500).json({ detail: deleteDocsError.message });
+    return void failRequest(
+      res,
+      "[projects] folder documents delete failed",
+      deleteDocsError,
+    );
 
   const { error } = await db.from("project_subfolders")
     .delete().eq("id", folderId).eq("project_id", projectId);
-  if (error) return void res.status(500).json({ detail: error.message });
+  if (error)
+    return void failRequest(res, "[projects] subfolder delete failed", error);
   res.status(204).send();
 }));
 

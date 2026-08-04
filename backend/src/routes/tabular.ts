@@ -31,7 +31,7 @@ import {
     ensureReviewAccess,
     filterAccessibleDocumentIds,
 } from "../lib/access";
-import { safeErrorLog, safeErrorMessage } from "../lib/safeError";
+import { failRequest, safeErrorLog, safeErrorMessage } from "../lib/safeError";
 import {
     resolveDeletionMode,
     tombstoneResource,
@@ -111,7 +111,12 @@ tabularRouter.get("/", requireAuth, asyncHandler(async (req, res) => {
         p_project_id: projectIdFilter,
         p_user_org_id: userOrgId,
     });
-    if (error) return void res.status(500).json({ detail: error.message });
+    if (error)
+        return void failRequest(
+            res,
+            "[tabular] reviews overview RPC failed",
+            error,
+        );
 
     // The overview RPC does not filter deleted_at (owner-frozen for v1); exclude
     // tombstoned reviews here (WS8 PR G, docs/DELETION_GOVERNANCE_SPEC.md).
@@ -167,9 +172,13 @@ tabularRouter.post("/", requireAuth, asyncHandler(async (req, res) => {
         .select("*")
         .single();
     if (error || !review)
-        return void res
-            .status(500)
-            .json({ detail: error?.message ?? "Failed to create review" });
+        return void failRequest(
+            res,
+            "[tabular] review insert failed",
+            error ?? new Error("review insert returned no row"),
+            500,
+            "Failed to create review",
+        );
 
     const cells = allowedDocumentIds.flatMap((docId) =>
         columns_config.map((col) => ({
@@ -499,9 +508,13 @@ tabularRouter.patch("/:reviewId", requireAuth, asyncHandler(async (req, res) => 
         .select("*")
         .single();
     if (updateError || !updatedReview)
-        return void res.status(500).json({
-            detail: updateError?.message ?? "Failed to update review",
-        });
+        return void failRequest(
+            res,
+            "[tabular] review update failed",
+            updateError ?? new Error("review update returned no row"),
+            500,
+            "Failed to update review",
+        );
 
     let persistedDocumentIds: string[] | undefined;
     if (
@@ -551,9 +564,11 @@ tabularRouter.patch("/:reviewId", requireAuth, asyncHandler(async (req, res) => 
                     .eq("review_id", reviewId)
                     .in("document_id", removedDocIds);
                 if (deleteError)
-                    return void res
-                        .status(500)
-                        .json({ detail: deleteError.message });
+                    return void failRequest(
+                        res,
+                        "[tabular] removed-document cells delete failed",
+                        deleteError,
+                    );
             }
 
             documentIds = newDocIds;
@@ -576,9 +591,11 @@ tabularRouter.patch("/:reviewId", requireAuth, asyncHandler(async (req, res) => 
                 })
                 .eq("id", reviewId);
             if (documentIdsError)
-                return void res.status(500).json({
-                    detail: documentIdsError.message,
-                });
+                return void failRequest(
+                    res,
+                    "[tabular] document_ids update failed",
+                    documentIdsError,
+                );
         }
 
         const activeColumns = Array.isArray(req.body.columns_config)
@@ -603,9 +620,11 @@ tabularRouter.patch("/:reviewId", requireAuth, asyncHandler(async (req, res) => 
                 .from("tabular_cells")
                 .insert(newCells);
             if (insertError)
-                return void res
-                    .status(500)
-                    .json({ detail: insertError.message });
+                return void failRequest(
+                    res,
+                    "[tabular] cells insert failed",
+                    insertError,
+                );
         }
     }
 
@@ -721,7 +740,8 @@ tabularRouter.delete("/:reviewId", requireAuth, asyncHandler(async (req, res) =>
         .delete()
         .eq("id", reviewId)
         .eq("user_id", userId);
-    if (error) return void res.status(500).json({ detail: error.message });
+    if (error)
+        return void failRequest(res, "[tabular] review delete failed", error);
     res.status(204).send();
 }));
 
@@ -756,7 +776,8 @@ tabularRouter.post("/:reviewId/clear-cells", requireAuth, asyncHandler(async (re
         .update({ content: null, status: "pending" })
         .eq("review_id", reviewId)
         .in("document_id", document_ids);
-    if (error) return void res.status(500).json({ detail: error.message });
+    if (error)
+        return void failRequest(res, "[tabular] cells reset failed", error);
     res.status(204).send();
 }));
 
@@ -1139,7 +1160,12 @@ tabularRouter.delete(
             .delete()
             .eq("id", chatId)
             .eq("user_id", userId);
-        if (error) return void res.status(500).json({ detail: error.message });
+        if (error)
+            return void failRequest(
+                res,
+                "[tabular] review chat delete failed",
+                error,
+            );
         res.status(204).send();
     },
 ));

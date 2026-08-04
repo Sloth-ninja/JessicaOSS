@@ -28,9 +28,8 @@ vi.mock("../middleware/auth", () => ({
   // Firm-policy gate is a factory returning a middleware; pass-through here so
   // these route tests exercise handler behaviour (enforcement is covered in
   // middleware/auth.policy.test.ts).
-  requireMemberPolicy:
-    () => (_req: unknown, _res: unknown, next: () => void) =>
-      next(),
+  requireMemberPolicy: () => (_req: unknown, _res: unknown, next: () => void) =>
+    next(),
 }));
 
 // getUserApiKeyStatus is the call that threw in production when the
@@ -141,5 +140,46 @@ describe("GET /user/profile — async-handler safety net", () => {
     // The raw Postgres error text must never reach the client.
     expect(JSON.stringify(body)).not.toContain("42501");
     expect(JSON.stringify(body)).not.toContain("permission denied");
+  });
+});
+
+describe("GET /user/api-keys — log visibility for plain-object errors", () => {
+  it("logs the extracted Postgrest diagnostics server-side and sends only the fixed detail", async () => {
+    // Error-visibility incident 04/08/2026: supabase-js rejects with a PLAIN
+    // object (not an Error). The log argument must go through safeErrorLog so
+    // the real message/code/details/hint stay visible in production logs; the
+    // client gets only the fixed detail.
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    try {
+      vi.mocked(getUserApiKeyStatus).mockRejectedValue({
+        message: "permission denied for table user_api_keys",
+        code: "42501",
+        hint: "GRANT to service_role",
+      });
+
+      const res = await fetch(`${baseUrl}/user/api-keys`, {
+        headers: { Authorization: "Bearer test" },
+      });
+      const body = await res.json();
+
+      expect(res.status).toBe(500);
+      expect(body).toEqual({ detail: "Could not load API key status." });
+
+      expect(consoleError).toHaveBeenCalledWith(
+        "[user/api-keys] status failed",
+        {
+          error: {
+            name: "42501",
+            message:
+              "permission denied for table user_api_keys" +
+              " | hint: GRANT to service_role",
+          },
+        },
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });
