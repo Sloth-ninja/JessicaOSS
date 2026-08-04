@@ -27,6 +27,41 @@ Quill/Unity + HMLR integration briefs).
 Deploy gotchas are in DURABLE_LESSONS (OpenNext packager/bun.lock, wrangler
 autoconfig delegation, piped-exit-code trap, Express-async crash class).
 
+## 0. CURRENT PICKUP — 4 August 2026 (read this, then CLAUDE.md Current status)
+
+State: everything through PR #68 is merged + deployed + live. Clio connector
+v1 shipped (#62–#66) and survived first pilot contact: the 03/08 incident
+(production minted 127.0.0.1 OAuth redirects because `API_PUBLIC_URL` was
+unset on Fly) was fixed operationally (`fly secrets set … API_PUBLIC_URL=…`)
+and structurally (#68 fail-closed guard + DURABLE_LESSONS entry). WS9 firm
+library ACTIVE in production. All migrations through `20260803_01` run in
+production Supabase.
+
+**Live pilot threads (chase, verify, don't rebuild):**
+1. Lindsay Healy + the owner's second account were created via Supabase
+   "Create new user" (invite emails were quarantined by the firm's Microsoft
+   365 — owner has the M365 allow-list + Cloudflare DMARC fixes as pending
+   actions; invite flow unverified since). Lindsay's Clio reconnect after the
+   incident fix was pending at session end — FIRST ASK: did it work, and does
+   her "matters visible" count differ from the owner's as expected? That is
+   the pilot's per-user permissions verification (owner decision: it happens
+   via the card, not a spike).
+2. Grow intake-notes tools (clio_intake_notes / clio_add_intake_note) are the
+   one research-based (not live-verified) surface — verify on first real use.
+3. Remaining ~5 pilot lawyers join after the office two are happy.
+
+**Owner-pending (unchanged):** M365 quarantine release + allow-list; DMARC
+TXT record on jessicaoss.com; HMLR channel-partner email (drafted in-session
+28/07, never sent); solicitor sign-offs per §5 below.
+
+**Next roadmap (owner order):** saved tabular schemas → Playbooks → Word
+add-in. Spec → mock-up → build for new surfaces; all work through the
+standard gates (independent review + 3 CI checks + BUILD_LOG entry; composed-
+range review after any multi-PR train — it has caught a real cross-module
+defect on every train to date).
+
+---
+
 > **RESOLVED 28 July 2026:** everything in §3a completed. PR E merged (#40) and
 > deployed; the composed-range review ran (0 Critical/Important, minors fixed
 > #43); migration #44 owner-authorised; PR F merged (#45, incl. a review-forced
