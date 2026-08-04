@@ -119,23 +119,19 @@ type UserProfileRow = {
     mfa_on_login: boolean | null;
 };
 
-// Client-facing error text for the MCP-connector routes. Crafted Error
-// instances (our MCP/OAuth errors) keep their actionable message — redacted —
-// with a string `code` appended when present; ANYTHING else (raw Supabase
-// plain objects rethrown by libs, strings, primitives) degrades to the fixed
-// generic detail. Never join details/hint from plain objects and never
-// JSON.stringify: constraint names and caller uuids must not reach the
-// browser. Full diagnostics belong in the server logs via safeErrorLog.
-// Exported for tests. TODO(follow-up): retire this in favour of the shared
-// safeError helpers.
+// Client-facing error text for the MCP-connector routes — CLIENT `detail`
+// ONLY, never the log argument (logs use safeErrorLog, which extracts full
+// diagnostics from plain objects). Crafted Error instances (our MCP/OAuth
+// errors) keep their actionable message, redacted; ANYTHING else (raw
+// Supabase plain objects rethrown by libs, strings, primitives) degrades to
+// the fixed generic detail. Never join details/hint from plain objects and
+// never JSON.stringify: constraint names and caller uuids must not reach the
+// browser. No code suffix: responses that need a machine-readable code carry
+// it as a sibling field (e.g. the oauth_required 401). Exported for tests.
+// TODO(follow-up): retire this in favour of the shared safeError helpers.
 export function errorMessage(error: unknown): string {
     if (error instanceof Error && error.message) {
-        const code = (error as { code?: unknown }).code;
-        const withCode =
-            typeof code === "string" && code
-                ? `${error.message} (${code})`
-                : error.message;
-        return redactSensitiveText(withCode);
+        return redactSensitiveText(error.message);
     }
     return GENERIC_ERROR_DETAIL;
 }
@@ -561,7 +557,7 @@ async function loadProfile(
     } catch (err) {
         console.error("[user/profile] organisation resolve failed", {
             userId,
-            error: errorMessage(err),
+            error: safeErrorLog(err),
         });
     }
 
@@ -731,7 +727,7 @@ userRouter.get("/api-keys", requireAuth, async (_req, res) => {
         res.json(withLocalStatus(status));
     } catch (err) {
         console.error("[user/api-keys] status failed", {
-            error: errorMessage(err),
+            error: safeErrorLog(err),
         });
         res.status(500).json({ detail: "Could not load API key status." });
     }
@@ -774,7 +770,7 @@ userRouter.put(
         } catch (err) {
             console.error("[user/api-keys] save failed", {
                 provider,
-                error: errorMessage(err),
+                error: safeErrorLog(err),
             });
             // Fixed message only — raw provider/DB errors never reach the client.
             res.status(500).json({ detail: "Could not update API key." });
@@ -868,7 +864,7 @@ userRouter.post(
             console.error("[user/connector-gallery] connect failed", {
                 userId,
                 registryId: entry.id,
-                error: errorMessage(err),
+                error: safeErrorLog(err),
             });
             res.status(400).json({
                 detail: "Could not start connecting this connector.",
@@ -910,7 +906,7 @@ userRouter.get(
             console.error("[user/mcp-connectors] get failed", {
                 userId,
                 connectorId: req.params.connectorId,
-                error: detail,
+                error: safeErrorLog(err),
             });
             res.status(404).json({ detail });
         }
@@ -956,7 +952,7 @@ userRouter.post(
             const detail = errorMessage(err);
             console.error("[user/mcp-connectors] create failed", {
                 userId,
-                error: detail,
+                error: safeErrorLog(err),
             });
             res.status(400).json({ detail });
         }
@@ -1020,7 +1016,7 @@ userRouter.patch(
             console.error("[user/mcp-connectors] update failed", {
                 userId,
                 connectorId: req.params.connectorId,
-                error: detail,
+                error: safeErrorLog(err),
             });
             res.status(400).json({ detail });
         }
@@ -1079,7 +1075,7 @@ userRouter.post(
             console.error("[user/mcp-connectors] oauth start failed", {
                 userId,
                 connectorId: req.params.connectorId,
-                error: detail,
+                error: safeErrorLog(err),
             });
             res.status(400).json({ detail });
         }
@@ -1116,7 +1112,7 @@ userRouter.get("/mcp-connectors/oauth/callback", async (req, res) => {
     } catch (err) {
         const detail = errorMessage(err);
         console.error("[user/mcp-connectors] oauth callback failed", {
-            error: detail,
+            error: safeErrorLog(err),
             stateHash: shortHash(state),
             hasCode: !!code,
             hasError: !!error,
@@ -1154,7 +1150,7 @@ userRouter.post(
             console.error("[user/mcp-connectors] refresh failed", {
                 userId,
                 connectorId: req.params.connectorId,
-                error: detail,
+                error: safeErrorLog(err),
             });
             if (err instanceof McpOAuthRequiredError) {
                 return void res.status(401).json({
@@ -1194,7 +1190,7 @@ userRouter.patch(
                 userId,
                 connectorId: req.params.connectorId,
                 toolId: req.params.toolId,
-                error: detail,
+                error: safeErrorLog(err),
             });
             res.status(400).json({ detail });
         }

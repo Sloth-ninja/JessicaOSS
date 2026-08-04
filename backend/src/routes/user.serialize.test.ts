@@ -136,13 +136,16 @@ describe("serializeProfile — firm model policy (WS8 PR F)", () => {
 });
 
 describe("errorMessage (MCP-connector client detail)", () => {
-  it("keeps a crafted Error's actionable message, redacted, with a string code appended", () => {
+  it("keeps a crafted Error's actionable message, redacted, without a code suffix", () => {
     const err = Object.assign(
       new Error("Authorisation expired — reconnect the connector."),
       { code: "mcp_oauth_required" },
     );
+    // No "(code)" suffix: responses that need a machine-readable code carry
+    // it as a sibling field (the oauth_required 401), so appending it here
+    // would duplicate it in user-visible copy.
     expect(errorMessage(err)).toBe(
-      "Authorisation expired — reconnect the connector. (mcp_oauth_required)",
+      "Authorisation expired — reconnect the connector.",
     );
 
     const leaky = new Error("Incorrect API key provided: sk-abc123def456ghij.");

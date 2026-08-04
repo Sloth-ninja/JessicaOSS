@@ -51,13 +51,21 @@ Fly logs. No new deps; no migrations/`.env`/schema/LICENSE touched.
    the earlier claim that the MCP-connector 400/404 sites were safe was wrong:
    the helper joined message+details+hint+code from ANY object and fell back
    to `JSON.stringify`, so raw Postgrest constraint names/uuids could reach
-   the browser). Now: `Error` instances keep their actionable message —
-   redacted, string `code` appended — and anything else degrades to the fixed
-   generic detail. Crafted MCP/OAuth errors are `Error` instances, so their
-   user-actionable text survives; raw Supabase plain objects rethrown by libs
-   degrade safely. Covers all its call sites (400/404/401 details + OAuth
-   popup HTML). Exported for tests; follow-up: retire it in favour of the
-   shared safeError helpers.
+   the browser). Now CLIENT-`detail`-only: `Error` instances keep their
+   actionable message, redacted (no code suffix — responses needing a
+   machine-readable code carry it as a sibling field, e.g. the oauth_required
+   401); anything else degrades to the fixed generic detail. Crafted MCP/OAuth
+   errors are `Error` instances, so their user-actionable text survives; raw
+   Supabase plain objects rethrown by libs degrade safely. Covers all its call
+   sites (400/404/401 details + OAuth popup HTML). Second-review fix: all 11
+   user.ts sites that used `errorMessage(err)` as the LOG argument now log
+   `safeErrorLog(err)` instead — otherwise plain-object errors would have
+   logged the literal generic sentence, blinding the logs. Exported for tests;
+   follow-up: retire it in favour of the shared safeError helpers.
+   Same-theme: `lib/chatTools.ts` tool-loop catch now
+   `console.error("[chat/tools] stream error", safeErrorLog(err))` before the
+   `AssistantStreamError` rethrow, so a Postgrest object thrown by a tool is
+   visible in production logs (the outer routes only log the wrapper).
 4. **Deliberately left** (hand-written/actionable, not DB/provider text):
    validation strings ("name is required" etc.), `lib/upload.ts` multer 400s
    (closed set of request-shape messages), SSE stream error events (already
@@ -65,17 +73,21 @@ Fly logs. No new deps; no migrations/`.env`/schema/LICENSE touched.
    policy `detail` parameter.
 
 **Verification evidence:** `npx tsc --noEmit` clean; full `npx vitest run` 44
-files / **623 tests passing** (604 baseline + 17 new `lib/safeError.test.ts`
+files / **624 tests passing** (604 baseline + 17 new `lib/safeError.test.ts`
 tests — log-path extraction incl. details/hint appending and redaction of
 message/details/hint/code, client-path fallback preservation for object
 errors, unknown-shape fallbacks, `failRequest` log+generic-detail behaviour
 incl. headersSent — + 2 new `routes/user.serialize.test.ts` tests on
-`errorMessage` for both shapes). Prettier clean on `lib/safeError.ts`,
+`errorMessage` for both shapes + 1 new `routes/user.test.ts` route-level test
+asserting a representative log site (`GET /user/api-keys`) receives the
+extracted Postgrest diagnostics via `safeErrorLog` while the client gets only
+the fixed detail). Prettier clean on `lib/safeError.ts`,
 `lib/safeError.test.ts`, `lib/asyncHandler.ts`,
-`routes/user.serialize.test.ts`; the 7 touched route/middleware files already
-fail `prettier --check` at HEAD (upstream 4-space style — verified by
-stash-check), so hunks were hand-matched to each file's existing style rather
-than reformatting wholesale (minimal-diff rule; DURABLE_LESSONS 2026-07-28).
+`routes/user.serialize.test.ts`, `routes/user.test.ts`; the 7 touched
+route/middleware files plus `lib/chatTools.ts` already fail `prettier --check`
+at HEAD (upstream 4-space style — verified by stash-check), so hunks were
+hand-matched to each file's existing style rather than reformatting wholesale
+(minimal-diff rule; DURABLE_LESSONS 2026-07-28).
 
 ---
 
