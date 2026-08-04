@@ -45,7 +45,9 @@ production Supabase.
    incident fix was pending at session end — FIRST ASK: did it work, and does
    her "matters visible" count differ from the owner's as expected? That is
    the pilot's per-user permissions verification (owner decision: it happens
-   via the card, not a spike).
+   via the card, not a spike). **RESOLVED 04/08/2026: reconnect succeeded and
+   the counts differ as expected — verification PASSES (BUILD_LOG entry
+   2026-08-04 "Pilot verification").**
 2. Grow intake-notes tools (clio_intake_notes / clio_add_intake_note) are the
    one research-based (not live-verified) surface — verify on first real use.
 3. Remaining ~5 pilot lawyers join after the office two are happy.

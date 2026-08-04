@@ -7,6 +7,36 @@
 
 ---
 
+## 2026-08-04 — Pilot verification: Clio per-user permissions confirmed (branch `pilot-verification-aug4`)
+
+**Scope:** record the outcome of the pilot's first per-user permissions
+verification (owner decision: it runs via the Connectors card, not a spike).
+Docs-only; no code changes.
+
+**Outcome (owner-reported, 04/08/2026):**
+1. **Lindsay Healy's Clio reconnect SUCCEEDED** after the `API_PUBLIC_URL`
+   incident fix (#68 + the Fly secret). Her Account → Connectors card shows
+   Connected with a matters-visible count — the production authorise→callback
+   round-trip now works from a non-dev machine, closing the loop on the
+   03/08 incident.
+2. **Per-user permissions verification PASSES:** Lindsay's "matters visible"
+   count differs from the owner's, as expected — each connection sees only its
+   own Clio user's matters. This was the owner-designated confidentiality
+   check for Clio v1 (CLAUDE.md Current status, HANDOVER §0.1). The remaining
+   ~5 pilot lawyers can join once the office two are happy.
+
+**Still outstanding (unchanged, owner actions):** M365 quarantine release +
+tenant allow-list for jessicaoss.com; DMARC TXT record in Cloudflare; HMLR
+channel-partner email (drafted 28/07, unsent). Invite-email flow remains
+unverified until the M365 fixes land. The Grow intake-notes chat tools
+(`clio_intake_notes` / `clio_add_intake_note`) remain the one
+research-based, not-live-verified surface — verify on first real use.
+
+**Verification evidence:** owner confirmation in-session 04/08 (Connected
+status + differing matters counts observed on both accounts). Live checks
+same session: jessicaoss.com HTTP 200, `api.jessicaoss.com/health` ok, no
+open PRs.
+
 ## 2026-08-04 — OAuth callback-base production guard (branch `oauth-base-hardening`)
 
 **Scope:** make the 03/08 Clio redirect-URI incident fail loud and closed instead
