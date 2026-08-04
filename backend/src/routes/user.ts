@@ -9,6 +9,7 @@ import { asyncHandler } from "../lib/asyncHandler";
 import {
     GENERIC_ERROR_DETAIL,
     failRequest,
+    redactSensitiveText,
     safeErrorLog,
 } from "../lib/safeError";
 import { createServerSupabase } from "../lib/supabase";
@@ -118,25 +119,25 @@ type UserProfileRow = {
     mfa_on_login: boolean | null;
 };
 
-function errorMessage(error: unknown): string {
-    if (error instanceof Error && error.message) return error.message;
-    if (error && typeof error === "object") {
-        const record = error as {
-            message?: unknown;
-            details?: unknown;
-            hint?: unknown;
-            code?: unknown;
-        };
-        return (
-            [record.message, record.details, record.hint, record.code]
-                .filter(
-                    (value): value is string =>
-                        typeof value === "string" && !!value,
-                )
-                .join(" ") || JSON.stringify(error)
-        );
+// Client-facing error text for the MCP-connector routes. Crafted Error
+// instances (our MCP/OAuth errors) keep their actionable message — redacted —
+// with a string `code` appended when present; ANYTHING else (raw Supabase
+// plain objects rethrown by libs, strings, primitives) degrades to the fixed
+// generic detail. Never join details/hint from plain objects and never
+// JSON.stringify: constraint names and caller uuids must not reach the
+// browser. Full diagnostics belong in the server logs via safeErrorLog.
+// Exported for tests. TODO(follow-up): retire this in favour of the shared
+// safeError helpers.
+export function errorMessage(error: unknown): string {
+    if (error instanceof Error && error.message) {
+        const code = (error as { code?: unknown }).code;
+        const withCode =
+            typeof code === "string" && code
+                ? `${error.message} (${code})`
+                : error.message;
+        return redactSensitiveText(withCode);
     }
-    return String(error);
+    return GENERIC_ERROR_DETAIL;
 }
 
 function backendPublicUrl(req: {

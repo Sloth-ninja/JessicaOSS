@@ -58,12 +58,16 @@ export function safeErrorMessage(
   error: unknown,
   fallback = "Unexpected error",
 ): string {
+  // Deliberately NO messageBearingParts extraction here: every call site is
+  // client-facing (SSE error events, persisted chat messages), and libs rethrow
+  // raw Supabase plain objects — extraction is for the LOG path (safeErrorLog)
+  // only, so DB error text never reaches the client through this helper.
   const message =
     error instanceof Error && error.message
       ? error.message
       : typeof error === "string"
         ? error
-        : (messageBearingParts(error)?.message ?? fallback);
+        : fallback;
   return redactSensitiveText(message);
 }
 
@@ -85,7 +89,7 @@ export function safeErrorLog(error: unknown): {
     if (parts.details) message += ` | details: ${parts.details}`;
     if (parts.hint) message += ` | hint: ${parts.hint}`;
     return {
-      name: parts.code,
+      name: parts.code ? redactSensitiveText(parts.code) : null,
       message: redactSensitiveText(message),
     };
   }

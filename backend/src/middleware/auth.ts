@@ -48,6 +48,18 @@ async function enforceLoginMfaIfEnabled(
     .maybeSingle();
 
   if (error) {
+    // 42703 = mfa_on_login column missing (pre-migration self-hosters): a
+    // tolerated state, logged at dev level only so production isn't spammed
+    // with one console.error per request.
+    if (error.code === "42703") {
+      devLog("[auth/mfa] login preference lookup failed", {
+        method: req.method,
+        path: req.originalUrl,
+        userId: res.locals.userId,
+        error: safeErrorLog(error),
+      });
+      return true;
+    }
     // console.error (not devLog): this failure path must stay visible in
     // production logs (error-visibility incident 04/08/2026).
     console.error("[auth/mfa] login preference lookup failed", {
@@ -56,7 +68,6 @@ async function enforceLoginMfaIfEnabled(
       userId: res.locals.userId,
       error: safeErrorLog(error),
     });
-    if (error.code === "42703") return true;
     res.status(500).json({ detail: GENERIC_ERROR_DETAIL });
     return false;
   }

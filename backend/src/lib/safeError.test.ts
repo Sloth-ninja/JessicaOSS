@@ -36,23 +36,24 @@ describe("safeErrorMessage", () => {
     expect(safeErrorMessage(null, "Stream error")).toBe("Stream error");
   });
 
-  it("uses the message of a PostgrestError-shaped plain object", () => {
+  it("keeps the fallback for PostgrestError-shaped plain objects (client path — extraction is log-only)", () => {
+    // safeErrorMessage feeds client-facing SSE events and persisted chat
+    // messages; raw DB text must never surface there. The diagnostic
+    // extraction lives in safeErrorLog only.
     expect(
       safeErrorMessage({
-        message: "function get_projects_overview(uuid) does not exist",
-        code: "42883",
+        message: "permission denied for table user_api_keys",
+        code: "42501",
         details: null,
-        hint: "No function matches the given name and argument types.",
+        hint: "Re-grant privileges to service_role.",
       }),
-    ).toBe("function get_projects_overview(uuid) does not exist");
-  });
-
-  it("redacts secrets in an object-borne message", () => {
-    const message = safeErrorMessage({
-      message: "Incorrect API key provided: sk-abc123def456ghij.",
-    });
-    expect(message).not.toContain("sk-abc123def456ghij");
-    expect(message).toContain("[redacted]");
+    ).toBe("Unexpected error");
+    expect(
+      safeErrorMessage(
+        { message: "permission denied for table user_api_keys" },
+        "Stream error",
+      ),
+    ).toBe("Stream error");
   });
 });
 
@@ -127,6 +128,15 @@ describe("safeErrorLog", () => {
       hint: "check the key sk-abc123def456ghij",
     });
     expect(logged.message).not.toContain("sk-abc123def456ghij");
+  });
+
+  it("redacts the code field too", () => {
+    const logged = safeErrorLog({
+      message: "boom",
+      code: "sk-abc123def456ghij",
+    });
+    expect(logged.name).not.toContain("sk-abc123def456ghij");
+    expect(logged.name).toContain("[redacted]");
   });
 });
 

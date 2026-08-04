@@ -20,44 +20,62 @@ while logging NOTHING server-side, so today's Matters failure was invisible in
 Fly logs. No new deps; no migrations/`.env`/schema/LICENSE touched.
 
 **Key changes.**
-1. **`backend/src/lib/safeError.ts`** — new `messageBearingParts()` extractor:
-   for a non-null object with a string `message`, `safeErrorMessage` now uses
-   that message (redacted) and `safeErrorLog` additionally sets `name` from a
-   string `code` and appends string `details`/`hint` (all redacted) to the
-   logged message. Only these known string fields are read — the object is
-   never logged wholesale. Behaviour for `Error` instances, strings, and truly
-   unknown shapes is unchanged. Also new: `GENERIC_ERROR_DETAIL` ("Something
-   went wrong. Please try again." — the wording asyncHandler already used, now
-   shared) and `failRequest(res, scope, error, status?, detail?)`, which logs
-   the redacted error server-side and sends a FIXED `detail`. Typed against a
-   structural `JsonResponder` subset so the lib stays dependency-free.
+1. **`backend/src/lib/safeError.ts`** — new `messageBearingParts()` extractor,
+   used by **`safeErrorLog` ONLY** (review-forced: extraction is log-only —
+   every `safeErrorMessage` call site is client-facing SSE/persisted-message
+   text, and libs rethrow raw Supabase plain objects into those try blocks, so
+   `safeErrorMessage` keeps its fallback for non-Error objects). For a
+   non-null object with a string `message`, `safeErrorLog` now logs that
+   message, sets `name` from a string `code`, and appends string
+   `details`/`hint` — message, code, details and hint all redacted via
+   `redactSensitiveText`. Only these known string fields are read — the object
+   is never logged wholesale. Behaviour for `Error` instances, strings, and
+   truly unknown shapes is unchanged. Also new: `GENERIC_ERROR_DETAIL`
+   ("Something went wrong. Please try again." — the wording asyncHandler
+   already used, now shared) and `failRequest(res, scope, error, status?,
+   detail?)`, which logs the redacted error server-side and sends a FIXED
+   `detail`. Typed against a structural `JsonResponder` subset so the lib
+   stays dependency-free.
 2. **Backend-wide audit of raw-error-to-client sends** — 56 sites converted to
    log-server-side + fixed generic detail: `middleware/auth.ts` (3 — the
    failure-path `devLog`s were also dev-only, so these 401/500 paths logged
    nothing in production; now `console.error` + fixed details, statuses
-   unchanged), `routes/chat.ts` (3), `routes/projects.ts` (8, incl. the
-   incident's `GET /` overview RPC site), `routes/documents.ts` (6),
-   `routes/tabular.ts` (9), `routes/workflows.ts` (8), `routes/user.ts` (19 —
-   ten `detail: <db error>.message` sites plus nine 500-status catch blocks
-   that sent un-redacted `errorMessage(err)` to the client).
-   `lib/asyncHandler.ts` now uses the shared constant.
-3. **Deliberately left** (hand-written/actionable, not DB/provider text):
+   unchanged; the tolerated 42703 pre-migration case stays at dev-level logging
+   so production isn't spammed per-request), `routes/chat.ts` (3),
+   `routes/projects.ts` (8, incl. the incident's `GET /` overview RPC site),
+   `routes/documents.ts` (6), `routes/tabular.ts` (9), `routes/workflows.ts`
+   (8), `routes/user.ts` (19 — ten `detail: <db error>.message` sites plus
+   nine 500-status catch blocks that sent un-redacted `errorMessage(err)` to
+   the client). `lib/asyncHandler.ts` now uses the shared constant.
+3. **`routes/user.ts` `errorMessage()` hardened at source** (review-forced —
+   the earlier claim that the MCP-connector 400/404 sites were safe was wrong:
+   the helper joined message+details+hint+code from ANY object and fell back
+   to `JSON.stringify`, so raw Postgrest constraint names/uuids could reach
+   the browser). Now: `Error` instances keep their actionable message —
+   redacted, string `code` appended — and anything else degrades to the fixed
+   generic detail. Crafted MCP/OAuth errors are `Error` instances, so their
+   user-actionable text survives; raw Supabase plain objects rethrown by libs
+   degrade safely. Covers all its call sites (400/404/401 details + OAuth
+   popup HTML). Exported for tests; follow-up: retire it in favour of the
+   shared safeError helpers.
+4. **Deliberately left** (hand-written/actionable, not DB/provider text):
    validation strings ("name is required" etc.), `lib/upload.ts` multer 400s
-   (closed set of request-shape messages), user.ts MCP-connector 400/404/401
-   details + OAuth popup HTML detail (designed user-actionable flow, already
-   logged), SSE stream error events (already `safeErrorMessage`-redacted by
-   design), `requireMemberPolicy`'s fixed policy `detail` parameter.
+   (closed set of request-shape messages), SSE stream error events (already
+   `safeErrorMessage`-redacted by design), `requireMemberPolicy`'s fixed
+   policy `detail` parameter.
 
 **Verification evidence:** `npx tsc --noEmit` clean; full `npx vitest run` 44
-files / **621 tests passing** (604 baseline + 17 new `lib/safeError.test.ts`
-tests covering PostgrestError-shaped extraction, details/hint appending,
-redaction of message/details/hint, non-string field rejection, fallback
-preservation, and `failRequest` log+generic-detail behaviour incl.
-headersSent). Prettier clean on `lib/safeError.ts`, `lib/safeError.test.ts`,
-`lib/asyncHandler.ts`; the 7 touched route/middleware files already fail
-`prettier --check` at HEAD (upstream 4-space style — verified by stash-check),
-so hunks were hand-matched to each file's existing style rather than
-reformatting wholesale (minimal-diff rule; DURABLE_LESSONS 2026-07-28).
+files / **623 tests passing** (604 baseline + 17 new `lib/safeError.test.ts`
+tests — log-path extraction incl. details/hint appending and redaction of
+message/details/hint/code, client-path fallback preservation for object
+errors, unknown-shape fallbacks, `failRequest` log+generic-detail behaviour
+incl. headersSent — + 2 new `routes/user.serialize.test.ts` tests on
+`errorMessage` for both shapes). Prettier clean on `lib/safeError.ts`,
+`lib/safeError.test.ts`, `lib/asyncHandler.ts`,
+`routes/user.serialize.test.ts`; the 7 touched route/middleware files already
+fail `prettier --check` at HEAD (upstream 4-space style — verified by
+stash-check), so hunks were hand-matched to each file's existing style rather
+than reformatting wholesale (minimal-diff rule; DURABLE_LESSONS 2026-07-28).
 
 ---
 
