@@ -414,3 +414,39 @@ calls or widening the window — that just moves the flake. Debugging signature:
 bucket-exhaustion test that passes alone but fails in the full suite, or whose
 pass/fail flips with unrelated CPU load, means the bucket refilled on wall-clock
 between acquisitions.
+
+### 2026-08-04 (OAuth callback base) — Env-derived callback bases silently degrade to a dev localhost fallback in production
+
+Trigger (incident 03/08/2026): the deployed backend minted Clio authorize URLs
+with `redirect_uri=http://127.0.0.1:3001/clio/oauth/callback` because neither
+`API_PUBLIC_URL` nor `BACKEND_URL` was set on Fly, so `clioBackendBaseUrl()`
+(config.ts) fell through to its dev literal. Clio accepted the consent (that
+redirect variant is registered for dev), then redirected the solicitor's browser
+to 127.0.0.1:3001 — her own machine — where nothing was listening. The failure
+was invisible to every deploy check we run: `/`, `/health`, and the connectors
+status page all returned 200 because the wrong host only appears INSIDE the
+authorize URL's query string, and only a real consent round-trip from a non-dev
+machine exercises it. Fixed operationally by setting `API_PUBLIC_URL` on Fly, then
+hardened in code.
+
+Rule: a callback/redirect base that reads `PROCESS_ENV || PROCESS_ENV || <dev
+literal>` MUST fail CLOSED in production when it lands on the dev literal — do not
+mint the URL. Here `clioConfigured()` now returns false (same state as missing
+client credentials) when `NODE_ENV === 'production'` and the resolved base is the
+127.0.0.1 fallback, so the start route returns the fixed "not configured" error
+and a redacted log fires once per boot naming `API_PUBLIC_URL`. Corollary for
+deploy verification: OAuth features cannot be signed off by hitting routes or
+status pages — they need ONE real authorise→callback round-trip from a machine
+that is NOT the backend host, because redirect-URI wrongness is only observable in
+the provider handshake. Not every same-shaped fallback is equally dangerous: the
+MCP interactive authorize redirect derives its base from the request `Host` header
+(`routes/user.ts backendPublicUrl`), so on Fly it resolves to the real inbound
+host, not 127.0.0.1 — a different fallback class, left unchanged. (The MCP
+token-refresh helper `mcpOAuthCallbackUrl()` does keep the localhost literal, but
+it is only reached in the non-interactive refresh path and is covered by
+`API_PUBLIC_URL` now being required in production.) Debugging signature: consent
+SUCCEEDS at the provider, then the browser lands on ERR_CONNECTION_REFUSED at
+`127.0.0.1:3001` (or `localhost:<PORT>`); decode the authorize URL and its
+`redirect_uri` names the wrong host — grep the derivation for a bare `||
+"http://127.0.0.1..."` / `|| \`http://localhost:${PORT}\`` fallback with no
+production guard.

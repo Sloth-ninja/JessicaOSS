@@ -12,6 +12,8 @@
 // Region is EU today (UK firms are EU-region; tokens are region-bound). The
 // host maps are structured so us/ca/au can be added without touching callers.
 
+import { safeErrorLog } from "../safeError";
+
 export type ClioProduct = "manage" | "grow";
 
 export type ClioRegion = "us" | "eu" | "ca" | "au";
@@ -146,9 +148,58 @@ export function clioCredentials(
   return { clientId, clientSecret };
 }
 
-/** True when a product's OAuth app is configured-enough to attempt. */
+/**
+ * True when a product's OAuth app is configured-enough to attempt. Returns
+ * false not only when client credentials are missing but ALSO when the OAuth
+ * callback base is still the localhost dev fallback in production — see
+ * `productionCallbackBaseMissing`. In that state we must NOT mint an authorize
+ * URL (its redirect_uri would point at 127.0.0.1), so the connector is treated
+ * as unconfigured and the start route returns the fixed "not configured" error.
+ */
 export function clioConfigured(product: ClioProduct): boolean {
-  return clioCredentials(product) !== null;
+  if (clioCredentials(product) === null) return false;
+  if (productionCallbackBaseMissing()) return false;
+  return true;
+}
+
+// The registered localhost redirect base used in dev (`localhost` itself is
+// banned by Clio, so the literal is 127.0.0.1). In production this value being
+// the resolved base means neither API_PUBLIC_URL nor BACKEND_URL was set.
+const LOCALHOST_FALLBACK_BASE = "http://127.0.0.1:3001";
+
+// Fires the loud misconfiguration log at most once per process (module-level).
+let warnedCallbackBaseFallback = false;
+
+/**
+ * Production guard for the OAuth callback base. On 03/08/2026 the deployed
+ * backend minted Clio authorize URLs with `redirect_uri=http://127.0.0.1:3001/…`
+ * because neither API_PUBLIC_URL nor BACKEND_URL was set on Fly, so
+ * `clioBackendBaseUrl()` silently fell back to the dev literal — a pilot
+ * solicitor's consent bounced to 127.0.0.1 (ERR_CONNECTION_REFUSED on her
+ * machine). This makes that failure loud and closed instead of silent: in
+ * production, when the resolved base is still the localhost fallback, Clio OAuth
+ * is reported NOT CONFIGURED (never mint a localhost redirect in production) and
+ * a redacted error is logged ONCE per boot naming the env var to set. In
+ * non-production the dev fallback is left untouched.
+ */
+function productionCallbackBaseMissing(): boolean {
+  if (process.env.NODE_ENV !== "production") return false;
+  if (clioBackendBaseUrl() !== LOCALHOST_FALLBACK_BASE) return false;
+  if (!warnedCallbackBaseFallback) {
+    warnedCallbackBaseFallback = true;
+    console.error(
+      "[clio/config] Clio OAuth DISABLED in production: no public callback base is set. " +
+        "Set API_PUBLIC_URL (or BACKEND_URL) to this backend's public origin — refusing " +
+        "to mint a redirect_uri to 127.0.0.1 that would bounce a solicitor's consent to " +
+        "their own machine.",
+      safeErrorLog(
+        new Error(
+          `API_PUBLIC_URL/BACKEND_URL unset; OAuth callback base fell back to ${LOCALHOST_FALLBACK_BASE}`,
+        ),
+      ),
+    );
+  }
+  return true;
 }
 
 /**
@@ -163,7 +214,7 @@ export function clioBackendBaseUrl(): string {
   return (
     process.env.API_PUBLIC_URL ||
     process.env.BACKEND_URL ||
-    "http://127.0.0.1:3001"
+    LOCALHOST_FALLBACK_BASE
   ).replace(/\/+$/, "");
 }
 
