@@ -38,6 +38,55 @@ export interface ClioManageToolContext {
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const MAX_TIME_ENTRY_MINUTES = 24 * 60; // reject absurd (>24h) single entries.
 
+// Matter search page size. Clio caps index actions at 200 results per request
+// (docs.developers.clio.com/api-docs/clio-manage/paging/); 100 keeps a single
+// page big enough to resolve almost any search in one call while bounding the
+// JSON fed back into the model context.
+const MATTER_PAGE_SIZE = 100;
+const MATTER_FIELDS = "id,display_number,description,status,client{id,name}";
+const MATTER_STATUSES = new Set(["open", "pending", "closed"]);
+
+/**
+ * Normalise + validate the matter `status` filter: 'open' | 'pending' |
+ * 'closed', or a comma-separated combination (Clio accepts a comma-separated
+ * list; an omitted filter returns all statuses). Returns undefined for an
+ * absent filter; throws a user-safe error on unknown values. Exported for
+ * unit testing.
+ */
+export function parseMatterStatusFilter(raw: unknown): string | undefined {
+  const value = asString(raw).toLowerCase();
+  if (!value) return undefined;
+  const parts = value
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (parts.length === 0 || parts.some((p) => !MATTER_STATUSES.has(p))) {
+    throw new ClioValidationError(
+      "The status filter must be 'open', 'pending', 'closed', or a comma-separated combination of those.",
+    );
+  }
+  return [...new Set(parts)].join(",");
+}
+
+/**
+ * Fold a Manage `meta.paging.next` URL (absolute, on the Clio API host) into a
+ * continuation token: the /matters.json path + querystring relative to the API
+ * base, safe to hand to the model and replay against `${apiBase}${token}`.
+ * Returns undefined for anything that is not a matters next-page URL. Exported
+ * for unit testing.
+ */
+export function matterPageTokenFromNext(next: unknown): string | undefined {
+  if (typeof next !== "string" || !next) return undefined;
+  try {
+    const u = new URL(next);
+    const path = u.pathname.replace(/^\/api\/v4/, "");
+    if (!path.startsWith("/matters.json")) return undefined;
+    return `${path}${u.search}`;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Convert whole/fractional minutes to the SECONDS Clio's `activities.quantity`
  * expects (verified 03/08: 360 → 6 min). Rejects non-positive and absurd
@@ -69,16 +118,26 @@ export const CLIO_MANAGE_TOOLS: OpenAIToolSchema[] = [
     function: {
       name: "clio_find_matter",
       description:
-        "Search the user's Clio Manage matters by name, client, or matter number. Returns each matter's id, display number, description, status, and client. Use this to resolve a matter id before recording time or saving a document.",
+        "Search the user's Clio Manage matters by free text and/or status. Returns up to 100 matters per page (id, display number, description, status, client) plus count, total_entries (null when Clio does not report a total), has_more, and next_page_token. Use the status argument — never query keywords like 'open' — to filter by open/pending/closed; one call resolves most searches. Fetch a further page (page_token) only when the user asks for more. Also use this to resolve a matter id before recording time or saving a document.",
       parameters: {
         type: "object",
         properties: {
           query: {
             type: "string",
-            description: "Matter name, client name, or matter/display number.",
+            description:
+              "Free-text search: matter name, client name, or matter/display number. Optional when status or page_token is provided.",
+          },
+          status: {
+            type: "string",
+            description:
+              "Optional matter-status filter: 'open', 'pending', 'closed', or a comma-separated combination (e.g. 'open,pending'). Omit to include all statuses.",
+          },
+          page_token: {
+            type: "string",
+            description:
+              "Optional continuation token (next_page_token from a previous clio_find_matter result) to fetch the next page. Other arguments are ignored when set.",
           },
         },
-        required: ["query"],
       },
     },
   },
@@ -214,7 +273,8 @@ export const CLIO_MANAGE_SYSTEM_PROMPT = `CLIO MANAGE (the user's connected prac
 - You can search matters (clio_find_matter) and contacts (clio_find_contact), read matter financials (clio_matter_financials), list matter documents (clio_list_matter_documents), record time (clio_record_time), save a JessicaOS document to a matter (clio_save_document_to_matter), and delete a time entry you created this session (clio_delete_time_entry).
 - Clio enforces each user's own matter permissions — you only ever see and change data this user is permitted to. If a call returns a permissions error, tell the user plainly; never guess around it.
 - Before any WRITE (recording time, saving a document, deleting a time entry) restate the exact details and get the user's explicit go-ahead in the conversation first. Report time durations in minutes/hours to the user even though Clio stores seconds.
-- Resolve a matter with clio_find_matter before recording time or saving a document — never invent a matter id.`;
+- Resolve a matter with clio_find_matter before recording time or saving a document — never invent a matter id.
+- Finding matters: when the user asks for open/pending/closed matters, pass the status argument — never put words like "open" in the query text (Clio's free-text search does not understand them). One call returns up to 100 matters, almost always the whole answer. Report the count honestly from the result: use total_entries when present (e.g. "26 matters, showing all 26"); when total_entries is null and has_more is true, say "showing the first N — more exist". Fetch the next page (page_token) only when the user asks for more; NEVER enumerate matters by looping repeated narrower searches.`;
 
 function asString(v: unknown): string {
   return typeof v === "string" ? v.trim() : v == null ? "" : String(v);
@@ -225,18 +285,62 @@ async function findMatter(
   args: Record<string, unknown>,
 ): Promise<ClioToolOutcome> {
   const query = asString(args.query);
-  if (!query) throw new ClioValidationError("A search query is required.");
-  const body = await clioRequest(
+  const status = parseMatterStatusFilter(args.status);
+  const pageToken = asString(args.page_token);
+
+  let path = "/matters.json";
+  let opts: Parameters<typeof clioRequest>[4];
+  if (pageToken) {
+    // Continuation: the token is a /matters.json path+querystring we minted
+    // from meta.paging.next — it already encodes fields, filters, and cursor.
+    if (!pageToken.startsWith("/matters.json")) {
+      throw new ClioValidationError(
+        "That page token is not valid — use the next_page_token from a previous matter search.",
+      );
+    }
+    path = pageToken;
+    opts = {};
+  } else {
+    if (!query && !status) {
+      throw new ClioValidationError(
+        "Provide a search query and/or a status filter.",
+      );
+    }
+    opts = {
+      fields: MATTER_FIELDS,
+      query: {
+        ...(query ? { query } : {}),
+        ...(status ? { status } : {}),
+        limit: MATTER_PAGE_SIZE,
+      },
+    };
+  }
+
+  const body = (await clioRequest(
     ctx.db,
     ctx.userId,
     "manage",
-    "/matters.json",
-    {
-      fields: "id,display_number,description,status,client{id,name}",
-      query: { query, limit: 10 },
-    },
-  );
-  return clioToolOk("manage", "clio_find_matter", body);
+    path,
+    opts,
+  )) as {
+    data?: unknown[];
+    meta?: { paging?: { next?: unknown }; records?: unknown };
+  } | null;
+
+  const matters = Array.isArray(body?.data) ? body.data : [];
+  // Clio's documented paging metadata is the next/previous URLs; a total count
+  // (meta.records) is not documented, so it is surfaced only when present.
+  const totalRaw = body?.meta?.records;
+  const totalEntries =
+    typeof totalRaw === "number" && Number.isFinite(totalRaw) ? totalRaw : null;
+  const nextPageToken = matterPageTokenFromNext(body?.meta?.paging?.next);
+  return clioToolOk("manage", "clio_find_matter", {
+    matters,
+    count: matters.length,
+    total_entries: totalEntries,
+    has_more: nextPageToken !== undefined,
+    ...(nextPageToken !== undefined ? { next_page_token: nextPageToken } : {}),
+  });
 }
 
 async function findContact(

@@ -7,6 +7,60 @@
 
 ---
 
+## 2026-08-04 — Clio matter search: status filter + real pagination (branch `clio-matter-search-fix`)
+
+**Scope:** fix the pilot bug found today (screenshot-verified): a solicitor asked
+chat for "open Kyckr matters"; Clio holds 26, but `clio_find_matter` hardcoded
+`limit: 10` with no filters or pagination, so the model looped targeted searches
+for minutes. Search must resolve in one or two tool calls. Backend only
+(`lib/clio/manageTools.ts` + its tests); no new deps; no migration/`.env`/
+schema/LICENSE touched.
+
+**Key changes.**
+1. **Page size 10 → 100** (`MATTER_PAGE_SIZE`). Clio caps index actions at 200
+   results per request (verified: docs.developers.clio.com/api-docs/clio-manage/
+   paging/); 100 resolves almost any search in one call while bounding the JSON
+   fed into the model context.
+2. **`status` tool arg** — 'open' | 'pending' | 'closed' or a comma-separated
+   combination, validated + normalised by the exported
+   `parseMatterStatusFilter()` (unknown values → fixed user-safe error), passed
+   through as Clio's documented comma-separated `status` query param. `query`
+   is now optional; at least one of query/status/page_token is required.
+3. **Pagination continuation** — Clio Manage paginates by cursor:
+   `meta.paging.next`/`previous` are full next-page URLs, omitted when absent
+   (verified: paging doc + developer FAQ). `matterPageTokenFromNext()` folds the
+   next URL into a `/matters.json?…` token relative to the API base; the tool
+   accepts it back as `page_token` (validated to be a matters continuation —
+   an off-path/absolute token is rejected before any fetch) and replays it
+   against `${apiBase}${token}`, mirroring `clioPaginateManage`.
+4. **Honest totals in the tool output** — payload is now `{ matters, count,
+   total_entries, has_more, next_page_token? }`. `meta.records` (a total count)
+   is NOT documented in the reachable Clio docs (paging page, FAQ, changelog all
+   silent), so it is parsed tolerantly: surfaced as `total_entries` when present
+   and numeric, `null` otherwise — the model is told to say "showing the first
+   N — more exist" when the total is unknown and `has_more` is true.
+5. **Schema description + `CLIO_MANAGE_SYSTEM_PROMPT`** updated: use the status
+   argument (never query keywords like "open"), report counts honestly from
+   count/total_entries/has_more, fetch further pages only when the user asks,
+   and never enumerate matters by looping narrower searches.
+
+**Verified vs deferred (API claims).** Verified against official docs: 200-max
+index page size, cursor pagination via `meta.paging.next` URLs, comma-separated
+`status=open,pending,closed` filter on matters. Not verifiable, so parsed
+tolerantly rather than claimed: `meta.records` total count. Deferred as
+unverified: any originating-solicitor/responsible-attorney filter — not
+confirmed in the research doc, not added.
+
+**Verification evidence:** `npx tsc --noEmit` clean; full backend suite
+`npx vitest run` 616/616 passing (baseline 604 + 12 new: 7 find_matter
+behaviour tests incl. URL-param assertions, status-only search, page_token
+replay + off-path rejection, meta parsing; 3 `parseMatterStatusFilter`; 2
+`matterPageTokenFromNext`); `npx prettier --check` clean on both changed files.
+No limiter touched (≤1 request per test, Manage bucket capacity 50) so no
+frozen-clock handling needed.
+
+---
+
 ## 2026-08-04 — Pilot verification: Clio per-user permissions confirmed (branch `pilot-verification-aug4`)
 
 **Scope:** record the outcome of the pilot's first per-user permissions

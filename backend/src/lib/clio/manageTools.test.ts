@@ -17,7 +17,9 @@ import { saveClioConnection } from "./connections";
 import { resetClioClientStateForTests } from "./client";
 import {
   executeClioManageToolCall,
+  matterPageTokenFromNext,
   minutesToSeconds,
+  parseMatterStatusFilter,
   type ClioManageToolContext,
 } from "./manageTools";
 
@@ -105,7 +107,7 @@ describe("not-connected gating", () => {
 });
 
 describe("clio_find_matter — happy path + error mapping", () => {
-  it("returns the matter list on success", async () => {
+  it("returns the matter list with count/total/has_more on success", async () => {
     const db = await connectedDb();
     vi.stubGlobal(
       "fetch",
@@ -119,7 +121,131 @@ describe("clio_find_matter — happy path + error mapping", () => {
       ctx(db),
     );
     expect(event.status).toBe("ok");
-    expect(JSON.parse(content).data[0].display_number).toBe("0001-0007");
+    const payload = JSON.parse(content);
+    expect(payload.matters[0].display_number).toBe("0001-0007");
+    expect(payload.count).toBe(1);
+    expect(payload.total_entries).toBeNull();
+    expect(payload.has_more).toBe(false);
+    expect(payload.next_page_token).toBeUndefined();
+  });
+
+  it("requests a 100-result page and passes the status filter through", async () => {
+    const db = await connectedDb();
+    const fetchMock = vi.fn(async (_url: string | URL) => json({ data: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { event } = await executeClioManageToolCall(
+      "clio_find_matter",
+      { query: "Kyckr", status: "open" },
+      ctx(db),
+    );
+    expect(event.status).toBe("ok");
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(url.pathname).toBe("/api/v4/matters.json");
+    expect(url.searchParams.get("limit")).toBe("100");
+    expect(url.searchParams.get("status")).toBe("open");
+    expect(url.searchParams.get("query")).toBe("Kyckr");
+    expect(url.searchParams.get("fields")).toContain("display_number");
+  });
+
+  it("searches by status alone (no query) and normalises the list", async () => {
+    const db = await connectedDb();
+    const fetchMock = vi.fn(async (_url: string | URL) => json({ data: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { event } = await executeClioManageToolCall(
+      "clio_find_matter",
+      { status: "Open, pending" },
+      ctx(db),
+    );
+    expect(event.status).toBe("ok");
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(url.searchParams.get("status")).toBe("open,pending");
+    expect(url.searchParams.get("query")).toBeNull();
+  });
+
+  it("rejects an unknown status value with a friendly error", async () => {
+    const db = await connectedDb();
+    vi.stubGlobal("fetch", vi.fn());
+    const { event } = await executeClioManageToolCall(
+      "clio_find_matter",
+      { query: "Acme", status: "archived" },
+      ctx(db),
+    );
+    expect(event.status).toBe("error");
+    expect(event.error).toMatch(/'open', 'pending', 'closed'/);
+  });
+
+  it("requires a query, status, or page token", async () => {
+    const db = await connectedDb();
+    vi.stubGlobal("fetch", vi.fn());
+    const { event } = await executeClioManageToolCall(
+      "clio_find_matter",
+      {},
+      ctx(db),
+    );
+    expect(event.status).toBe("error");
+    expect(event.error).toMatch(/query and\/or a status filter/i);
+  });
+
+  it("surfaces meta.records and mints a next_page_token from meta.paging.next", async () => {
+    const db = await connectedDb();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        json({
+          data: [{ id: 1 }, { id: 2 }],
+          meta: {
+            records: 26,
+            paging: {
+              next: "https://eu.app.clio.com/api/v4/matters.json?limit=100&page_token=abc123&status=open",
+            },
+          },
+        }),
+      ),
+    );
+    const { content } = await executeClioManageToolCall(
+      "clio_find_matter",
+      { query: "Kyckr", status: "open" },
+      ctx(db),
+    );
+    const payload = JSON.parse(content);
+    expect(payload.count).toBe(2);
+    expect(payload.total_entries).toBe(26);
+    expect(payload.has_more).toBe(true);
+    expect(payload.next_page_token).toBe(
+      "/matters.json?limit=100&page_token=abc123&status=open",
+    );
+  });
+
+  it("follows a page_token continuation against the API base verbatim", async () => {
+    const db = await connectedDb();
+    const fetchMock = vi.fn(async (_url: string | URL) =>
+      json({ data: [{ id: 3 }] }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { event, content } = await executeClioManageToolCall(
+      "clio_find_matter",
+      { page_token: "/matters.json?limit=100&page_token=abc123" },
+      ctx(db),
+    );
+    expect(event.status).toBe("ok");
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(url.pathname).toBe("/api/v4/matters.json");
+    expect(url.searchParams.get("page_token")).toBe("abc123");
+    expect(JSON.parse(content).count).toBe(1);
+  });
+
+  it("rejects a page token that is not a matters continuation", async () => {
+    const db = await connectedDb();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { event } = await executeClioManageToolCall(
+      "clio_find_matter",
+      { page_token: "https://evil.example.com/steal" },
+      ctx(db),
+    );
+    expect(event.status).toBe("error");
+    expect(event.error).toMatch(/page token is not valid/i);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("maps an upstream 500 to a fixed generic error (no raw text)", async () => {
@@ -135,6 +261,38 @@ describe("clio_find_matter — happy path + error mapping", () => {
     );
     expect(event.status).toBe("error");
     expect(event.error).not.toMatch(/secret/);
+  });
+});
+
+describe("parseMatterStatusFilter", () => {
+  it("returns undefined for an absent filter", () => {
+    expect(parseMatterStatusFilter(undefined)).toBeUndefined();
+    expect(parseMatterStatusFilter("")).toBeUndefined();
+  });
+  it("normalises case, whitespace, and duplicates", () => {
+    expect(parseMatterStatusFilter(" Closed ,OPEN,closed")).toBe("closed,open");
+  });
+  it("throws on unknown values", () => {
+    expect(() => parseMatterStatusFilter("open,archived")).toThrow(
+      /'open', 'pending', 'closed'/,
+    );
+  });
+});
+
+describe("matterPageTokenFromNext", () => {
+  it("folds an absolute next URL to a relative matters token", () => {
+    expect(
+      matterPageTokenFromNext(
+        "https://eu.app.clio.com/api/v4/matters.json?page_token=x&limit=100",
+      ),
+    ).toBe("/matters.json?page_token=x&limit=100");
+  });
+  it("returns undefined for non-matters or malformed URLs", () => {
+    expect(
+      matterPageTokenFromNext("https://eu.app.clio.com/api/v4/contacts.json?x"),
+    ).toBeUndefined();
+    expect(matterPageTokenFromNext("not a url")).toBeUndefined();
+    expect(matterPageTokenFromNext(null)).toBeUndefined();
   });
 });
 
