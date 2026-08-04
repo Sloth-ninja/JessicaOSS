@@ -7,6 +7,60 @@
 
 ---
 
+## 2026-08-04 — Error-visibility hardening (branch `error-visibility-hardening`)
+
+**Scope:** fix the two defects behind today's production incident where real
+Supabase errors were invisible: (1) `safeErrorLog`/`safeErrorMessage` flattened
+non-`Error` throws (supabase-js PostgrestError plain objects) to the literal
+"Unexpected error" — observed as `[asyncHandler] GET /firm-library failed
+{ name: null, message: 'Unexpected error' }` while the true cause was a missing
+RPC signature; (2) dozens of route sites sent the RAW Supabase/provider error
+message to the browser (`detail: error.message` — a state-leak-rule violation)
+while logging NOTHING server-side, so today's Matters failure was invisible in
+Fly logs. No new deps; no migrations/`.env`/schema/LICENSE touched.
+
+**Key changes.**
+1. **`backend/src/lib/safeError.ts`** — new `messageBearingParts()` extractor:
+   for a non-null object with a string `message`, `safeErrorMessage` now uses
+   that message (redacted) and `safeErrorLog` additionally sets `name` from a
+   string `code` and appends string `details`/`hint` (all redacted) to the
+   logged message. Only these known string fields are read — the object is
+   never logged wholesale. Behaviour for `Error` instances, strings, and truly
+   unknown shapes is unchanged. Also new: `GENERIC_ERROR_DETAIL` ("Something
+   went wrong. Please try again." — the wording asyncHandler already used, now
+   shared) and `failRequest(res, scope, error, status?, detail?)`, which logs
+   the redacted error server-side and sends a FIXED `detail`. Typed against a
+   structural `JsonResponder` subset so the lib stays dependency-free.
+2. **Backend-wide audit of raw-error-to-client sends** — 56 sites converted to
+   log-server-side + fixed generic detail: `middleware/auth.ts` (3 — the
+   failure-path `devLog`s were also dev-only, so these 401/500 paths logged
+   nothing in production; now `console.error` + fixed details, statuses
+   unchanged), `routes/chat.ts` (3), `routes/projects.ts` (8, incl. the
+   incident's `GET /` overview RPC site), `routes/documents.ts` (6),
+   `routes/tabular.ts` (9), `routes/workflows.ts` (8), `routes/user.ts` (19 —
+   ten `detail: <db error>.message` sites plus nine 500-status catch blocks
+   that sent un-redacted `errorMessage(err)` to the client).
+   `lib/asyncHandler.ts` now uses the shared constant.
+3. **Deliberately left** (hand-written/actionable, not DB/provider text):
+   validation strings ("name is required" etc.), `lib/upload.ts` multer 400s
+   (closed set of request-shape messages), user.ts MCP-connector 400/404/401
+   details + OAuth popup HTML detail (designed user-actionable flow, already
+   logged), SSE stream error events (already `safeErrorMessage`-redacted by
+   design), `requireMemberPolicy`'s fixed policy `detail` parameter.
+
+**Verification evidence:** `npx tsc --noEmit` clean; full `npx vitest run` 44
+files / **621 tests passing** (604 baseline + 17 new `lib/safeError.test.ts`
+tests covering PostgrestError-shaped extraction, details/hint appending,
+redaction of message/details/hint, non-string field rejection, fallback
+preservation, and `failRequest` log+generic-detail behaviour incl.
+headersSent). Prettier clean on `lib/safeError.ts`, `lib/safeError.test.ts`,
+`lib/asyncHandler.ts`; the 7 touched route/middleware files already fail
+`prettier --check` at HEAD (upstream 4-space style — verified by stash-check),
+so hunks were hand-matched to each file's existing style rather than
+reformatting wholesale (minimal-diff rule; DURABLE_LESSONS 2026-07-28).
+
+---
+
 ## 2026-08-04 — Pilot verification: Clio per-user permissions confirmed (branch `pilot-verification-aug4`)
 
 **Scope:** record the outcome of the pilot's first per-user permissions

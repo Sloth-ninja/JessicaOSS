@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../lib/asyncHandler";
+import { failRequest } from "../lib/safeError";
 import { createServerSupabase } from "../lib/supabase";
 import {
   buildContentDisposition,
@@ -69,7 +70,8 @@ documentsRouter.get("/", requireAuth, asyncHandler(async (req, res) => {
     .eq("user_id", userId)
     .is("project_id", null)
     .order("created_at", { ascending: false });
-  if (error) return void res.status(500).json({ detail: error.message });
+  if (error)
+    return void failRequest(res, "[documents] documents query failed", error);
   let docs = (data ?? []) as unknown as {
     id: string;
     current_version_id?: string | null;
@@ -218,7 +220,8 @@ documentsRouter.post("/download-zip", requireAuth, asyncHandler(async (req, res)
     .select("id, current_version_id, user_id, project_id")
     .in("id", document_ids);
 
-  if (error) return void res.status(500).json({ detail: error.message });
+  if (error)
+    return void failRequest(res, "[documents] batch lookup failed", error);
   // Filter to docs the user actually has access to (own + shared-project).
   const accessChecks = await Promise.all(
     (rawDocs ?? []).map(async (d) => ({
@@ -946,9 +949,13 @@ documentsRouter.put(
           .filter((path): path is string => !!path)
           .map((path) => deleteFile(path).catch(() => {})),
       );
-      return void res.status(500).json({
-        detail: updateErr?.message ?? "Failed to replace version.",
-      });
+      return void failRequest(
+        res,
+        "[documents] version replace failed",
+        updateErr ?? new Error("document update returned no row"),
+        500,
+        "Failed to replace version.",
+      );
     }
 
     await Promise.all(
@@ -992,7 +999,11 @@ documentsRouter.delete(
       .eq("document_id", documentId)
       .is("deleted_at", null);
     if (versionsErr) {
-      return void res.status(500).json({ detail: versionsErr.message });
+      return void failRequest(
+        res,
+        "[documents] versions query failed",
+        versionsErr,
+      );
     }
 
     const rows = (versions ?? []) as {
@@ -1038,7 +1049,11 @@ documentsRouter.delete(
         })
         .eq("id", documentId);
       if (updateErr) {
-        return void res.status(500).json({ detail: updateErr.message });
+        return void failRequest(
+          res,
+          "[documents] current-version update failed",
+          updateErr,
+        );
       }
     }
 
@@ -1054,7 +1069,11 @@ documentsRouter.delete(
       .eq("document_id", documentId)
       .is("deleted_at", null);
     if (deleteErr) {
-      return void res.status(500).json({ detail: deleteErr.message });
+      return void failRequest(
+        res,
+        "[documents] version delete failed",
+        deleteErr,
+      );
     }
 
     await Promise.all(

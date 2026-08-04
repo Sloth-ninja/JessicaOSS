@@ -27,6 +27,33 @@ export function redactSensitiveText(value: string): string {
   return redacted;
 }
 
+/**
+ * Known diagnostic string fields on a non-Error thrown value — most importantly
+ * supabase-js PostgrestError ({ message, code?, details?, hint? }), which
+ * reaches these helpers as a plain object in production. Only these known
+ * string fields are ever read; the object is never logged wholesale.
+ * (Error-visibility incident 04/08/2026: such objects used to flatten to the
+ * literal "Unexpected error", hiding the real cause from Fly logs.)
+ */
+function messageBearingParts(error: unknown): {
+  message: string;
+  code: string | null;
+  details: string | null;
+  hint: string | null;
+} | null {
+  if (typeof error !== "object" || error === null) return null;
+  const candidate = error as Record<string, unknown>;
+  if (typeof candidate.message !== "string" || !candidate.message) return null;
+  const str = (value: unknown): string | null =>
+    typeof value === "string" && value ? value : null;
+  return {
+    message: candidate.message,
+    code: str(candidate.code),
+    details: str(candidate.details),
+    hint: str(candidate.hint),
+  };
+}
+
 export function safeErrorMessage(
   error: unknown,
   fallback = "Unexpected error",
@@ -36,7 +63,7 @@ export function safeErrorMessage(
       ? error.message
       : typeof error === "string"
         ? error
-        : fallback;
+        : (messageBearingParts(error)?.message ?? fallback);
   return redactSensitiveText(message);
 }
 
@@ -52,8 +79,47 @@ export function safeErrorLog(error: unknown): {
       stack: error.stack ? redactSensitiveText(error.stack) : undefined,
     };
   }
+  const parts = messageBearingParts(error);
+  if (parts) {
+    let message = parts.message;
+    if (parts.details) message += ` | details: ${parts.details}`;
+    if (parts.hint) message += ` | hint: ${parts.hint}`;
+    return {
+      name: parts.code,
+      message: redactSensitiveText(message),
+    };
+  }
   return {
     name: null,
     message: safeErrorMessage(error),
   };
+}
+
+/**
+ * The fixed, generic client-facing failure `detail` (the #22 contract): raw
+ * provider/DB text is logged server-side only and never sent to the browser.
+ */
+export const GENERIC_ERROR_DETAIL = "Something went wrong. Please try again.";
+
+/** Structural subset of an Express Response — keeps this lib dependency-free. */
+type JsonResponder = {
+  headersSent: boolean;
+  status(code: number): { json(body: unknown): unknown };
+};
+
+/**
+ * Log a DB/provider/library failure server-side (redacted, via safeErrorLog)
+ * and respond with a FIXED `detail` — never the raw error message.
+ * Error-visibility incident 04/08/2026: `detail: error.message` sites leaked
+ * raw Supabase text to the browser while logging nothing server-side.
+ */
+export function failRequest(
+  res: JsonResponder,
+  scope: string,
+  error: unknown,
+  status = 500,
+  detail = GENERIC_ERROR_DETAIL,
+): void {
+  console.error(scope, safeErrorLog(error));
+  if (!res.headersSent) res.status(status).json({ detail });
 }
