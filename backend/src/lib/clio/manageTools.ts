@@ -18,6 +18,7 @@ import { downloadFile } from "../storage";
 import type { OpenAIToolSchema } from "../llm";
 import { createServerSupabase } from "../supabase";
 import { clioRequest } from "./client";
+import { clioHosts } from "./config";
 import {
   clioToolError,
   clioToolOk,
@@ -69,22 +70,34 @@ export function parseMatterStatusFilter(raw: unknown): string | undefined {
 }
 
 /**
- * Fold a Manage `meta.paging.next` URL (absolute, on the Clio API host) into a
- * continuation token: the /matters.json path + querystring relative to the API
- * base, safe to hand to the model and replay against `${apiBase}${token}`.
- * Returns undefined for anything that is not a matters next-page URL. Exported
- * for unit testing.
+ * Extract the OPAQUE continuation cursor from a Manage `meta.paging.next` URL.
+ * Clio's cursor pagination carries the cursor as the `page_token` query param
+ * on a full next-page URL (docs.developers.clio.com/api-docs/clio-manage/
+ * paging/). The URL is PARSED (never prefix-matched — DURABLE_LESSONS
+ * 2026-07-28): it must sit on the Manage API origin with the exact
+ * `<apiBase>/matters.json` pathname (URL normalisation collapses any `..`
+ * traversal, so a traversal pathname simply fails the equality check), and
+ * only the `page_token` value is returned. The continuation request is then
+ * rebuilt by us from named parts — a model-supplied string never becomes a
+ * request path. Returns undefined for anything else. Exported for unit
+ * testing.
  */
 export function matterPageTokenFromNext(next: unknown): string | undefined {
   if (typeof next !== "string" || !next) return undefined;
+  let url: URL;
+  let base: URL;
   try {
-    const u = new URL(next);
-    const path = u.pathname.replace(/^\/api\/v4/, "");
-    if (!path.startsWith("/matters.json")) return undefined;
-    return `${path}${u.search}`;
+    url = new URL(next);
+    base = new URL(clioHosts("manage").apiBase);
   } catch {
     return undefined;
   }
+  if (url.origin !== base.origin) return undefined;
+  if (url.pathname !== `${base.pathname.replace(/\/$/, "")}/matters.json`) {
+    return undefined;
+  }
+  const cursor = url.searchParams.get("page_token");
+  return cursor ? cursor : undefined;
 }
 
 /**
@@ -118,7 +131,7 @@ export const CLIO_MANAGE_TOOLS: OpenAIToolSchema[] = [
     function: {
       name: "clio_find_matter",
       description:
-        "Search the user's Clio Manage matters by free text and/or status. Returns up to 100 matters per page (id, display number, description, status, client) plus count, total_entries (null when Clio does not report a total), has_more, and next_page_token. Use the status argument — never query keywords like 'open' — to filter by open/pending/closed; one call resolves most searches. Fetch a further page (page_token) only when the user asks for more. Also use this to resolve a matter id before recording time or saving a document.",
+        "Search the user's Clio Manage matters by free text and/or status. Provide at least one of query, status, or page_token. Returns up to 100 matters per page (id, display number, description, status, client) plus count, total_entries (null when Clio does not report a total), has_more, and next_page_token. Use the status argument — never query keywords like 'open' — to filter by open/pending/closed; one call resolves most searches. Fetch a further page only when the user asks for more: pass next_page_token as page_token together with the SAME query/status as the original search. Also use this to resolve a matter id before recording time or saving a document.",
       parameters: {
         type: "object",
         properties: {
@@ -135,7 +148,7 @@ export const CLIO_MANAGE_TOOLS: OpenAIToolSchema[] = [
           page_token: {
             type: "string",
             description:
-              "Optional continuation token (next_page_token from a previous clio_find_matter result) to fetch the next page. Other arguments are ignored when set.",
+              "Optional continuation cursor (next_page_token from a previous clio_find_matter result). Pass it with the SAME query/status as the original search to fetch the next page — and only when the user asks for more.",
           },
         },
       },
@@ -274,7 +287,7 @@ export const CLIO_MANAGE_SYSTEM_PROMPT = `CLIO MANAGE (the user's connected prac
 - Clio enforces each user's own matter permissions — you only ever see and change data this user is permitted to. If a call returns a permissions error, tell the user plainly; never guess around it.
 - Before any WRITE (recording time, saving a document, deleting a time entry) restate the exact details and get the user's explicit go-ahead in the conversation first. Report time durations in minutes/hours to the user even though Clio stores seconds.
 - Resolve a matter with clio_find_matter before recording time or saving a document — never invent a matter id.
-- Finding matters: when the user asks for open/pending/closed matters, pass the status argument — never put words like "open" in the query text (Clio's free-text search does not understand them). One call returns up to 100 matters, almost always the whole answer. Report the count honestly from the result: use total_entries when present (e.g. "26 matters, showing all 26"); when total_entries is null and has_more is true, say "showing the first N — more exist". Fetch the next page (page_token) only when the user asks for more; NEVER enumerate matters by looping repeated narrower searches.`;
+- Finding matters: when the user asks for open/pending/closed matters, pass the status argument — never put words like "open" in the query text (Clio's free-text search does not understand them). One call returns up to 100 matters, almost always the whole answer. Report the count honestly from the result: use total_entries when present (e.g. "26 matters, showing all 26"); when total_entries is null and has_more is true, say "showing the first N — more exist". Fetch the next page only when the user asks for more (pass next_page_token as page_token with the same query/status); NEVER enumerate matters by looping repeated narrower searches.`;
 
 function asString(v: unknown): string {
   return typeof v === "string" ? v.trim() : v == null ? "" : String(v);
@@ -287,41 +300,33 @@ async function findMatter(
   const query = asString(args.query);
   const status = parseMatterStatusFilter(args.status);
   const pageToken = asString(args.page_token);
-
-  let path = "/matters.json";
-  let opts: Parameters<typeof clioRequest>[4];
-  if (pageToken) {
-    // Continuation: the token is a /matters.json path+querystring we minted
-    // from meta.paging.next — it already encodes fields, filters, and cursor.
-    if (!pageToken.startsWith("/matters.json")) {
-      throw new ClioValidationError(
-        "That page token is not valid — use the next_page_token from a previous matter search.",
-      );
-    }
-    path = pageToken;
-    opts = {};
-  } else {
-    if (!query && !status) {
-      throw new ClioValidationError(
-        "Provide a search query and/or a status filter.",
-      );
-    }
-    opts = {
-      fields: MATTER_FIELDS,
-      query: {
-        ...(query ? { query } : {}),
-        ...(status ? { status } : {}),
-        limit: MATTER_PAGE_SIZE,
-      },
-    };
+  if (!query && !status && !pageToken) {
+    throw new ClioValidationError(
+      "Provide a search query and/or a status filter.",
+    );
   }
 
+  // One request shape for both first pages and continuations: the path, fields
+  // selector, and limit are always OURS; the model-supplied cursor only ever
+  // travels as the `page_token` query-param VALUE (URL-encoded by buildUrl), so
+  // no model-influenced string can become a request path. Clio's own
+  // meta.paging.next URL is exactly "the original request's params plus
+  // page_token", so a continuation re-sends the same query/status alongside
+  // the cursor (the schema tells the model to repeat them).
   const body = (await clioRequest(
     ctx.db,
     ctx.userId,
     "manage",
-    path,
-    opts,
+    "/matters.json",
+    {
+      fields: MATTER_FIELDS,
+      query: {
+        ...(query ? { query } : {}),
+        ...(status ? { status } : {}),
+        ...(pageToken ? { page_token: pageToken } : {}),
+        limit: MATTER_PAGE_SIZE,
+      },
+    },
   )) as {
     data?: unknown[];
     meta?: { paging?: { next?: unknown }; records?: unknown };
@@ -333,12 +338,17 @@ async function findMatter(
   const totalRaw = body?.meta?.records;
   const totalEntries =
     typeof totalRaw === "number" && Number.isFinite(totalRaw) ? totalRaw : null;
-  const nextPageToken = matterPageTokenFromNext(body?.meta?.paging?.next);
+  // has_more derives from the RAW presence of a next URL — never from whether
+  // a cursor was successfully extracted — so an unexpected next-URL shape
+  // degrades to an honest "more exist" rather than a silent "no more pages".
+  const rawNext = body?.meta?.paging?.next;
+  const hasMore = typeof rawNext === "string" && rawNext.length > 0;
+  const nextPageToken = matterPageTokenFromNext(rawNext);
   return clioToolOk("manage", "clio_find_matter", {
     matters,
     count: matters.length,
     total_entries: totalEntries,
-    has_more: nextPageToken !== undefined,
+    has_more: hasMore,
     ...(nextPageToken !== undefined ? { next_page_token: nextPageToken } : {}),
   });
 }

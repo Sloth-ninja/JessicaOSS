@@ -24,40 +24,67 @@ schema/LICENSE touched.
 2. **`status` tool arg** — 'open' | 'pending' | 'closed' or a comma-separated
    combination, validated + normalised by the exported
    `parseMatterStatusFilter()` (unknown values → fixed user-safe error), passed
-   through as Clio's documented comma-separated `status` query param. `query`
-   is now optional; at least one of query/status/page_token is required.
-3. **Pagination continuation** — Clio Manage paginates by cursor:
-   `meta.paging.next`/`previous` are full next-page URLs, omitted when absent
-   (verified: paging doc + developer FAQ). `matterPageTokenFromNext()` folds the
-   next URL into a `/matters.json?…` token relative to the API base; the tool
-   accepts it back as `page_token` (validated to be a matters continuation —
-   an off-path/absolute token is rejected before any fetch) and replays it
-   against `${apiBase}${token}`, mirroring `clioPaginateManage`.
+   through as Clio's documented comma-separated `status` query param
+   (docs.developers.clio.com/faq/: "The `status` filter only returns the
+   statuses you specify … Add additional statuses in a comma-separated list …
+   If no `status` filter is passed at all, all matters are returned").
+   Case-sensitivity is undocumented; we normalise to lowercase so only the
+   documented literal values are ever sent. `query` is now optional; at least
+   one of query/status/page_token is required.
+3. **Pagination continuation (opaque cursor)** — Clio Manage paginates by
+   cursor: `meta.paging.next`/`previous` are full next-page URLs carrying the
+   cursor as a `page_token` query param, omitted when no further page
+   (verified: paging doc + developer FAQ). `matterPageTokenFromNext()` PARSES
+   the next URL (never prefix-matches — DURABLE_LESSONS 2026-07-28), requires
+   the exact Manage API origin and exact `<apiBase>/matters.json` pathname
+   (URL normalisation collapses `..` traversal, so traversal fails the
+   equality check), and extracts ONLY the `page_token` value. The continuation
+   request is rebuilt by us from named parts — hardcoded `/matters.json` path,
+   our `fields`/`limit`, the same query/status (the schema tells the model to
+   repeat them — Clio's own next URL is exactly "the original params plus
+   page_token"), with the model-supplied cursor travelling only as a
+   URL-encoded query-param value. A first-review finding: the original design
+   replayed a path-shaped token and its `startsWith("/matters.json")` guard
+   was traversal-bypassable via URL normalisation — the exact 2026-07-28
+   lesson class; redesigned to the opaque cursor before merge.
 4. **Honest totals in the tool output** — payload is now `{ matters, count,
    total_entries, has_more, next_page_token? }`. `meta.records` (a total count)
    is NOT documented in the reachable Clio docs (paging page, FAQ, changelog all
    silent), so it is parsed tolerantly: surfaced as `total_entries` when present
    and numeric, `null` otherwise — the model is told to say "showing the first
    N — more exist" when the total is unknown and `has_more` is true.
+   `has_more` derives from the RAW presence of `meta.paging.next` — never from
+   whether a cursor was successfully extracted — so an unexpected next-URL
+   shape degrades to an honest "more exist", not a silent "no more pages".
 5. **Schema description + `CLIO_MANAGE_SYSTEM_PROMPT`** updated: use the status
    argument (never query keywords like "open"), report counts honestly from
-   count/total_entries/has_more, fetch further pages only when the user asks,
-   and never enumerate matters by looping narrower searches.
+   count/total_entries/has_more, fetch further pages only when the user asks
+   (page_token with the same query/status), and never enumerate matters by
+   looping narrower searches. The at-least-one-argument rule is stated in the
+   function description itself.
 
 **Verified vs deferred (API claims).** Verified against official docs: 200-max
-index page size, cursor pagination via `meta.paging.next` URLs, comma-separated
-`status=open,pending,closed` filter on matters. Not verifiable, so parsed
-tolerantly rather than claimed: `meta.records` total count. Deferred as
-unverified: any originating-solicitor/responsible-attorney filter — not
-confirmed in the research doc, not added.
+index page size + cursor `page_token` param
+(docs.developers.clio.com/api-docs/clio-manage/paging/), `meta.paging.next`
+follow-until-absent (docs.developers.clio.com/faq/), comma-separated
+`status=open,pending,closed` filter on matters (same FAQ, quoted above; case
+sensitivity undocumented — lowercase literals assumed and enforced). Not
+verifiable, so parsed tolerantly rather than claimed: `meta.records` total
+count. Deferred as unverified: any originating-solicitor/responsible-attorney
+filter — not confirmed in the research doc, not added.
 
 **Verification evidence:** `npx tsc --noEmit` clean; full backend suite
-`npx vitest run` 616/616 passing (baseline 604 + 12 new: 7 find_matter
-behaviour tests incl. URL-param assertions, status-only search, page_token
-replay + off-path rejection, meta parsing; 3 `parseMatterStatusFilter`; 2
-`matterPageTokenFromNext`); `npx prettier --check` clean on both changed files.
-No limiter touched (≤1 request per test, Manage bucket capacity 50) so no
-frozen-clock handling needed.
+`npx vitest run` 620/620 passing (baseline 604 + 16 new: 9 find_matter
+behaviour tests — URL-param assertions for limit/status/query/fields,
+status-only search, unknown-status + empty-args rejection, meta parsing with
+opaque-cursor extraction, has_more-from-raw-next with a hostile next URL,
+continuation-request rebuild incl. fields+limit+cursor, traversal-shaped
+page_token never becoming a path; 3 `parseMatterStatusFilter`; 5
+`matterPageTokenFromNext` incl. traversal/suffix-path/off-host/
+protocol-relative rejection); `npx prettier --check` clean on both changed
+files. No limiter touched (≤1 request per test, Manage bucket capacity 50) so
+no frozen-clock handling needed. Independent review round 1 failed on the
+page_token traversal blocker + 6 should-fixes; all addressed as above.
 
 ---
 
