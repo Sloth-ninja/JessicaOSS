@@ -31,22 +31,30 @@ schema/LICENSE touched.
    Case-sensitivity is undocumented; we normalise to lowercase so only the
    documented literal values are ever sent. `query` is now optional; at least
    one of query/status/page_token is required.
-3. **Pagination continuation (opaque cursor)** — Clio Manage paginates by
+3. **Pagination continuation (opaque BOUND token)** — Clio Manage paginates by
    cursor: `meta.paging.next`/`previous` are full next-page URLs carrying the
    cursor as a `page_token` query param, omitted when no further page
    (verified: paging doc + developer FAQ). `matterPageTokenFromNext()` PARSES
    the next URL (never prefix-matches — DURABLE_LESSONS 2026-07-28), requires
    the exact Manage API origin and exact `<apiBase>/matters.json` pathname
    (URL normalisation collapses `..` traversal, so traversal fails the
-   equality check), and extracts ONLY the `page_token` value. The continuation
-   request is rebuilt by us from named parts — hardcoded `/matters.json` path,
-   our `fields`/`limit`, the same query/status (the schema tells the model to
-   repeat them — Clio's own next URL is exactly "the original params plus
-   page_token"), with the model-supplied cursor travelling only as a
-   URL-encoded query-param value. A first-review finding: the original design
-   replayed a path-shaped token and its `startsWith("/matters.json")` guard
-   was traversal-bypassable via URL normalisation — the exact 2026-07-28
-   lesson class; redesigned to the opaque cursor before merge.
+   equality check; suffix-domain and userinfo host spoofs fail the origin
+   equality), and extracts ONLY the `page_token` value. The token handed to
+   the model is then minted by `encodeMatterPageToken()` as base64url JSON
+   `{ c: cursor, q?, s? }` — BINDING the cursor to the query/status the page
+   was actually fetched with, because models routinely drop optional args on
+   follow-ups and an unbound continuation would silently fetch the UNFILTERED
+   matter list. On continuation the token is length-bounded (≤1024 chars),
+   decoded (`decodeMatterPageToken()`, decode/shape failures → the fixed
+   user-safe error before any fetch), its status re-validated via
+   `parseMatterStatusFilter`, and the request rebuilt from named parts —
+   hardcoded `/matters.json` path, our `fields`/`limit`, the DECODED
+   query/status (model-supplied query/status are deliberately ignored when a
+   page_token is present), with the cursor travelling only as a URL-encoded
+   query-param value. Review history: round 1 found the original path-shaped
+   token's `startsWith("/matters.json")` guard traversal-bypassable via URL
+   normalisation — the exact 2026-07-28 lesson class — and forced the opaque
+   redesign; the final pre-merge wave bound the filters into the token.
 4. **Honest totals in the tool output** — payload is now `{ matters, count,
    total_entries, has_more, next_page_token? }`. `meta.records` (a total count)
    is NOT documented in the reachable Clio docs (paging page, FAQ, changelog all
@@ -59,9 +67,9 @@ schema/LICENSE touched.
 5. **Schema description + `CLIO_MANAGE_SYSTEM_PROMPT`** updated: use the status
    argument (never query keywords like "open"), report counts honestly from
    count/total_entries/has_more, fetch further pages only when the user asks
-   (page_token with the same query/status), and never enumerate matters by
-   looping narrower searches. The at-least-one-argument rule is stated in the
-   function description itself.
+   (pass page_token on its own — the original filters are remembered inside
+   it), and never enumerate matters by looping narrower searches. The
+   at-least-one-argument rule is stated in the function description itself.
 
 **Verified vs deferred (API claims).** Verified against official docs: 200-max
 index page size + cursor `page_token` param
@@ -74,17 +82,23 @@ count. Deferred as unverified: any originating-solicitor/responsible-attorney
 filter — not confirmed in the research doc, not added.
 
 **Verification evidence:** `npx tsc --noEmit` clean; full backend suite
-`npx vitest run` 620/620 passing (baseline 604 + 16 new: 9 find_matter
-behaviour tests — URL-param assertions for limit/status/query/fields,
-status-only search, unknown-status + empty-args rejection, meta parsing with
-opaque-cursor extraction, has_more-from-raw-next with a hostile next URL,
-continuation-request rebuild incl. fields+limit+cursor, traversal-shaped
-page_token never becoming a path; 3 `parseMatterStatusFilter`; 5
+`npx vitest run` 627/627 passing (baseline 604 + 23 new: 11 new find_matter
+behaviour tests (13 in the block) — URL-param assertions for
+limit/status/query/fields, status-only search, unknown-status + empty-args
+rejection, meta parsing with bound-token minting, has_more-from-raw-next with
+a hostile next URL, continuation rebuild from the token's bound filters,
+model-supplied query/status ignored under page_token, tampered/garbage/
+traversal-shaped and over-length tokens rejected before any fetch,
+tampered-status-in-token rejection; 3 `parseMatterStatusFilter`; 6
 `matterPageTokenFromNext` incl. traversal/suffix-path/off-host/
-protocol-relative rejection); `npx prettier --check` clean on both changed
-files. No limiter touched (≤1 request per test, Manage bucket capacity 50) so
-no frozen-clock handling needed. Independent review round 1 failed on the
-page_token traversal blocker + 6 should-fixes; all addressed as above.
+protocol-relative plus the named 2026-07-28 suffix-domain and userinfo
+host-spoof shapes; 3 token encode/decode round-trip); `npx prettier --check`
+clean on both changed files. No limiter
+touched (≤1 request per test, Manage bucket capacity 50) so no frozen-clock
+handling needed. Independent review round 1 failed on the page_token
+traversal blocker + 6 should-fixes (all addressed); round 2 PASSED, then a
+final pre-merge wave bound the filters into the token, added the named
+host-spoof regression tests, and length-bounded the incoming token.
 
 ---
 

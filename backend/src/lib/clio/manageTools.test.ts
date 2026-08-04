@@ -16,6 +16,8 @@ import { makeClioDb } from "./fakeClioDb";
 import { saveClioConnection } from "./connections";
 import { resetClioClientStateForTests } from "./client";
 import {
+  decodeMatterPageToken,
+  encodeMatterPageToken,
   executeClioManageToolCall,
   matterPageTokenFromNext,
   minutesToSeconds,
@@ -211,7 +213,11 @@ describe("clio_find_matter — happy path + error mapping", () => {
     expect(payload.count).toBe(2);
     expect(payload.total_entries).toBe(26);
     expect(payload.has_more).toBe(true);
-    expect(payload.next_page_token).toBe("abc123");
+    // The minted token is BOUND: cursor plus the filters this page used.
+    const decoded = JSON.parse(
+      Buffer.from(payload.next_page_token, "base64url").toString("utf8"),
+    );
+    expect(decoded).toEqual({ c: "abc123", q: "Kyckr", s: "open" });
   });
 
   it("reports has_more from the RAW next URL even when no cursor can be extracted", async () => {
@@ -239,15 +245,16 @@ describe("clio_find_matter — happy path + error mapping", () => {
     expect(payload.next_page_token).toBeUndefined();
   });
 
-  it("sends a continuation as a rebuilt request: fixed path, fields, limit, cursor as a query param", async () => {
+  it("sends a continuation as a rebuilt request using the token's bound filters", async () => {
     const db = await connectedDb();
     const fetchMock = vi.fn(async (_url: string | URL) =>
       json({ data: [{ id: 3 }] }),
     );
     vi.stubGlobal("fetch", fetchMock);
+    const token = encodeMatterPageToken("abc123", "Kyckr", "open");
     const { event, content } = await executeClioManageToolCall(
       "clio_find_matter",
-      { page_token: "abc123", query: "Kyckr", status: "open" },
+      { page_token: token },
       ctx(db),
     );
     expect(event.status).toBe("ok");
@@ -261,24 +268,73 @@ describe("clio_find_matter — happy path + error mapping", () => {
     expect(JSON.parse(content).count).toBe(1);
   });
 
-  it("never lets a model-supplied page_token become a request path (traversal-shaped token)", async () => {
+  it("ignores model-supplied query/status when a page_token is present", async () => {
     const db = await connectedDb();
     const fetchMock = vi.fn(async (_url: string | URL) => json({ data: [] }));
     vi.stubGlobal("fetch", fetchMock);
-    const malicious = "/matters.json/../../../api/v4/bills.json";
+    const token = encodeMatterPageToken("abc123", "Kyckr", "open");
     const { event } = await executeClioManageToolCall(
       "clio_find_matter",
-      { page_token: malicious },
+      { page_token: token, query: "Different Client", status: "closed" },
       ctx(db),
     );
     expect(event.status).toBe("ok");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
     const url = new URL(String(fetchMock.mock.calls[0][0]));
-    // The path is always ours; the malicious string only appears URL-encoded
-    // as the page_token query-param value.
-    expect(url.pathname).toBe("/api/v4/matters.json");
-    expect(url.searchParams.get("page_token")).toBe(malicious);
-    expect(url.pathname).not.toContain("bills");
+    // The bound filters win; the conflicting model args never reach Clio.
+    expect(url.searchParams.get("query")).toBe("Kyckr");
+    expect(url.searchParams.get("status")).toBe("open");
+  });
+
+  it("rejects a tampered or garbage page_token before any fetch", async () => {
+    const db = await connectedDb();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    for (const bad of [
+      "/matters.json/../../../api/v4/bills.json",
+      "!!!not-base64url!!!",
+      Buffer.from(JSON.stringify({ x: 1 })).toString("base64url"),
+      Buffer.from(JSON.stringify({ c: 42 })).toString("base64url"),
+    ]) {
+      const { event } = await executeClioManageToolCall(
+        "clio_find_matter",
+        { page_token: bad },
+        ctx(db),
+      );
+      expect(event.status).toBe("error");
+      expect(event.error).toMatch(/page token is not valid/i);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a decoded status that is not a valid filter", async () => {
+    const db = await connectedDb();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const tampered = Buffer.from(
+      JSON.stringify({ c: "abc123", s: "archived" }),
+    ).toString("base64url");
+    const { event } = await executeClioManageToolCall(
+      "clio_find_matter",
+      { page_token: tampered },
+      ctx(db),
+    );
+    expect(event.status).toBe("error");
+    expect(event.error).toMatch(/'open', 'pending', 'closed'/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an over-length page_token before decoding", async () => {
+    const db = await connectedDb();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { event } = await executeClioManageToolCall(
+      "clio_find_matter",
+      { page_token: "a".repeat(1025) },
+      ctx(db),
+    );
+    expect(event.status).toBe("error");
+    expect(event.error).toMatch(/page token is not valid/i);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("maps an upstream 500 to a fixed generic error (no raw text)", async () => {
@@ -356,9 +412,43 @@ describe("matterPageTokenFromNext", () => {
       ),
     ).toBeUndefined();
   });
+  it("rejects the suffix-domain and userinfo host spoofs (2026-07-28 lesson)", () => {
+    // Suffix-domain: the real host is a literal prefix of an attacker domain.
+    expect(
+      matterPageTokenFromNext(
+        "https://eu.app.clio.com.evil.example.com/api/v4/matters.json?page_token=x",
+      ),
+    ).toBeUndefined();
+    // Userinfo: everything before @ is credentials; the real host is evil.
+    expect(
+      matterPageTokenFromNext(
+        "https://eu.app.clio.com@evil.example.com/api/v4/matters.json?page_token=x",
+      ),
+    ).toBeUndefined();
+  });
   it("returns undefined for malformed or non-string input", () => {
     expect(matterPageTokenFromNext("not a url")).toBeUndefined();
     expect(matterPageTokenFromNext(null)).toBeUndefined();
+  });
+});
+
+describe("matter page token encode/decode", () => {
+  it("round-trips cursor + bound filters", () => {
+    const token = encodeMatterPageToken("cur-1", "Kyckr", "open,pending");
+    expect(decodeMatterPageToken(token)).toEqual({
+      cursor: "cur-1",
+      query: "Kyckr",
+      status: "open,pending",
+    });
+  });
+  it("omits absent filters and decodes a cursor-only token", () => {
+    const token = encodeMatterPageToken("cur-2");
+    expect(decodeMatterPageToken(token)).toEqual({ cursor: "cur-2" });
+  });
+  it("throws the friendly validation error on garbage", () => {
+    expect(() => decodeMatterPageToken("zzz")).toThrow(
+      /page token is not valid/i,
+    );
   });
 });
 

@@ -100,6 +100,66 @@ export function matterPageTokenFromNext(next: unknown): string | undefined {
   return cursor ? cursor : undefined;
 }
 
+// Generous bound on the incoming continuation token: our base64url envelope is
+// bigger than a bare Clio cursor, but nowhere near this. Anything longer is
+// garbage or abuse, refused before decoding.
+const MAX_PAGE_TOKEN_LENGTH = 1024;
+
+/**
+ * Mint the opaque continuation token handed to the model: base64url JSON
+ * binding the Clio cursor to the query/status the page was actually fetched
+ * with. Models routinely drop optional args on follow-ups; binding the filters
+ * into the token means a continuation can never silently degrade to the
+ * unfiltered matter list. Exported for unit testing.
+ */
+export function encodeMatterPageToken(
+  cursor: string,
+  query?: string,
+  status?: string,
+): string {
+  return Buffer.from(
+    JSON.stringify({
+      c: cursor,
+      ...(query ? { q: query } : {}),
+      ...(status ? { s: status } : {}),
+    }),
+  ).toString("base64url");
+}
+
+/**
+ * Decode + shape-check a continuation token minted by encodeMatterPageToken.
+ * Throws the fixed, user-safe validation error on anything that does not
+ * decode to `{ c: string, q?: string, s?: string }` (the `s` value is
+ * re-validated by the caller via parseMatterStatusFilter). Exported for unit
+ * testing.
+ */
+export function decodeMatterPageToken(token: string): {
+  cursor: string;
+  query?: string;
+  status?: string;
+} {
+  try {
+    const parsed: unknown = JSON.parse(
+      Buffer.from(token, "base64url").toString("utf8"),
+    );
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const { c, q, s } = parsed as { c?: unknown; q?: unknown; s?: unknown };
+      if (typeof c === "string" && c) {
+        return {
+          cursor: c,
+          ...(typeof q === "string" && q ? { query: q } : {}),
+          ...(typeof s === "string" && s ? { status: s } : {}),
+        };
+      }
+    }
+  } catch {
+    // fall through to the shared error below
+  }
+  throw new ClioValidationError(
+    "That page token is not valid — use the next_page_token from a previous matter search.",
+  );
+}
+
 /**
  * Convert whole/fractional minutes to the SECONDS Clio's `activities.quantity`
  * expects (verified 03/08: 360 → 6 min). Rejects non-positive and absurd
@@ -131,7 +191,7 @@ export const CLIO_MANAGE_TOOLS: OpenAIToolSchema[] = [
     function: {
       name: "clio_find_matter",
       description:
-        "Search the user's Clio Manage matters by free text and/or status. Provide at least one of query, status, or page_token. Returns up to 100 matters per page (id, display number, description, status, client) plus count, total_entries (null when Clio does not report a total), has_more, and next_page_token. Use the status argument — never query keywords like 'open' — to filter by open/pending/closed; one call resolves most searches. Fetch a further page only when the user asks for more: pass next_page_token as page_token together with the SAME query/status as the original search. Also use this to resolve a matter id before recording time or saving a document.",
+        "Search the user's Clio Manage matters by free text and/or status. Provide at least one of query, status, or page_token. Returns up to 100 matters per page (id, display number, description, status, client) plus count, total_entries (null when Clio does not report a total), has_more, and next_page_token. Use the status argument — never query keywords like 'open' — to filter by open/pending/closed; one call resolves most searches. Fetch a further page only when the user asks for more: pass next_page_token as page_token on its own — the original query/status are remembered inside the token. Also use this to resolve a matter id before recording time or saving a document.",
       parameters: {
         type: "object",
         properties: {
@@ -148,7 +208,7 @@ export const CLIO_MANAGE_TOOLS: OpenAIToolSchema[] = [
           page_token: {
             type: "string",
             description:
-              "Optional continuation cursor (next_page_token from a previous clio_find_matter result). Pass it with the SAME query/status as the original search to fetch the next page — and only when the user asks for more.",
+              "Optional continuation token (next_page_token from a previous clio_find_matter result). Pass it on its own to fetch the next page — the original query/status filters are remembered inside the token, and any query/status passed alongside it are ignored. Use only when the user asks for more.",
           },
         },
       },
@@ -287,7 +347,7 @@ export const CLIO_MANAGE_SYSTEM_PROMPT = `CLIO MANAGE (the user's connected prac
 - Clio enforces each user's own matter permissions — you only ever see and change data this user is permitted to. If a call returns a permissions error, tell the user plainly; never guess around it.
 - Before any WRITE (recording time, saving a document, deleting a time entry) restate the exact details and get the user's explicit go-ahead in the conversation first. Report time durations in minutes/hours to the user even though Clio stores seconds.
 - Resolve a matter with clio_find_matter before recording time or saving a document — never invent a matter id.
-- Finding matters: when the user asks for open/pending/closed matters, pass the status argument — never put words like "open" in the query text (Clio's free-text search does not understand them). One call returns up to 100 matters, almost always the whole answer. Report the count honestly from the result: use total_entries when present (e.g. "26 matters, showing all 26"); when total_entries is null and has_more is true, say "showing the first N — more exist". Fetch the next page only when the user asks for more (pass next_page_token as page_token with the same query/status); NEVER enumerate matters by looping repeated narrower searches.`;
+- Finding matters: when the user asks for open/pending/closed matters, pass the status argument — never put words like "open" in the query text (Clio's free-text search does not understand them). One call returns up to 100 matters, almost always the whole answer. Report the count honestly from the result: use total_entries when present (e.g. "26 matters, showing all 26"); when total_entries is null and has_more is true, say "showing the first N — more exist". Fetch the next page only when the user asks for more (pass next_page_token as page_token on its own — the original filters are remembered inside it); NEVER enumerate matters by looping repeated narrower searches.`;
 
 function asString(v: unknown): string {
   return typeof v === "string" ? v.trim() : v == null ? "" : String(v);
@@ -297,22 +357,41 @@ async function findMatter(
   ctx: ClioManageToolContext,
   args: Record<string, unknown>,
 ): Promise<ClioToolOutcome> {
-  const query = asString(args.query);
-  const status = parseMatterStatusFilter(args.status);
-  const pageToken = asString(args.page_token);
-  if (!query && !status && !pageToken) {
+  const rawPageToken = asString(args.page_token);
+  if (rawPageToken.length > MAX_PAGE_TOKEN_LENGTH) {
     throw new ClioValidationError(
-      "Provide a search query and/or a status filter.",
+      "That page token is not valid — use the next_page_token from a previous matter search.",
     );
   }
 
+  // Continuation tokens are BOUND: they carry the Clio cursor plus the
+  // query/status the previous page was actually fetched with, so a follow-up
+  // reuses the original filters even when the model omits them — a dropped
+  // filter can never silently turn the continuation into the unfiltered
+  // matter list. Model-supplied query/status are deliberately ignored when a
+  // page_token is present; the decoded status is re-validated.
+  let query: string;
+  let status: string | undefined;
+  let cursor: string | undefined;
+  if (rawPageToken) {
+    const decoded = decodeMatterPageToken(rawPageToken);
+    cursor = decoded.cursor;
+    query = decoded.query ?? "";
+    status = parseMatterStatusFilter(decoded.status);
+  } else {
+    query = asString(args.query);
+    status = parseMatterStatusFilter(args.status);
+    if (!query && !status) {
+      throw new ClioValidationError(
+        "Provide a search query and/or a status filter.",
+      );
+    }
+  }
+
   // One request shape for both first pages and continuations: the path, fields
-  // selector, and limit are always OURS; the model-supplied cursor only ever
-  // travels as the `page_token` query-param VALUE (URL-encoded by buildUrl), so
-  // no model-influenced string can become a request path. Clio's own
-  // meta.paging.next URL is exactly "the original request's params plus
-  // page_token", so a continuation re-sends the same query/status alongside
-  // the cursor (the schema tells the model to repeat them).
+  // selector, and limit are always OURS; the Clio cursor only ever travels as
+  // the `page_token` query-param VALUE (URL-encoded by buildUrl), so no
+  // model-influenced string can become a request path.
   const body = (await clioRequest(
     ctx.db,
     ctx.userId,
@@ -323,7 +402,7 @@ async function findMatter(
       query: {
         ...(query ? { query } : {}),
         ...(status ? { status } : {}),
-        ...(pageToken ? { page_token: pageToken } : {}),
+        ...(cursor ? { page_token: cursor } : {}),
         limit: MATTER_PAGE_SIZE,
       },
     },
@@ -343,7 +422,11 @@ async function findMatter(
   // degrades to an honest "more exist" rather than a silent "no more pages".
   const rawNext = body?.meta?.paging?.next;
   const hasMore = typeof rawNext === "string" && rawNext.length > 0;
-  const nextPageToken = matterPageTokenFromNext(rawNext);
+  const nextCursor = matterPageTokenFromNext(rawNext);
+  const nextPageToken =
+    nextCursor !== undefined
+      ? encodeMatterPageToken(nextCursor, query, status)
+      : undefined;
   return clioToolOk("manage", "clio_find_matter", {
     matters,
     count: matters.length,
