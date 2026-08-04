@@ -7,6 +7,61 @@
 
 ---
 
+## 2026-08-04 — OAuth callback-base production guard (branch `oauth-base-hardening`)
+
+**Scope:** make the 03/08 Clio redirect-URI incident fail loud and closed instead
+of silent. Incident: the deployed backend minted Clio authorize URLs with
+`redirect_uri=http://127.0.0.1:3001/…` because neither `API_PUBLIC_URL` nor
+`BACKEND_URL` was set on Fly, so `clioBackendBaseUrl()` fell through to its dev
+literal — a pilot solicitor's consent succeeded at Clio then bounced to
+127.0.0.1 (ERR_CONNECTION_REFUSED on her machine). Fixed operationally at the time
+by setting `API_PUBLIC_URL`; this PR adds the guard so it cannot recur silently.
+No new deps; no migration/`.env`/`schema.sql`/LICENSE touched.
+
+**Key changes.**
+1. **`backend/src/lib/clio/config.ts` — production guard.** New
+   `productionCallbackBaseMissing()`: when `NODE_ENV === 'production'` AND the
+   resolved callback base is the `http://127.0.0.1:3001` fallback (neither
+   `API_PUBLIC_URL` nor `BACKEND_URL` set), `clioConfigured()` now returns false —
+   the SAME state as missing client credentials. So `GET /clio/oauth/start`
+   returns the existing fixed 503 "not configured" and `startClioOAuth` is never
+   reached: no authorize URL with a 127.0.0.1 redirect is ever minted in
+   production. A redacted `safeErrorLog` fires ONCE per boot (module-level flag)
+   naming `API_PUBLIC_URL`. Dev/test behaviour is unchanged (guard is a no-op
+   outside production; the registered 127.0.0.1 dev redirect still works). The
+   fallback literal is now a shared const reused by `clioBackendBaseUrl()`.
+2. **MCP side — checked, finding recorded, behaviour unchanged.** The MCP
+   *interactive* authorize redirect derives its base from the request **Host
+   header** (`routes/user.ts backendPublicUrl`: `API_PUBLIC_URL || BACKEND_URL ||
+   ${req.protocol}://${req.get("host")}`) — a DIFFERENT fallback class. On Fly the
+   inbound host is the real public origin, so it never degrades to 127.0.0.1; per
+   the task's "derives differently ⇒ note and leave" instruction it is unchanged.
+   A second helper, `mcpOAuthCallbackUrl()` (`lib/mcp/client.ts`), DOES share the
+   localhost-literal fallback, but it is used only by the token-refresh auth
+   provider (`servers.ts`, mode `"use"`), not the interactive connect flow, and is
+   now covered by `API_PUBLIC_URL` being required in production. Left unchanged to
+   keep the diff minimal; documented here and in CLAUDE.md/DURABLE_LESSONS.
+3. **Docs.** `backend/.env.example` gains a documented `API_PUBLIC_URL` /
+   `BACKEND_URL` block stating it is REQUIRED in production for OAuth callback
+   flows (Clio + MCP) with the incident rationale. CLAUDE.md env-registry row
+   upgraded to match (required-in-production, fail-closed note, MCP class
+   distinction). `docs/DURABLE_LESSONS.md` appends the lesson (env-derived
+   callback bases degrade silently; guard now fails closed; deploy verification of
+   OAuth features must include one real round-trip from a non-dev machine —
+   route/status checks cannot catch redirect-URI wrongness) with the debugging
+   signature (consent succeeds at the provider, then ERR_CONNECTION_REFUSED on
+   127.0.0.1:3001; the authorize URL's `redirect_uri` names the wrong host).
+
+**Tests.** `config.test.ts` gains 4 guard cases: production+fallback ⇒
+`clioConfigured` false (fail-closed, no URL minted); production+`API_PUBLIC_URL`
+⇒ configured + public redirect; production+`BACKEND_URL` alone ⇒ configured;
+non-production+fallback ⇒ unchanged (configured, 127.0.0.1 redirect).
+
+**Verification.** Backend `tsc --noEmit` clean; `vitest run` **604/604** (600
+baseline + 4 new); `prettier --check` clean on the two changed backend TS files.
+
+---
+
 ## 2026-08-03 — Clio train: composed-range fix wave (branch `clio-train-fixes`)
 
 **Scope:** the six findings from the composed-range multi-lens review of the Clio

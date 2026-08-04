@@ -21,6 +21,7 @@ beforeEach(() => {
   delete process.env.CLIO_MANAGE_API_VERSION;
   delete process.env.API_PUBLIC_URL;
   delete process.env.BACKEND_URL;
+  delete process.env.NODE_ENV;
 });
 
 afterEach(() => {
@@ -118,6 +119,49 @@ describe("redirect URIs", () => {
     );
   });
   it("defaults to the registered 127.0.0.1 literal (localhost banned)", () => {
+    expect(clioRedirectUri("manage")).toBe(
+      "http://127.0.0.1:3001/clio/oauth/callback",
+    );
+  });
+});
+
+describe("production callback-base guard (incident 03/08/2026)", () => {
+  beforeEach(() => {
+    // Credentials present so the ONLY variable under test is the callback base.
+    process.env.CLIO_CLIENT_ID = "m-id";
+    process.env.CLIO_CLIENT_SECRET = "m-secret";
+    process.env.CLIO_GROW_CLIENT_ID = "g-id";
+    process.env.CLIO_GROW_CLIENT_SECRET = "g-secret";
+  });
+
+  it("in production with NO public base, treats Clio OAuth as NOT configured (fail-closed, no localhost redirect minted)", () => {
+    process.env.NODE_ENV = "production";
+    // Neither API_PUBLIC_URL nor BACKEND_URL is set → base is the 127.0.0.1
+    // fallback. The start route guards on clioConfigured, so a false here means
+    // it returns the fixed "not configured" error and never mints an authorize
+    // URL pointing at 127.0.0.1.
+    expect(clioConfigured("manage")).toBe(false);
+    expect(clioConfigured("grow")).toBe(false);
+  });
+
+  it("in production WITH API_PUBLIC_URL set, behaves normally (configured + public redirect)", () => {
+    process.env.NODE_ENV = "production";
+    process.env.API_PUBLIC_URL = "https://api.jessicaoss.com";
+    expect(clioConfigured("manage")).toBe(true);
+    expect(clioRedirectUri("manage")).toBe(
+      "https://api.jessicaoss.com/clio/oauth/callback",
+    );
+  });
+
+  it("in production, BACKEND_URL alone satisfies the guard", () => {
+    process.env.NODE_ENV = "production";
+    process.env.BACKEND_URL = "https://api.jessicaoss.com";
+    expect(clioConfigured("manage")).toBe(true);
+  });
+
+  it("outside production, the localhost dev fallback is unchanged (configured; 127.0.0.1 redirect)", () => {
+    // NODE_ENV unset (dev/test), no public base → the guard MUST NOT fire.
+    expect(clioConfigured("manage")).toBe(true);
     expect(clioRedirectUri("manage")).toBe(
       "http://127.0.0.1:3001/clio/oauth/callback",
     );
