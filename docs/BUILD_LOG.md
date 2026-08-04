@@ -20,10 +20,11 @@ Docs-only; no code changes.
    round-trip now works from a non-dev machine, closing the loop on the
    03/08 incident.
 2. **Per-user permissions verification PASSES:** Lindsay's "matters visible"
-   count differs from the owner's, as expected — each connection sees only its
-   own Clio user's matters. This was the owner-designated confidentiality
-   check for Clio v1 (CLAUDE.md Current status, HANDOVER §0.1). The remaining
-   ~5 pilot lawyers can join once the office two are happy.
+   count differs from the owner's, as expected — consistent with per-user
+   scoping (count-level check only; no matter-by-matter enumeration was
+   performed). This was the owner-designated confidentiality check for Clio
+   v1 (CLAUDE.md Current status, HANDOVER §0.1). The remaining ~5 pilot
+   solicitors can join once the office pilots are happy.
 
 **Still outstanding (unchanged, owner actions):** M365 quarantine release +
 tenant allow-list for jessicaoss.com; DMARC TXT record in Cloudflare; HMLR
@@ -35,7 +36,9 @@ research-based, not-live-verified surface — verify on first real use.
 **Verification evidence:** owner confirmation in-session 04/08 (Connected
 status + differing matters counts observed on both accounts). Live checks
 same session: jessicaoss.com HTTP 200, `api.jessicaoss.com/health` ok, no
-open PRs.
+other open PRs at the time of check.
+
+---
 
 ## 2026-08-04 — OAuth callback-base production guard (branch `oauth-base-hardening`)
 

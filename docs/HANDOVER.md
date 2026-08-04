@@ -29,7 +29,7 @@ autoconfig delegation, piped-exit-code trap, Express-async crash class).
 
 ## 0. CURRENT PICKUP — 4 August 2026 (read this, then CLAUDE.md Current status)
 
-State: everything through PR #68 is merged + deployed + live. Clio connector
+State: everything through PR #69 is merged + deployed + live. Clio connector
 v1 shipped (#62–#66) and survived first pilot contact: the 03/08 incident
 (production minted 127.0.0.1 OAuth redirects because `API_PUBLIC_URL` was
 unset on Fly) was fixed operationally (`fly secrets set … API_PUBLIC_URL=…`)
