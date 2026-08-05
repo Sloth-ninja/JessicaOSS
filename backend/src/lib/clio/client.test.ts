@@ -20,11 +20,12 @@ import {
 const asDb = (db: unknown) => db as any;
 
 // Most tests here perform real scrypt AES-256-GCM key derivation via
-// saveClioConnection/loadClioConnection (the seed helper). Under the full
-// 43-file suite that CPU work can blow vitest's 5s default and flake (same
-// class as the #61 userApiKeys fix); raise the ceiling so the suite is
-// deterministically green.
-vi.setConfig({ testTimeout: 20_000 });
+// saveClioConnection/loadClioConnection (the seed helper). Real KDF work
+// under concurrent machine load (parallel agent suites) has blown 5s AND 20s
+// ceilings while passing in isolation — that flake is contention, not a
+// defect (DURABLE_LESSONS 2026-08-05), so the ceiling is deliberately
+// generous.
+vi.setConfig({ testTimeout: 120_000 });
 
 function json(
   body: unknown,

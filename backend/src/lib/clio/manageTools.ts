@@ -16,8 +16,9 @@ import { loadActiveVersion } from "../documentVersions";
 import { getUserOrganisationId } from "../organisations";
 import { downloadFile } from "../storage";
 import type { OpenAIToolSchema } from "../llm";
+import { safeErrorLog } from "../safeError";
 import { createServerSupabase } from "../supabase";
-import { clioRequest } from "./client";
+import { ClioApiError, clioRequest } from "./client";
 import { clioHosts } from "./config";
 import {
   clioToolError,
@@ -104,6 +105,10 @@ export function matterPageTokenFromNext(next: unknown): string | undefined {
 // bigger than a bare Clio cursor, but nowhere near this. Anything longer is
 // garbage or abuse, refused before decoding.
 const MAX_PAGE_TOKEN_LENGTH = 1024;
+
+// Bound the free-text query at mint time so encodeMatterPageToken can never
+// produce a token its own decoder refuses at MAX_PAGE_TOKEN_LENGTH.
+const MAX_MATTER_QUERY_LENGTH = 256;
 
 /**
  * Mint the opaque continuation token handed to the model: base64url JSON
@@ -378,8 +383,21 @@ async function findMatter(
     cursor = decoded.cursor;
     query = decoded.query ?? "";
     status = parseMatterStatusFilter(decoded.status);
+    // Tokens we mint always carry the original filters, but a hand-crafted
+    // token decoding to a bare cursor must not become an UNFILTERED fetch —
+    // re-apply the at-least-one-filter guard on the decoded values too.
+    if (!query && !status) {
+      throw new ClioValidationError(
+        "Provide a search query and/or a status filter.",
+      );
+    }
   } else {
     query = asString(args.query);
+    if (query.length > MAX_MATTER_QUERY_LENGTH) {
+      throw new ClioValidationError(
+        "That search query is too long — use 256 characters or fewer.",
+      );
+    }
     status = parseMatterStatusFilter(args.status);
     if (!query && !status) {
       throw new ClioValidationError(
@@ -410,6 +428,14 @@ async function findMatter(
     data?: unknown[];
     meta?: { paging?: { next?: unknown }; records?: unknown };
   } | null;
+
+  // clioRequest returns null for a 204 or an unparseable body; shaping that
+  // into an empty list would have the model confidently report "0 matters".
+  if (!body || typeof body !== "object") {
+    throw new ClioApiError(
+      "Clio's response could not be read. Please try again.",
+    );
+  }
 
   const matters = Array.isArray(body?.data) ? body.data : [];
   // Clio's documented paging metadata is the next/previous URLs; a total count
@@ -774,6 +800,17 @@ export async function executeClioManageToolCall(
         return clioToolError("manage", name, `Unknown Clio tool '${name}'.`);
     }
   } catch (err) {
+    // Log the ORIGINAL failure before it collapses into the fixed client-safe
+    // message: Clio's error containment means chatTools' [chat/tools] stream
+    // log never fires for these tools, so an internal throw (Postgrest plain
+    // object, R2, docx) would otherwise be invisible in production logs.
+    // Validation errors are expected user-input failures and stay unlogged.
+    if (!(err instanceof ClioValidationError)) {
+      console.error("[clio/tools] tool failed", {
+        toolName: name,
+        error: safeErrorLog(err),
+      });
+    }
     return clioToolError("manage", name, safeToolMessage(err));
   }
 }
