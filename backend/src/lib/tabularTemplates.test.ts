@@ -940,6 +940,112 @@ describe("setTemplateVisibility", () => {
     const result = await setTemplateVisibility(db, OWNER, "t1", "firm", ORG);
     expect(result).toMatchObject({ id: "t1", visibility: "firm" });
   });
+
+  // Legacy rows: `workflows` predates this seam and the legacy POST/PATCH
+  // /workflows routes still write type:'tabular' payloads without its
+  // validation, so a stored row can hold values createTemplate would reject.
+  // Firm sharing is where those values become colleagues' prompt input, so the
+  // flip re-validates and refuses rather than propagating them.
+  it("refuses to share a legacy row whose tag is only markers/control chars", async () => {
+    const { db, tables } = makeDb({
+      tables: {
+        workflows: [
+          templateRow({
+            columns_config: [
+              {
+                index: 0,
+                name: "Governing law",
+                prompt: "Which law governs?",
+                format: "tag",
+                tags: ["[[|]]"],
+              },
+            ],
+          }),
+        ],
+      },
+    });
+    expect(await setTemplateVisibility(db, OWNER, "t1", "firm", ORG)).toBe(
+      "invalid_columns",
+    );
+    // The row is untouched — still private, no org stamp, nothing audited.
+    expect(tables.workflows[0].visibility).toBeUndefined();
+    expect(tables.workflows[0].organisation_id).toBeUndefined();
+    expect(insertDeletionAudit).not.toHaveBeenCalled();
+  });
+
+  it("refuses to share a legacy row with an oversize tag", async () => {
+    const { db } = makeDb({
+      tables: {
+        workflows: [
+          templateRow({
+            columns_config: [
+              {
+                index: 0,
+                name: "Category",
+                prompt: "Categorise the clause.",
+                format: "tag",
+                tags: ["x".repeat(101)],
+              },
+            ],
+          }),
+        ],
+      },
+    });
+    expect(await setTemplateVisibility(db, OWNER, "t1", "firm", ORG)).toBe(
+      "invalid_columns",
+    );
+  });
+
+  it("refuses to share a legacy row with more columns than the cap", async () => {
+    const { db } = makeDb({
+      tables: {
+        workflows: [
+          templateRow({
+            columns_config: Array.from(
+              { length: MAX_TEMPLATE_COLUMNS + 1 },
+              (_, i) => ({
+                index: i,
+                name: `Column ${i}`,
+                prompt: "Extract something.",
+              }),
+            ),
+          }),
+        ],
+      },
+    });
+    expect(await setTemplateVisibility(db, OWNER, "t1", "firm", ORG)).toBe(
+      "invalid_columns",
+    );
+  });
+
+  it("a valid row still flips to firm (validation is not a blanket block)", async () => {
+    const { db, tables } = makeDb({ tables: { workflows: [templateRow()] } });
+    expect(
+      await setTemplateVisibility(db, OWNER, "t1", "firm", ORG),
+    ).toMatchObject({ id: "t1", visibility: "firm" });
+    expect(tables.workflows[0]).toMatchObject({
+      visibility: "firm",
+      organisation_id: ORG,
+    });
+  });
+
+  it("reverting an invalid legacy row to private is never blocked", async () => {
+    const { db, tables } = makeDb({
+      tables: {
+        workflows: [
+          templateRow({
+            visibility: "firm",
+            organisation_id: ORG,
+            columns_config: [{ index: 0, name: "", prompt: "" }],
+          }),
+        ],
+      },
+    });
+    expect(
+      await setTemplateVisibility(db, OWNER, "t1", "private", ORG),
+    ).toMatchObject({ id: "t1", visibility: "private" });
+    expect(tables.workflows[0]).toMatchObject({ organisation_id: null });
+  });
 });
 
 // ── adminRevertTemplate ──────────────────────────────────────────────────────

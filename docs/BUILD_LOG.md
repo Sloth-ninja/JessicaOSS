@@ -7,6 +7,131 @@
 
 ---
 
+## 2026-08-05 — Review-templates train: composed-range fix wave (branch `templates-train-fixes`)
+
+**Scope:** the composed-range multi-lens review of the whole Review-templates
+train (base…`5da6d5c`, i.e. #74 backend, #76 frontend, #77 MFA alignment)
+found two Important issues and a set of Minor ones that no per-PR review could
+see, because each is only visible across commits. This wave fixes them in one
+PR. Backend + frontend; **no migration**, no `.env`, no LICENCE, no new
+dependencies. Not merged — awaiting review.
+
+**Key changes.**
+
+1. **I1 + M7 — the template→review linkage, restored and then made safe to
+   display.** The train shipped a template picker that passed only
+   `columns_config`, so every review created from a saved template stored
+   `workflow_id = null`: the firm usage dashboard's per-template table could
+   never attribute a run to the template it came from. Restored end to end —
+   `AddNewTRModal` now returns the picked template's id through `onAdd` (both
+   callers, `(pages)/tabular-reviews/page.tsx` and `ProjectWorkspace.tsx`,
+   forward it to `createTabularReview`), and the in-grid "Apply template" path
+   (`TabularReviewView.saveColumnsConfig`) sends it on the PATCH, clearing the
+   linkage with `null` when a built-in is applied. Built-ins are client-side
+   constants with `builtin-…` ids and `tabular_reviews.workflow_id` is a uuid
+   FK, so a single shared helper `persistableTemplateId()`
+   (`components/tabular/templateOptions.ts`) is the only place that decides
+   what may be persisted. `backend/src/routes/tabular.ts` gained the matching
+   surface: `parseWorkflowId()` accepts a uuid or null and answers a fixed 400
+   otherwise (a malformed uuid would otherwise raise Postgres 22P02 and
+   surface as a generic 500), applied on POST and on PATCH, where the update
+   is **owner-only, gated with `columns_config`** — the two always move
+   together in the UI.
+   *And in the same breath, the display side:* `lib/usageStats.ts` resolved
+   template titles by looking up **any** `workflows.id` a member's review
+   referenced. Since `workflow_id` is stored verbatim and the picker offers
+   templates a colleague was email-shared from **outside** the firm, a foreign
+   template's title — often a client or matter name — could print on this
+   firm's dashboard. The lookup is now org-scoped to two classes: owned by a
+   member of this organisation, or firm-shared **into** this organisation.
+   Ids matching neither resolve to no title and drop out of the per-template
+   table exactly as an already-deleted template id always has; their runs
+   still count in the totals and member rows. Restoring I1 without M7 would
+   have turned a dormant leak into a live one, which is why they are one item.
+2. **I2 — legacy rows cannot be shared to the firm.** `workflows` predates the
+   templates seam and the legacy `POST/PATCH /workflows` routes still accept
+   `type:'tabular'` payloads without its validation, so a stored row can hold
+   values `createTemplate` would reject (an oversize tag, a tag that sanitises
+   to nothing, more than 30 columns). A firm-shared template's tags are
+   interpolated into every colleague's cell-generation prompts, so sharing —
+   the moment a private row becomes other people's input — is the right choke
+   point. `setTemplateVisibility` re-validates the **stored** columns before
+   permitting a flip to `firm` and returns a new `"invalid_columns"` outcome,
+   which the route maps to **400 "Reopen and re-save this template before
+   sharing it."** (the Templates page already surfaces server detail verbatim
+   for this action, so no frontend change was needed — verified, not assumed).
+   Reverting to private is never blocked: that direction only reduces
+   exposure.
+3. **I3 — Hide now means the same thing everywhere.** `loadTemplateOptions()`
+   fetches `listHiddenWorkflows()` alongside the template list and filters
+   hidden built-ins out of both pickers, matching the Templates page. Each
+   fetch fails open on its own: a failed template fetch still yields the
+   built-ins, and a failed hidden-list fetch shows every built-in rather than
+   silently dropping templates the caller can still use.
+4. **Minor fixes.** M1 removed the dead `is_system` re-filter in
+   `listFirmTemplatesForAdmin` (the query already excludes built-ins) and left
+   a note saying so. M2 appended "Members share their own from the Templates
+   page." to the Firm-templates `SectionCard` description — exactly where the
+   #77 entry said the dropped discoverability pointer belonged. M3
+   parameterised the breadcrumb root of `WFColumnViewModal` /
+   `WFEditColumnModal` (`breadcrumbRoot`, default "Workflows") so the template
+   editor's column modals say "Templates". M4 derives the Pending-deletions
+   row label from the row's sub-kind — `listPendingDeletions` now reports
+   `resourceSubtype` (the `workflows.type` column), so a deleted template is
+   labelled "Template", not "Workflow". M6 disables "Save as template" above
+   30 columns with a hover explanation naming the cap and the review's actual
+   column count, instead of letting the save 400 (`HeaderActionsMenuItem`
+   gained an optional `title`). M9 guards draft work-loss on
+   `/review-templates/new`: a `beforeunload` handler while dirty, and a
+   ConfirmPopup on the breadcrumb — the only in-app way out (Next's App Router
+   exposes no navigation-blocking API; that limit is recorded in the code).
+   M10 special-cases 404 on a template save ("This template no longer exists.
+   It may have been deleted in another tab.") rather than inviting a retry
+   that cannot succeed. M11 documents why `loadOptions` must be a stable
+   function reference in `WorkflowPickerModal`'s effect deps — an inline arrow
+   would refetch the template list on every render.
+
+**Accepted with rationale (not actioned).** The review's remaining Minor
+findings **M5, M8 and M12** were accepted as-is by the fix-wave scope
+decision; no code changed on their account. Their text lives in the
+composed-range review of base…`5da6d5c` — this entry deliberately does not
+paraphrase findings it cannot quote.
+
+**Verification evidence.** Backend: `tsc --noEmit` clean; `vitest run` **757
+passed / 46 files, zero failures** (739 baseline, +18: 5 visibility-validation
+cases in `tabularTemplates.test.ts`, 1 route-mapping case in
+`routes/tabularTemplates.test.ts`, 5 template-linkage cases in
+`routes/tabular.test.ts`, 5 org-scoping cases in `usageStats.test.ts`, 2
+sub-kind cases in `deletionGovernance.test.ts`). The run also reported a
+vitest worker RPC timeout (`Timeout calling "onTaskUpdate"`) that varied
+between runs while every test passed — machine contention, the 2026-08-05
+lesson's signature, not a defect. `prettier --check` clean on the four changed
+files that were prettier-clean at baseline
+(`lib/tabularTemplates.ts` + its test, `routes/tabularTemplates.ts` + its
+test); `lib/usageStats.ts`, `routes/tabular.ts`, `lib/deletionGovernance.ts`
+and their tests were **already** prettier-dirty before this branch (4-space
+WS8-era style) and were left that way — hand-matched to each file's existing
+style, never `--write`-formatted (2026-07-28 lesson). Frontend: `tsc --noEmit`
+clean; `npm run lint` **112 problems (34 errors, 78 warnings) — byte-identical
+to the repo baseline**, zero new findings; `npm run build` succeeds (the build
+needs `NEXT_PUBLIC_SUPABASE_URL` at prerender, absent in this worktree, so it
+was supplied as a throwaway placeholder on the command line — no `.env` file
+was read or written). `prettier --write` was never run on the frontend. UK
+English throughout. In-browser QA is not possible from this worktree; the
+manual steps (create a review from a saved template and see it appear in the
+admin dashboard's template table; try to share a legacy template; hide a
+built-in and confirm it leaves both pickers) are enumerated in the PR body.
+
+**Decision recorded for the owner.** The legacy `POST/PATCH /workflows` routes
+still accept `type:'tabular'` writes that bypass the templates seam's
+validation — the reason I2 exists at all. Rejecting `type:'tabular'` on those
+routes would close the class at source rather than guarding one exit, but it
+is a behaviour change to an upstream surface and possibly to the older
+workflow editor, so it is raised as an owner-decision candidate in the PR
+body, not taken here.
+
+---
+
 ## 2026-08-05 — Template admin-revert MFA alignment (branch `templates-mfa-alignment`)
 
 **Scope:** closes the decision flagged as (d) in the #76 entry below — the

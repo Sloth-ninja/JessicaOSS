@@ -285,6 +285,7 @@ export function ProjectWorkspaceProvider({
         _projectId?: string,
         documentIds?: string[],
         columnsConfig?: ColumnConfig[] | null,
+        workflowId?: string,
     ) {
         setCreatingReview(true);
         try {
@@ -295,6 +296,7 @@ export function ProjectWorkspaceProvider({
                 document_ids: documentIds ?? readyDocs.map((d) => d.id),
                 columns_config: columnsConfig ?? [],
                 project_id: projectId,
+                ...(workflowId && { workflow_id: workflowId }),
             });
             setProjectReviews((prev) => (prev ? [review, ...prev] : prev));
             router.push(`/projects/${projectId}/tabular-reviews/${review.id}`);

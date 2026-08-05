@@ -138,6 +138,7 @@ export default function TabularReviewsPage() {
         columnsConfig?:
             | import("@/app/components/shared/types").ColumnConfig[]
             | null,
+        workflowId?: string,
     ) => {
         setCreating(true);
         try {
@@ -146,6 +147,7 @@ export default function TabularReviewsPage() {
                 document_ids: documentIds ?? [],
                 columns_config: columnsConfig ?? [],
                 ...(projectId && { project_id: projectId }),
+                ...(workflowId && { workflow_id: workflowId }),
             });
             router.push(
                 projectId

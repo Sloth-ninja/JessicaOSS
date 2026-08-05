@@ -32,6 +32,11 @@ export const tabularTemplatesRouter = Router();
 
 const TEMPLATE_NOT_FOUND_DETAIL = "Template not found.";
 const FIRM_SHARING_UNAVAILABLE_DETAIL = "Firm sharing is not available.";
+// A stored template whose columns no longer satisfy the seam's validation
+// (legacy rows written by the older workflow editor) cannot be shared with the
+// firm until its owner re-saves it through the template editor.
+const INVALID_COLUMNS_FOR_SHARING_DETAIL =
+  "Reopen and re-save this template before sharing it.";
 
 // Template ids are uuids. A non-uuid `:id` (including the literal "admin" from
 // a mistyped /tabular-templates/admin) gets the uniform 404 up front rather
@@ -249,6 +254,11 @@ tabularTemplatesRouter.patch(
       return void res
         .status(409)
         .json({ detail: FIRM_SHARING_UNAVAILABLE_DETAIL });
+    }
+    if (result === "invalid_columns") {
+      return void res
+        .status(400)
+        .json({ detail: INVALID_COLUMNS_FOR_SHARING_DETAIL });
     }
     if (result === "not_found") {
       return void res.status(404).json({ detail: TEMPLATE_NOT_FOUND_DETAIL });

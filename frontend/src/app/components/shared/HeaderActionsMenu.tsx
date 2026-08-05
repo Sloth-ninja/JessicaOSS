@@ -15,6 +15,8 @@ export type HeaderActionsMenuItem = {
     onSelect: () => void;
     disabled?: boolean;
     variant?: "default" | "danger";
+    /** Hover text — used to explain why an item is disabled. */
+    title?: string;
 };
 
 export function HeaderActionsMenu({
@@ -52,6 +54,7 @@ export function HeaderActionsMenu({
                                     : "default"
                             }
                             onSelect={item.onSelect}
+                            title={item.title}
                             className={cn(
                                 "cursor-pointer text-xs",
                                 item.variant === "danger" &&

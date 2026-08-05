@@ -124,6 +124,17 @@ async function fetchWindowRows<T>(
     return (data ?? []) as T[];
 }
 
+/** "Missing column/table" degrade codes — the workflow firm-visibility columns
+ *  arrive with migration 20260804_01, so a filter naming them can raise
+ *  Postgres 42703/42P01 (or PostgREST's PGRST204) on an unmigrated database.
+ *  Read-only filters here, but all three are accepted for consistency with
+ *  lib/tabularTemplates.ts (DURABLE_LESSONS 2026-08-05). */
+function isMissingColumnOrTable(error: unknown): boolean {
+    if (!error || typeof error !== "object") return false;
+    const code = (error as { code?: unknown }).code;
+    return code === "42703" || code === "42P01" || code === "PGRST204";
+}
+
 function parseTime(value: string | null): number | null {
     if (!value) return null;
     const t = Date.parse(value);
@@ -139,7 +150,10 @@ function parseTime(value: string | null): number | null {
  * filtered to that id set, so another firm's rows can never be counted. The
  * uuid→text gotcha (user_profiles.user_id is uuid; chats/tabular_reviews/
  * documents.user_id are TEXT) is handled by resolving ids first and filtering
- * the text columns by those string ids — never a cross-type join.
+ * the text columns by those string ids — never a cross-type join. Template
+ * TITLES are scoped the same way (owned by a member, or firm-shared into this
+ * organisation), so a template a colleague was email-shared from outside the
+ * firm can never print its name on this firm's dashboard.
  *
  * All windowing is computed in code over narrow selects capped at 30 days
  * (fine at pilot scale). `now` is injectable for deterministic tests.
@@ -193,7 +207,21 @@ export async function getOrganisationUsage(
         ),
     ]);
 
-    // Resolve workflow titles for the templates that actually appear.
+    // Resolve workflow titles for the templates that actually appear — ORG-SCOPED.
+    //
+    // `tabular_reviews.workflow_id` is stored verbatim from whichever template a
+    // member started from, and the template picker offers templates shared with
+    // them by email as well as their own and the firm's. Resolving those ids
+    // against the whole `workflows` table would print an OUTSIDER's template
+    // title on this firm's dashboard (a foreign firm's naming, e.g. a client or
+    // matter name, leaking through a colleague's email share). Only two classes
+    // of template are the firm's own to name: those owned by a member of THIS
+    // organisation, and those firm-shared INTO this organisation.
+    //
+    // Anything else resolves to no title and therefore drops out of the
+    // per-template table entirely (`titleById.has(wid)` below) — its runs still
+    // count in the totals and the member rows, which is the same path an
+    // already-deleted template id has always taken.
     const workflowIds = Array.from(
         new Set(
             reviewRows
@@ -202,14 +230,37 @@ export async function getOrganisationUsage(
         ),
     );
     const titleById = new Map<string, string>();
-    if (workflowIds.length > 0) {
-        const { data, error } = await db
+    if (workflowIds.length > 0 && memberIds.length > 0) {
+        const collectTitles = (rows: unknown) => {
+            for (const row of (rows ?? []) as WorkflowRow[]) {
+                if (row.title) titleById.set(row.id, row.title);
+            }
+        };
+        // Owned by a member of this firm (user_id is TEXT; memberIds are the
+        // uuid strings resolved from user_profiles — never a cross-type join).
+        const ownedResult = await db
             .from("workflows")
             .select("id, title")
-            .in("id", workflowIds);
-        if (error) throw error;
-        for (const row of (data ?? []) as WorkflowRow[]) {
-            if (row.title) titleById.set(row.id, row.title);
+            .in("id", workflowIds)
+            .in("user_id", memberIds);
+        if (ownedResult.error) throw ownedResult.error;
+        collectTitles(ownedResult.data);
+
+        // Firm-shared into this organisation. The visibility columns arrive with
+        // migration 20260804_01; on an unmigrated database this filter raises
+        // 42703/42P01 and simply contributes no extra titles.
+        const firmResult = await db
+            .from("workflows")
+            .select("id, title")
+            .in("id", workflowIds)
+            .eq("visibility", "firm")
+            .eq("organisation_id", organisationId);
+        if (firmResult.error) {
+            if (!isMissingColumnOrTable(firmResult.error)) {
+                throw firmResult.error;
+            }
+        } else {
+            collectTitles(firmResult.data);
         }
     }
 

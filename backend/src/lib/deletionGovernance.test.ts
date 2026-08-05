@@ -645,6 +645,60 @@ describe("listPendingDeletions", () => {
     const pending = await listPendingDeletions(db, "org-empty");
     expect(pending).toEqual([]);
   });
+
+  // `workflows` holds both prompt workflows and review templates
+  // (type='tabular'); the admin list must be able to name each honestly.
+  it("reports the workflow sub-kind so a template is not labelled a workflow", async () => {
+    const now = new Date("2026-08-05T00:00:00.000Z");
+    const tables: Record<string, Row[]> = {
+      user_profiles: [{ user_id: "m1", organisation_id: "org-x" }],
+      organisations: [{ id: "org-x", retention_days: 30 }],
+      workflows: [
+        {
+          id: "t1",
+          user_id: "m1",
+          title: "SPA first-look",
+          type: "tabular",
+          deleted_at: new Date(now.getTime() - DAY_MS).toISOString(),
+          deleted_by: "m1",
+        },
+        {
+          id: "w1",
+          user_id: "m1",
+          title: "Generate CP checklist",
+          type: "assistant",
+          deleted_at: new Date(now.getTime() - DAY_MS).toISOString(),
+          deleted_by: "m1",
+        },
+      ],
+    };
+    const { db } = makeDb(tables);
+    const pending = await listPendingDeletions(db, "org-x", now);
+    const template = pending.find((p) => p.id === "t1")!;
+    const workflow = pending.find((p) => p.id === "w1")!;
+    expect(template.resourceType).toBe("workflow");
+    expect(template.resourceSubtype).toBe("tabular");
+    expect(workflow.resourceSubtype).toBe("assistant");
+  });
+
+  it("reports a null sub-kind for tables that have none", async () => {
+    const now = new Date("2026-08-05T00:00:00.000Z");
+    const { db } = makeDb({
+      user_profiles: [{ user_id: "m1", organisation_id: "org-x" }],
+      organisations: [{ id: "org-x", retention_days: 30 }],
+      chats: [
+        {
+          id: "c1",
+          user_id: "m1",
+          title: "Chat",
+          deleted_at: new Date(now.getTime() - DAY_MS).toISOString(),
+          deleted_by: "m1",
+        },
+      ],
+    });
+    const pending = await listPendingDeletions(db, "org-x", now);
+    expect(pending[0].resourceSubtype).toBeNull();
+  });
 });
 
 // ── restoreResource ──────────────────────────────────────────────────────────

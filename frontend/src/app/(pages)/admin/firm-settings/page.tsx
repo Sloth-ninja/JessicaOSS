@@ -1055,7 +1055,7 @@ function FirmTemplatesSection() {
         <>
             <SectionCard
                 title="Firm templates"
-                description="Review templates currently shared with the whole firm. Reverting makes one private again — its owner keeps it."
+                description="Review templates currently shared with the whole firm. Reverting makes one private again — its owner keeps it. Members share their own from the Templates page."
             >
                 {error && (
                     <p className="px-5 py-3 text-xs text-red-600">{error}</p>
@@ -1145,6 +1145,16 @@ const RESOURCE_TYPE_LABELS: Record<GovernedResourceType, string> = {
 
 function pendingDeletionKey(item: PendingDeletion): string {
     return `${item.resourceType}:${item.id}`;
+}
+
+// `workflows` stores both prompt workflows and review templates
+// (type='tabular'), so the row label is derived from the sub-kind — a deleted
+// template must not be presented to an admin as a "Workflow".
+function pendingDeletionLabel(item: PendingDeletion): string {
+    if (item.resourceType === "workflow") {
+        return item.resourceSubtype === "tabular" ? "Template" : "Workflow";
+    }
+    return RESOURCE_TYPE_LABELS[item.resourceType];
 }
 
 // Pending deletions (WS8 PR G) — the firm's tombstoned items, awaiting either
@@ -1300,8 +1310,7 @@ function PendingDeletionsSection() {
                                 ? membersById[item.deletedBy] ||
                                   item.deletedBy
                                 : "Unknown";
-                            const typeLabel =
-                                RESOURCE_TYPE_LABELS[item.resourceType];
+                            const typeLabel = pendingDeletionLabel(item);
                             return (
                                 <li
                                     key={pendingDeletionKey(item)}
