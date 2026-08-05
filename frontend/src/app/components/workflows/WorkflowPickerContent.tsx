@@ -30,6 +30,11 @@ interface WorkflowPickerContentProps {
     disabledWorkflow?: (workflow: Workflow) => boolean;
     showTypeIcon?: boolean;
     allowClearPreview?: boolean;
+    /** When given, rows are grouped under a heading per source (review
+     *  templates use this for My templates / Shared with me / Firm / Built-in)
+     *  and the per-row source label is dropped as redundant. */
+    groupLabelFor?: (workflow: Workflow) => string;
+    searchPlaceholder?: string;
 }
 
 export function WorkflowPickerContent({
@@ -45,6 +50,8 @@ export function WorkflowPickerContent({
     disabledWorkflow,
     showTypeIcon = false,
     allowClearPreview = true,
+    groupLabelFor,
+    searchPlaceholder = "Search workflows...",
 }: WorkflowPickerContentProps) {
     const selectedRowRef = useRef<HTMLButtonElement>(null);
     const [mobilePane, setMobilePane] = useState<MobilePickerPane>(
@@ -102,7 +109,7 @@ export function WorkflowPickerContent({
                         <Search className="h-3.5 w-3.5 shrink-0 text-gray-400" />
                         <input
                             type="text"
-                            placeholder="Search workflows..."
+                            placeholder={searchPlaceholder}
                             value={search}
                             onChange={(event) =>
                                 onSearchChange(event.target.value)
@@ -145,7 +152,7 @@ export function WorkflowPickerContent({
                         </p>
                     ) : (
                         <div>
-                            {filteredWorkflows.map((workflow) => {
+                            {filteredWorkflows.map((workflow, rowIndex) => {
                                 const disabled =
                                     disabledWorkflow?.(workflow) ?? false;
                                 const isSelected = selected?.id === workflow.id;
@@ -153,9 +160,25 @@ export function WorkflowPickerContent({
                                     workflow.type === "tabular"
                                         ? Table2
                                         : MessageSquare;
+                                const groupLabel = groupLabelFor?.(workflow);
+                                const previousGroupLabel =
+                                    rowIndex > 0
+                                        ? groupLabelFor?.(
+                                              filteredWorkflows[rowIndex - 1],
+                                          )
+                                        : undefined;
+                                const groupHeading =
+                                    groupLabel && groupLabel !== previousGroupLabel
+                                        ? groupLabel
+                                        : null;
                                 return (
+                                    <div key={workflow.id}>
+                                    {groupHeading && (
+                                        <p className="bg-gray-50 px-3 py-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-gray-400">
+                                            {groupHeading}
+                                        </p>
+                                    )}
                                     <button
-                                        key={workflow.id}
                                         ref={isSelected ? selectedRowRef : null}
                                         type="button"
                                         disabled={disabled}
@@ -181,6 +204,12 @@ export function WorkflowPickerContent({
                                         </span>
                                         {showTypeIcon ? (
                                             <TypeIcon className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                                        ) : groupLabelFor ? (
+                                            <span className="shrink-0 text-xs tabular-nums text-gray-400">
+                                                {workflow.columns_config
+                                                    ?.length ?? 0}{" "}
+                                                cols
+                                            </span>
                                         ) : (
                                             <span className="shrink-0 text-xs text-gray-400">
                                                 {workflow.is_system
@@ -189,6 +218,7 @@ export function WorkflowPickerContent({
                                             </span>
                                         )}
                                     </button>
+                                    </div>
                                 );
                             })}
                         </div>

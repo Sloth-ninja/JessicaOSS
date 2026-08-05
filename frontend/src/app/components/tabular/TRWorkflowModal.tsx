@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import type { Workflow } from "../shared/types";
 import { WorkflowPickerModal } from "../workflows/WorkflowPickerModal";
+import { loadTemplateOptions, templateGroupOf } from "./templateOptions";
 
 interface TRWorkflowModalProps {
     open: boolean;
@@ -26,10 +27,14 @@ export function TRWorkflowModal({
             onSelect={onApply}
             workflowType="tabular"
             breadcrumbs={breadcrumbs}
-            primaryLabel="Apply"
-            selectingLabel="Applying..."
+            primaryLabel="Apply template"
+            selectingLabel="Applying…"
             selecting={applying}
             closeOnSelect={false}
+            loadOptions={loadTemplateOptions}
+            groupLabelFor={templateGroupOf}
+            emptyMessage="No templates found"
+            searchPlaceholder="Search templates..."
             disabledWorkflow={(workflow) => !workflow.columns_config?.length}
         />
     );
