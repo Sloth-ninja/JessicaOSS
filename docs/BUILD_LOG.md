@@ -91,11 +91,30 @@ dependencies. Not merged — awaiting review.
    function reference in `WorkflowPickerModal`'s effect deps — an inline arrow
    would refetch the template list on every render.
 
-**Accepted with rationale (not actioned).** The review's remaining Minor
-findings **M5, M8 and M12** were accepted as-is by the fix-wave scope
-decision; no code changed on their account. Their text lives in the
-composed-range review of base…`5da6d5c` — this entry deliberately does not
-paraphrase findings it cannot quote.
+**Accepted with rationale (not actioned).** Three of the review's Minor
+findings were accepted as-is; no code changed on their account.
+
+* **M5 — unchunked `.in()` inconsistency.** `enrichOwnerNames`
+  (`lib/tabularTemplates.ts:297`) does not chunk its id list, while
+  `listEmailSharedTemplates` deliberately does (`IN_CHUNK_SIZE`, guarding
+  against a PostgREST 414 on share-heavy accounts). Accepted: harmless at firm
+  scale — the owner-id set is bounded by the number of templates a caller can
+  see, not by shares — and it degrades to a failed enrichment (names stay
+  null), never a failed list. Follow-up is a code comment or a consistency
+  pass, not a defect at pilot scale.
+* **M8 — no AbortController time-boxes on the new load gates.** All three use
+  the `active`-flag idiom used everywhere else in the app, and all three have
+  explicit error + retry states, so none can hang the UI silently. Accepted as
+  deliberate consistency: changing only these three would make them the odd
+  ones out. The time-box half of the 2026-07-21 lesson (the infinite-spinner
+  incident) remains an **app-wide** follow-up, not a templates-train item.
+* **M12 — `TabularTemplate.columns` is typed `ColumnConfig[]`**, narrowing
+  `format` to the `ColumnFormat` union, while `parseStoredColumns` passes
+  arbitrary strings through from legacy rows. Not a bug: the
+  `formatLabel`/`formatIcon` fallbacks (`columnFormat.ts:17-23`) handle an
+  unknown format gracefully. Worth a comment. Same class: `updatedAt` carries
+  `created_at` (already documented at the mapping, and the UI honestly says
+  "Created" — `workflows` has no `updated_at` column).
 
 **Verification evidence.** Backend: `tsc --noEmit` clean; `vitest run` **757
 passed / 46 files, zero failures** (739 baseline, +18: 5 visibility-validation
