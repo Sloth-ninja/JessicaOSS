@@ -7,6 +7,33 @@
 
 ---
 
+## 2026-08-05 — Review templates: migration + spec + plan (branch `templates-migration`)
+
+**Scope:** plan Task 1 of Review templates v1 (saved tabular schemas). Lands
+the owner-authorised migration `20260804_01_workflow_firm_visibility.sql`
+(allowlist entry added by the owner 05/08), keeps `backend/schema.sql` in
+sync, and commits the owner-approved spec (`docs/TABULAR_TEMPLATES_SPEC.md`,
+approved with mock-ups 04-05/08, artifact
+https://claude.ai/code/artifact/98d5ce8a-1a9e-4561-91f3-0ce540296fb3) plus
+the implementation plan (`docs/superpowers/plans/2026-08-04-review-templates.md`).
+
+**Key changes.** Additive only: `workflows.visibility text not null default
+'private'` + `workflows.organisation_id uuid` (FK organisations, on delete
+set null) + partial index `workflows_firm_visible_idx`; a proving `select`
+ends the migration (22/07 visible-success lesson). Zero behaviour change
+until the templates backend (PR #74) reads the columns; that seam degrades
+(42703/PGRST204-tolerant) wherever the migration has not run, so merge/deploy
+order is free. Not yet run in production — owner runs it at templates-train
+close-out.
+
+**Verification evidence:** migration mirrors the schema.sql delta exactly;
+`npx tsc --noEmit` clean (no TS touched); hook allowlist verified
+(`20260804_01_workflow_firm_visibility.sql` present). Spec/plan docs carry
+the owner decisions of 04/08 (v1 scope, "Templates" naming, own surface,
+seam-over-workflows storage).
+
+---
+
 ## 2026-08-05 — Composed-range review fix wave for the #71/#72 train (branch `fix-train-composed-findings`)
 
 **Scope:** the six findings from the composed-range multi-lens review of the

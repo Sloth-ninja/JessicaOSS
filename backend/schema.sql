@@ -441,6 +441,10 @@ create table if not exists public.workflows (
   columns_config jsonb,
   practice text,
   is_system boolean not null default false,
+  -- Firm-shared review templates (migration 20260804_01): tabular-type rows
+  -- flipped to 'firm' are visible to every member of the stamped organisation.
+  visibility text not null default 'private',
+  organisation_id uuid references public.organisations(id) on delete set null,
   -- Deletion governance (WS8 PR G) — see projects.deleted_at.
   deleted_at timestamptz,
   deleted_by uuid,
@@ -449,6 +453,9 @@ create table if not exists public.workflows (
 
 create index if not exists idx_workflows_user
   on public.workflows(user_id);
+
+create index if not exists workflows_firm_visible_idx
+  on public.workflows(organisation_id) where visibility = 'firm';
 
 create index if not exists workflows_pending_purge_idx
   on public.workflows(deleted_at) where deleted_at is not null;
