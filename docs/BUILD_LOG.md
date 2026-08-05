@@ -7,6 +7,70 @@
 
 ---
 
+## 2026-08-05 — Template admin-revert MFA alignment (branch `templates-mfa-alignment`)
+
+**Scope:** closes the decision flagged as (d) in the #76 entry below — the
+independent review of the Review-templates frontend recorded that the template
+admin-revert was **the only admin mutation in the product not MFA-gated**, and
+asked for alignment with the WS9 firm-library revert the card is modelled on.
+That was a backend change, hence deferred out of #76 into this follow-up.
+Backend + frontend only; no migration, no `.env`, no LICENCE, no new
+dependencies. Not merged — awaiting review.
+
+**Key changes.**
+1. **`backend/src/routes/tabularTemplates.ts`** — `POST
+   /tabular-templates/:id/admin-revert` gains `requireMfaIfEnrolled` between
+   `requireAdmin` and `asyncHandler`, the exact ordering every mutating route
+   in `routes/admin.ts` uses (ten sites, incl. `POST
+   /admin/firm-library/:resourceType/:id/revert`). An admin enrolled in TOTP
+   must now be at `aal2` to unshare a firm template; an admin with no factor
+   enrolled is unaffected (the middleware is enrolment-conditional). The
+   file's header comment records the added step-up. `GET /admin/firm` stays
+   read-only and un-stepped, matching `routes/admin.ts`.
+2. **`backend/src/routes/tabularTemplates.test.ts`** — the mocked
+   `../middleware/auth` factory grows a `requireMfaIfEnrolled` stub driven by
+   a new `state.mfaOk` (reset in `beforeEach`), mirroring
+   `routes/admin.test.ts`. New case: an enrolled-but-unverified admin gets
+   **403 with `code: "mfa_verification_required"` and `adminRevertTemplate`
+   is never called** — the seam is unreachable, not merely unrewarded.
+3. **`frontend/src/app/(pages)/admin/firm-settings/page.tsx`** —
+   `FirmTemplatesSection` now uses the page's existing
+   `useMfaGuardedAction()` exactly as `FirmLibrarySection` does: the whole
+   mutation (optimistic removal, call, rollback) is the guarded action so it
+   **replays intact** after a step-up, `isMfaRequiredError(err)` is rethrown
+   for the guard while other failures still surface inline, and `{mfa.popup}`
+   renders alongside the card. Without the replay the row would vanish
+   optimistically, the request would 403, and the rollback would fight the
+   retry.
+4. **Card copy, changed only after the behaviour was true** — "Reverts
+   require two-factor confirmation and are recorded in the audit trail.",
+   byte-identical to the firm-library card. The previous sentence "Members
+   can share their own templates from the Templates page." is dropped for
+   exact parity with that card; if the reviewer wants the discoverability
+   pointer kept, it belongs in the `SectionCard` description.
+
+**Verification evidence.** Backend: `npx tsc --noEmit` clean; `npx prettier
+--check src/routes/tabularTemplates.ts src/routes/tabularTemplates.test.ts`
+clean; `npx vitest run` **739 passed / 46 files** (738 before, +1 new MFA
+case), zero failures. Frontend: `npx tsc --noEmit` clean; `npm run lint`
+byte-identical to the same command with these changes stashed (zero new
+findings — the repo baseline is unchanged); `npm run build` succeeds.
+`prettier --write` was NEVER run on the frontend (2026-07-28 lesson) — the
+re-indentation of the card's JSX under its new fragment wrapper was done by
+hand in the file's 4-space ESLint style. UK English throughout ("two-factor",
+"authorisation"). In-browser QA is not possible from this worktree (no
+env/secrets); the manual step — an MFA-enrolled admin reverting a firm
+template and seeing the step-up popup, then the revert completing without a
+second click — is enumerated in the PR body.
+
+**Decision note.** The middleware is *conditional* on enrolment
+(`requireMfaIfEnrolled`), so this does not force TOTP on the pilot firm; it
+guarantees that where an admin has enrolled, no admin mutation escapes the
+step-up. That closes the class rather than the instance: the audit of
+`routes/admin.ts` done for this PR found no other unstepped admin mutation.
+
+---
+
 ## 2026-08-05 — Review templates frontend: Templates surface + pickers (branch `templates-frontend`, plan Task 4)
 
 **Scope:** frontend half of the Review templates train

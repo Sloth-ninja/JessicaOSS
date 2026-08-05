@@ -991,6 +991,7 @@ function FirmLibrarySection() {
 // with a per-item revert. Reverts are org-scoped server-side and recorded in
 // the audit trail. An unmigrated database simply returns an empty list.
 function FirmTemplatesSection() {
+    const mfa = useMfaGuardedAction();
     const [rows, setRows] = useState<TabularTemplate[] | null>(null);
     const [loadError, setLoadError] = useState(false);
     const [reloadKey, setReloadKey] = useState(0);
@@ -1021,7 +1022,7 @@ function FirmTemplatesSection() {
         setReloadKey((k) => k + 1);
     };
 
-    const revert = async (template: TabularTemplate) => {
+    const revert = (template: TabularTemplate) => {
         const name = template.title.trim() || "this template";
         if (
             !window.confirm(
@@ -1031,93 +1032,106 @@ function FirmTemplatesSection() {
             return;
         }
         setError(null);
-        setBusyId(template.id);
-        const snapshot = rows;
-        setRows((prev) => (prev ?? []).filter((r) => r.id !== template.id));
-        try {
-            await adminRevertTabularTemplate(template.id);
-        } catch {
-            setRows(snapshot);
-            setError("Could not revert that template.");
-        } finally {
-            setBusyId(null);
-        }
+        // The whole mutation is the guarded action so it replays intact after an
+        // MFA step-up. The optimistic removal is rolled back on any failure;
+        // mfa-required is rethrown for the guard, everything else surfaces inline.
+        void mfa.run(async () => {
+            setBusyId(template.id);
+            const snapshot = rows;
+            setRows((prev) => (prev ?? []).filter((r) => r.id !== template.id));
+            try {
+                await adminRevertTabularTemplate(template.id);
+            } catch (err) {
+                setRows(snapshot);
+                if (isMfaRequiredError(err)) throw err;
+                setError("Could not revert that template.");
+            } finally {
+                setBusyId(null);
+            }
+        });
     };
 
     return (
-        <SectionCard
-            title="Firm templates"
-            description="Review templates currently shared with the whole firm. Reverting makes one private again — its owner keeps it."
-        >
-            {error && <p className="px-5 py-3 text-xs text-red-600">{error}</p>}
-            {loadError ? (
-                <LoadErrorRow
-                    message="Could not load the firm's templates."
-                    onRetry={retryLoad}
-                />
-            ) : rows === null ? (
-                <div className="space-y-2 px-5 py-4">
-                    {[0, 1, 2].map((i) => (
-                        <div
-                            key={i}
-                            className="h-6 w-full animate-pulse rounded bg-gray-100"
-                        />
-                    ))}
+        <>
+            <SectionCard
+                title="Firm templates"
+                description="Review templates currently shared with the whole firm. Reverting makes one private again — its owner keeps it."
+            >
+                {error && (
+                    <p className="px-5 py-3 text-xs text-red-600">{error}</p>
+                )}
+                {loadError ? (
+                    <LoadErrorRow
+                        message="Could not load the firm's templates."
+                        onRetry={retryLoad}
+                    />
+                ) : rows === null ? (
+                    <div className="space-y-2 px-5 py-4">
+                        {[0, 1, 2].map((i) => (
+                            <div
+                                key={i}
+                                className="h-6 w-full animate-pulse rounded bg-gray-100"
+                            />
+                        ))}
+                    </div>
+                ) : rows.length === 0 ? (
+                    <p className="px-5 py-6 text-sm text-gray-500">
+                        No review templates are shared with the whole firm yet.
+                    </p>
+                ) : (
+                    <ul className="divide-y divide-gray-100">
+                        {rows.map((template) => (
+                            <li
+                                key={template.id}
+                                className="flex flex-wrap items-center gap-3 px-5 py-3.5"
+                            >
+                                <span className="min-w-0 flex-1">
+                                    <span className="block truncate text-sm text-gray-900">
+                                        {template.title.trim() ||
+                                            "Untitled template"}
+                                    </span>
+                                    <span className="block truncate text-xs text-gray-400">
+                                        {template.columns.length} column
+                                        {template.columns.length === 1
+                                            ? ""
+                                            : "s"}
+                                        {template.practice
+                                            ? ` · ${template.practice}`
+                                            : ""}{" "}
+                                        ·{" "}
+                                        {template.ownerDisplayName?.trim() ||
+                                            "—"}{" "}
+                                        · created{" "}
+                                        {formatUkDate(template.updatedAt)}
+                                    </span>
+                                </span>
+                                <span className="w-32 shrink-0 text-right">
+                                    {busyId === template.id ? (
+                                        <Loader2 className="ml-auto h-4 w-4 animate-spin text-gray-400" />
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            onClick={() => revert(template)}
+                                            className="text-xs font-medium text-gray-700 transition-colors hover:text-gray-950"
+                                        >
+                                            Revert to private
+                                        </button>
+                                    )}
+                                </span>
+                            </li>
+                        ))}
+                    </ul>
+                )}
+                <div className="flex items-start gap-2.5 border-t border-gray-100 bg-gray-50 px-5 py-3.5">
+                    <Info className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                    <p className="text-xs leading-relaxed text-gray-600">
+                        Reverts require two-factor confirmation and are recorded
+                        in the audit trail.
+                    </p>
                 </div>
-            ) : rows.length === 0 ? (
-                <p className="px-5 py-6 text-sm text-gray-500">
-                    No review templates are shared with the whole firm yet.
-                </p>
-            ) : (
-                <ul className="divide-y divide-gray-100">
-                    {rows.map((template) => (
-                        <li
-                            key={template.id}
-                            className="flex flex-wrap items-center gap-3 px-5 py-3.5"
-                        >
-                            <span className="min-w-0 flex-1">
-                                <span className="block truncate text-sm text-gray-900">
-                                    {template.title.trim() ||
-                                        "Untitled template"}
-                                </span>
-                                <span className="block truncate text-xs text-gray-400">
-                                    {template.columns.length} column
-                                    {template.columns.length === 1
-                                        ? ""
-                                        : "s"}
-                                    {template.practice
-                                        ? ` · ${template.practice}`
-                                        : ""}{" "}
-                                    ·{" "}
-                                    {template.ownerDisplayName?.trim() || "—"} ·
-                                    created {formatUkDate(template.updatedAt)}
-                                </span>
-                            </span>
-                            <span className="w-32 shrink-0 text-right">
-                                {busyId === template.id ? (
-                                    <Loader2 className="ml-auto h-4 w-4 animate-spin text-gray-400" />
-                                ) : (
-                                    <button
-                                        type="button"
-                                        onClick={() => void revert(template)}
-                                        className="text-xs font-medium text-gray-700 transition-colors hover:text-gray-950"
-                                    >
-                                        Revert to private
-                                    </button>
-                                )}
-                            </span>
-                        </li>
-                    ))}
-                </ul>
-            )}
-            <div className="flex items-start gap-2.5 border-t border-gray-100 bg-gray-50 px-5 py-3.5">
-                <Info className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
-                <p className="text-xs leading-relaxed text-gray-600">
-                    Reverts are recorded in the audit trail. Members can share
-                    their own templates from the Templates page.
-                </p>
-            </div>
-        </SectionCard>
+            </SectionCard>
+            {mfa.popup}
+        </>
     );
 }
 

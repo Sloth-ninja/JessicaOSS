@@ -1,5 +1,9 @@
 import { Router } from "express";
-import { requireAuth, requireAdmin } from "../middleware/auth";
+import {
+  requireAuth,
+  requireAdmin,
+  requireMfaIfEnrolled,
+} from "../middleware/auth";
 import { asyncHandler } from "../lib/asyncHandler";
 import { createServerSupabase } from "../lib/supabase";
 import { getUserOrganisationId } from "../lib/organisations";
@@ -18,7 +22,8 @@ import {
 /**
  * Review templates (saved tabular schemas v1) — thin routes over
  * lib/tabularTemplates.ts. Mounted at /tabular-templates. All handlers are
- * requireAuth + asyncHandler; the admin surface adds requireAdmin. Validation
+ * requireAuth + asyncHandler; the admin surface adds requireAdmin, and its
+ * mutating route additionally steps up through requireMfaIfEnrolled. Validation
  * failures surface the TemplateValidationError message (user-safe by
  * construction); everything else degrades to asyncHandler's fixed generic 500.
  */
@@ -73,10 +78,14 @@ tabularTemplatesRouter.get(
 );
 
 // POST /tabular-templates/:id/admin-revert — revert a firm template to private.
+// Mutating admin route, so it steps up through requireMfaIfEnrolled exactly as
+// every mutation in routes/admin.ts does (incl. the WS9 firm-library revert this
+// mirrors) — an admin enrolled in TOTP must be at aal2 to unshare a template.
 tabularTemplatesRouter.post(
   "/:id/admin-revert",
   requireAuth,
   requireAdmin,
+  requireMfaIfEnrolled,
   asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
     if (rejectNonUuidId(req.params.id, res)) return;
