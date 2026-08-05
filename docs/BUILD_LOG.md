@@ -7,6 +7,155 @@
 
 ---
 
+## 2026-08-05 — Review templates frontend: Templates surface + pickers (branch `templates-frontend`, plan Task 4)
+
+**Scope:** frontend half of the Review templates train
+(`docs/superpowers/plans/2026-08-04-review-templates.md`, spec
+`docs/TABULAR_TEMPLATES_SPEC.md`, mock-up artifact
+98d5ce8a-1a9e-4561-91f3-0ce540296fb3). Consumes the `/tabular-templates`
+routes merged in #74 and builds all five spec surfaces: the Templates page,
+the template editor, Save-as-template from a live review grid, the relabelled
+pickers plus the Workflows-page pointer, and the admin Firm-templates card.
+No new dependencies; no backend, migration, `.env` or LICENSE changes. Not
+merged — awaiting review.
+
+**Key changes.**
+1. **`frontend/src/app/lib/mikeApi.ts`** — `TabularTemplate` /
+   `TabularTemplateList` types plus eight methods
+   (`listTabularTemplates`, `getTabularTemplate`, `createTabularTemplate`,
+   `updateTabularTemplate`, `deleteTabularTemplate`,
+   `setTabularTemplateVisibility`, `listAdminFirmTabularTemplates`,
+   `adminRevertTabularTemplate`) in the file's existing `apiRequest` idiom.
+   `columns` is typed as the existing `ColumnConfig` (same shape as the
+   backend `TemplateColumn`).
+2. **Templates page `(pages)/review-templates/page.tsx`** — sections My
+   templates / Shared with me / Firm templates / Built-in in that order;
+   rows carry name, column count, practice, owner/date and a per-ownership
+   ⋯ menu (owner: Edit columns, Rename, Duplicate, Share to firm ⇄ Revert to
+   private, Delete; shared and non-owner firm rows: Duplicate only;
+   built-ins: Duplicate + Hide). An owner's own firm-shared template shows
+   the `FirmBadge` in My templates and is not duplicated into the Firm
+   section. The Firm section and the share-to-firm action are hidden unless
+   the caller has a firm AND `firmSharingSupported` is true (42703 degrade).
+   Load gate has an explicit error+retry state, never an unbounded spinner
+   (2026-07-21 lesson).
+3. **Editor `(pages)/review-templates/[id]/page.tsx` +
+   `components/tabular/TemplateEditor.tsx`** — Next 16 `use(params)`
+   wrapper over a three-mode editor: draft (`/review-templates/new`), owned
+   (columns auto-save, Rename/Duplicate/Delete), and read-only + Duplicate
+   for built-ins and templates owned by someone else. Reuses
+   `AddColumnModal`, `WFEditColumnModal`, `WFColumnViewModal` and
+   `columnFormat.ts` exactly as `WorkflowDetailPage` does. Load failures
+   split 404 (fixed "Template not found.") from transport errors
+   (error+retry).
+4. **`components/tabular/SaveAsTemplateModal.tsx` +
+   `TemplateDetailsModal.tsx`** — Frame B: name prefilled from the review
+   title, optional practice-area pills (the `NewWorkflowModal` idiom incl.
+   the "Others" free-text escape), and the honest line "Cell contents are not
+   saved." Entry point is the review grid's header ⋯ menu
+   (`TabularReviewView`), disabled when the review has no columns; on success
+   a self-dismissing "Template saved" notice links to `/review-templates`
+   (there is no app-wide toast component — deliberately a local notice, no
+   new dependency).
+5. **Pickers (`components/tabular/templateOptions.ts`, `TRWorkflowModal`,
+   `WorkflowPickerModal`, `WorkflowPickerContent`, `AddNewTRModal`)** — a
+   small adapter maps `TabularTemplate` onto the shape the existing picker
+   already renders, so both pickers list mine / shared / firm / built-in from
+   one call without forking the component. `WorkflowPickerModal` gains
+   optional `loadOptions` / `groupLabelFor` / `emptyMessage` /
+   `searchPlaceholder` (defaults preserve today's behaviour for the assistant
+   picker). Copy is now "Start from a template" (new review) and "Apply
+   template" (in-grid, still replacing columns and clearing cells behind the
+   existing confirmation); rows show group headings and "N cols".
+6. **`components/workflows/WorkflowList.tsx`** — lists assistant workflows
+   only; the now-degenerate Type column and its filter are removed, built-ins
+   filtered to `type === "assistant"`, and a dashed pointer line "Review
+   templates have moved to Templates." links `/review-templates`.
+   `NewWorkflowModal` gains a `lockedType` prop so the Workflows page can no
+   longer create a tabular workflow that would immediately vanish from it.
+7. **`components/shared/AppSidebar.tsx`** — "Templates" nav entry directly
+   under Tabular Review (org and orgless users alike).
+8. **`(pages)/admin/firm-settings/page.tsx`** — `FirmTemplatesSection` card:
+   the firm's firm-shared templates with a per-item Revert to private,
+   mirroring the WS9 Firm library card (`SectionCard` + `LoadErrorRow`,
+   optimistic removal with rollback).
+
+**Independent review: PASSED** with three should-fixes and five cheap nits,
+all taken in the second push (MFA gating explicitly out of scope for this PR —
+it lands as a follow-up backend+frontend PR, so the admin card's copy is
+unchanged):
+1. **Editor stale state across `[id]` navigations** — `<TemplateEditor
+   key={id} …>` in the route segment, so state re-initialises per template;
+   fixes built-in → Duplicate → Back showing the previous template's content
+   and the read-only flash after `createDraft`'s `replace()`.
+2. **Keyboard activation leak** — the row's actions `<td>` now stops
+   propagation on `onKeyDown` as well as `onClick`, so Enter/Space on the ⋯
+   trigger opens the menu instead of navigating the row.
+3. **Column auto-save failure** — `applyColumns` captures the previous
+   columns and `persistColumns` **restores them on failure** with an inline
+   error ("Your last change was undone — please try again."), the
+   snapshot+rollback pattern from the admin card
+   (`firm-settings/page.tsx:1033-1044`); UI and server can no longer silently
+   diverge.
+Nits: `TemplateRow`/`Section` moved to module scope (a component defined
+inside another is a new type each render, remounting row subtrees and closing
+open menus); Duplicate failures surface the server detail at both call sites;
+the `err instanceof Error ? err.message : ""` idiom replaced with the house
+`err instanceof MikeApiError && err.message` at all four flagged sites, so
+network `TypeError`s can never render as user copy; the save-notice timer is
+now cleared on unmount and replaced on re-save; "Search templates…" ellipsis.
+Recorded for the composed-range review / QA rather than fixed here:
+`AbortController` time-boxes (consistent with existing pages), a
+`beforeunload` draft guard, and the assistant-picker wrapper `div`.
+
+**Verification evidence (re-run after the review fixes):** `npx tsc --noEmit`
+clean. `npm run lint`: **112 problems (34 errors, 78 warnings) — byte-identical
+to the same command run with these changes stashed**, i.e. zero new findings;
+every error is pre-existing repo baseline, and the six new files contribute
+none. `npm run build` succeeds, emitting `/review-templates` (static) and
+`/review-templates/[id]` (dynamic) among 27 pages. (First build attempt
+failed prerendering the untouched `/account/api-keys` with "supabaseUrl is
+required" — this fresh worktree has no `.env.local`, which hard rule 2
+forbids creating; re-running with placeholder public
+`NEXT_PUBLIC_SUPABASE_*` values on the command line confirmed the failure was
+environmental, not code.) `prettier --write` was NEVER run on the frontend
+(2026-07-28 lesson); files are 4-space, ESLint-formatted. One self-inflicted
+`react-hooks/set-state-in-effect` error was caught by lint and fixed
+properly: `TemplateDetailsModal` now mounts its form only while open so the
+initial values come from props at mount time instead of a state-syncing
+effect. UK English throughout; the user-facing word is "template", never
+"schema". In-browser QA is not possible from this worktree (no env/secrets) —
+manual QA steps are enumerated in the PR body.
+
+**Decisions and contract notes (five for review attention).**
+(a) **≥1 column is a server rule** — `POST /tabular-templates` rejects an
+empty `columns` array, so "New template" cannot create an empty row: it
+routes to `/review-templates/new`, which holds the draft client-side and only
+POSTs once a name and first column exist. The same rule means the editor
+refuses to remove the last column, with an inline message rather than a
+failed save.
+(b) **`updatedAt` is `created_at`** (no `updated_at` column on `workflows`,
+per #74) — rows therefore read "Created DD/MM/YYYY", a deliberate deviation
+from the mock-up's "Edited 4 Aug", because "Edited" would be untrue.
+(c) **Admin card added beyond the plan's Task 4 steps** — spec surface 5 and
+the `GET /admin/firm` + `POST /:id/admin-revert` routes shipped in #74, but
+no Task 4 step built a UI for them; without this card those routes would be
+dead code.
+(d) **Template admin-revert is NOT MFA-gated**, unlike the WS9 firm-library
+revert it sits beside, because the backend route carries only
+`requireAuth`+`requireAdmin`. The card's copy therefore claims audit-trail
+recording only and never mentions two-factor. **Flagged for review: align
+this with the WS9 MFA-gated precedent** (a backend change, hence not made
+here).
+(e) **Built-ins stay client-side constants** — the seam never returns
+`is_system` rows, so the read-only built-in editor is driven from the
+`builtin-*` string ids. Consequence handled: hidden built-in tabular
+templates used to be un-hideable only via the Workflows page, which now lists
+assistant workflows only, so the Templates page grew a "Show N hidden
+built-in templates" disclosure keeping `hidden_workflows` reversible.
+
+---
+
 ## 2026-08-05 — Review templates backend: seam + routes (branch `templates-backend`, plan Tasks 2–3)
 
 **Scope:** backend half of the Review templates train

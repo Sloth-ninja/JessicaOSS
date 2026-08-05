@@ -9,6 +9,7 @@ import type {
     Chat,
     ChatDetailOut,
     CitationAnnotation,
+    ColumnConfig,
     Document,
     Folder,
     Message,
@@ -1692,6 +1693,105 @@ export async function deleteWorkflowShare(
 ): Promise<void> {
     await apiRequest(`/workflows/${workflowId}/shares/${shareId}`, {
         method: "DELETE",
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Review templates (saved tabular schemas v1) — /tabular-templates.
+// A template is a reusable set of tabular-review columns. The 14 built-in
+// templates stay client-side constants and never appear in these responses.
+// ---------------------------------------------------------------------------
+
+export interface TabularTemplate {
+    id: string;
+    title: string;
+    practice: string | null;
+    columns: ColumnConfig[];
+    ownerUserId: string;
+    ownerDisplayName: string | null;
+    visibility: "private" | "firm";
+    isOwner: boolean;
+    /** The workflows table has no updated_at; the server surfaces created_at. */
+    updatedAt: string | null;
+}
+
+export interface TabularTemplateList {
+    mine: TabularTemplate[];
+    /** Templates a colleague shared with the caller by email. */
+    shared: TabularTemplate[];
+    firm: TabularTemplate[];
+    /** False when the firm-visibility migration has not run, or when unusable. */
+    firmSharingSupported: boolean;
+}
+
+export async function listTabularTemplates(): Promise<TabularTemplateList> {
+    return apiRequest<TabularTemplateList>("/tabular-templates");
+}
+
+export async function getTabularTemplate(
+    templateId: string,
+): Promise<TabularTemplate> {
+    return apiRequest<TabularTemplate>(`/tabular-templates/${templateId}`);
+}
+
+export async function createTabularTemplate(payload: {
+    title: string;
+    practice?: string | null;
+    columns: ColumnConfig[];
+}): Promise<TabularTemplate> {
+    return apiRequest<TabularTemplate>("/tabular-templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+}
+
+export async function updateTabularTemplate(
+    templateId: string,
+    patch: {
+        title?: string;
+        practice?: string | null;
+        columns?: ColumnConfig[];
+    },
+): Promise<TabularTemplate> {
+    return apiRequest<TabularTemplate>(`/tabular-templates/${templateId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+    });
+}
+
+export async function deleteTabularTemplate(
+    templateId: string,
+): Promise<void> {
+    await apiRequest(`/tabular-templates/${templateId}`, { method: "DELETE" });
+}
+
+export async function setTabularTemplateVisibility(
+    templateId: string,
+    visibility: "private" | "firm",
+): Promise<TabularTemplate> {
+    return apiRequest<TabularTemplate>(
+        `/tabular-templates/${templateId}/visibility`,
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ visibility }),
+        },
+    );
+}
+
+export async function listAdminFirmTabularTemplates(): Promise<
+    TabularTemplate[]
+> {
+    return apiRequest<TabularTemplate[]>("/tabular-templates/admin/firm");
+}
+
+export async function adminRevertTabularTemplate(
+    templateId: string,
+): Promise<void> {
+    await apiRequest(`/tabular-templates/${templateId}/admin-revert`, {
+        method: "POST",
     });
 }
 

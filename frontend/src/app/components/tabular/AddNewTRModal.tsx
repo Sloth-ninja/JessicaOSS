@@ -7,13 +7,17 @@ import {
     getProject,
     listProjects,
     listStandaloneDocuments,
-    listWorkflows,
     uploadProjectDocument,
     uploadStandaloneDocument,
 } from "@/app/lib/mikeApi";
 import { FileDirectory } from "../shared/FileDirectory";
-import { BUILT_IN_WORKFLOWS } from "../workflows/builtinWorkflows";
 import { Modal } from "../shared/Modal";
+import {
+    builtInTemplateOptions,
+    loadTemplateOptions,
+    templateGroupOf,
+    type TemplateOption,
+} from "./templateOptions";
 
 interface Props {
     open: boolean;
@@ -63,8 +67,9 @@ export function AddNewTRModal({
     const [uploading, setUploading] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Workflow templates
-    const [workflows, setWorkflows] = useState<Workflow[]>([]);
+    // Review templates — the caller's own, ones shared with them, firm-shared
+    // ones and the built-ins.
+    const [workflows, setWorkflows] = useState<TemplateOption[]>([]);
     const [loadingWorkflows, setLoadingWorkflows] = useState(false);
     const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(
         null,
@@ -76,12 +81,9 @@ export function AddNewTRModal({
         if (!open) return;
 
         setLoadingWorkflows(true);
-        const builtinTabular = BUILT_IN_WORKFLOWS.filter(
-            (w) => w.type === "tabular",
-        );
-        listWorkflows("tabular")
-            .then((custom) => setWorkflows([...builtinTabular, ...custom]))
-            .catch(() => setWorkflows(builtinTabular))
+        loadTemplateOptions()
+            .then(setWorkflows)
+            .catch(() => setWorkflows(builtInTemplateOptions()))
             .finally(() => setLoadingWorkflows(false));
 
         if (isProjectMode) {
@@ -268,10 +270,10 @@ export function AddNewTRModal({
                         autoFocus
                     />
 
-                        {/* Workflow template */}
+                        {/* Review template */}
                         <div className="space-y-2">
                             <p className="text-xs font-medium text-gray-700">
-                                Workflow Template
+                                Start from a template
                             </p>
                             <div className="relative">
                                 <button
@@ -322,29 +324,48 @@ export function AddNewTRModal({
                                         {workflows.length > 0 && (
                                             <div className="border-t border-gray-100" />
                                         )}
-                                        {workflows.map((wf) => (
-                                            <button
-                                                key={wf.id}
-                                                type="button"
-                                                onClick={() => {
-                                                    setSelectedWorkflowId(
-                                                        wf.id,
-                                                    );
-                                                    setWorkflowDropdownOpen(
-                                                        false,
-                                                    );
-                                                }}
-                                                className={`w-full text-left flex items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-gray-50 ${selectedWorkflowId === wf.id ? "bg-gray-50 text-gray-900" : "text-gray-700"}`}
-                                            >
-                                                <span className="flex-1 truncate">
-                                                    {wf.title}
-                                                </span>
-                                                {selectedWorkflowId ===
-                                                    wf.id && (
-                                                    <Check className="h-3.5 w-3.5 text-gray-500 shrink-0" />
-                                                )}
-                                            </button>
-                                        ))}
+                                        {workflows.map((wf, index) => {
+                                            const group = templateGroupOf(wf);
+                                            const showGroup =
+                                                index === 0 ||
+                                                templateGroupOf(
+                                                    workflows[index - 1],
+                                                ) !== group;
+                                            return (
+                                                <div key={wf.id}>
+                                                    {showGroup && (
+                                                        <p className="bg-gray-50 px-3 py-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-gray-400">
+                                                            {group}
+                                                        </p>
+                                                    )}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setSelectedWorkflowId(
+                                                                wf.id,
+                                                            );
+                                                            setWorkflowDropdownOpen(
+                                                                false,
+                                                            );
+                                                        }}
+                                                        className={`w-full text-left flex items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-gray-50 ${selectedWorkflowId === wf.id ? "bg-gray-50 text-gray-900" : "text-gray-700"}`}
+                                                    >
+                                                        <span className="flex-1 truncate">
+                                                            {wf.title}
+                                                        </span>
+                                                        <span className="shrink-0 text-xs tabular-nums text-gray-400">
+                                                            {wf.columns_config
+                                                                ?.length ?? 0}{" "}
+                                                            cols
+                                                        </span>
+                                                        {selectedWorkflowId ===
+                                                            wf.id && (
+                                                            <Check className="h-3.5 w-3.5 text-gray-500 shrink-0" />
+                                                        )}
+                                                    </button>
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 )}
                             </div>

@@ -19,6 +19,13 @@ interface WorkflowPickerModalProps {
     closeOnSelect?: boolean;
     initialWorkflowId?: string;
     disabledWorkflow?: (workflow: Workflow) => boolean;
+    /** Replaces the default built-ins + listWorkflows(type) load. Review
+     *  templates pass their own loader so the list covers personal, shared,
+     *  firm-shared and built-in templates. */
+    loadOptions?: () => Promise<Workflow[]>;
+    groupLabelFor?: (workflow: Workflow) => string;
+    emptyMessage?: string;
+    searchPlaceholder?: string;
 }
 
 export function WorkflowPickerModal({
@@ -33,6 +40,10 @@ export function WorkflowPickerModal({
     closeOnSelect = true,
     initialWorkflowId,
     disabledWorkflow,
+    loadOptions,
+    groupLabelFor,
+    emptyMessage,
+    searchPlaceholder,
 }: WorkflowPickerModalProps) {
     const [workflows, setWorkflows] = useState<Workflow[]>([]);
     const [loading, setLoading] = useState(false);
@@ -58,10 +69,15 @@ export function WorkflowPickerModal({
             setSearch("");
         });
 
-        listWorkflows(workflowType)
-            .then((custom) => {
+        (loadOptions
+            ? loadOptions()
+            : listWorkflows(workflowType).then((custom) => [
+                  ...builtins,
+                  ...custom,
+              ])
+        )
+            .then((all) => {
                 if (cancelled) return;
-                const all = [...builtins, ...custom];
                 setWorkflows(all);
                 if (initialWorkflowId) {
                     setSelected(
@@ -88,7 +104,7 @@ export function WorkflowPickerModal({
             cancelled = true;
             cancelAnimationFrame(frame);
         };
-    }, [initialWorkflowId, open, workflowType]);
+    }, [initialWorkflowId, open, workflowType, loadOptions]);
 
     if (!open) return null;
 
@@ -131,6 +147,9 @@ export function WorkflowPickerModal({
                 workflowType={workflowType}
                 previewMode={workflowType === "tabular" ? "columns" : "prompt"}
                 disabledWorkflow={disabledWorkflow}
+                groupLabelFor={groupLabelFor}
+                emptyMessage={emptyMessage}
+                searchPlaceholder={searchPlaceholder}
             />
         </Modal>
     );

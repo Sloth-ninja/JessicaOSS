@@ -2,10 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import {
     Plus,
+    BookmarkPlus,
     Loader2,
     Play,
+    Check,
     ChevronDown,
     MessageSquare,
     Download,
@@ -39,6 +42,7 @@ import type {
 } from "../shared/types";
 import { AddColumnModal } from "./AddColumnModal";
 import { TRWorkflowModal } from "./TRWorkflowModal";
+import { SaveAsTemplateModal } from "./SaveAsTemplateModal";
 import { AddDocumentsModal } from "../shared/AddDocumentsModal";
 import { AddProjectDocsModal } from "../shared/AddProjectDocsModal";
 import { PeopleModal } from "../shared/PeopleModal";
@@ -83,6 +87,15 @@ export function TRView({ reviewId, projectId }: Props) {
     const [peopleModalOpen, setPeopleModalOpen] = useState(false);
     const [workflowModalOpen, setWorkflowModalOpen] = useState(false);
     const [applyingWorkflow, setApplyingWorkflow] = useState(false);
+    const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
+    // Confirmation that a template was saved. There is no app-wide toast
+    // component, so this is a small self-dismissing notice.
+    const [savedTemplateName, setSavedTemplateName] = useState<string | null>(
+        null,
+    );
+    const savedTemplateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+        null,
+    );
     const [deleteReviewConfirmOpen, setDeleteReviewConfirmOpen] =
         useState(false);
     const [deleteReviewStatus, setDeleteReviewStatus] = useState<
@@ -121,6 +134,16 @@ export function TRView({ reviewId, projectId }: Props) {
     const apiKeys = profile?.apiKeys;
     const localModels = profile?.localModels ?? [];
     const tabularModel = profile?.tabularModel ?? "gemini-3-flash-preview";
+
+    // Drop the template-saved notice timer if the view unmounts first.
+    useEffect(
+        () => () => {
+            if (savedTemplateTimerRef.current) {
+                clearTimeout(savedTemplateTimerRef.current);
+            }
+        },
+        [],
+    );
 
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
@@ -602,7 +625,7 @@ export function TRView({ reviewId, projectId }: Props) {
 
     function requestWorkflow() {
         if (review?.is_owner === false) {
-            setOwnerOnlyAction("apply a workflow");
+            setOwnerOnlyAction("apply a template");
             return;
         }
         setWorkflowModalOpen(true);
@@ -723,9 +746,16 @@ export function TRView({ reviewId, projectId }: Props) {
                                                 onSelect: requestReviewRename,
                                             },
                                             {
-                                                label: "Apply workflow",
+                                                label: "Apply template",
                                                 icon: WandSparkles,
                                                 onSelect: requestWorkflow,
+                                            },
+                                            {
+                                                label: "Save as template",
+                                                icon: BookmarkPlus,
+                                                onSelect: () =>
+                                                    setSaveTemplateOpen(true),
+                                                disabled: columns.length === 0,
                                             },
                                             {
                                                 label: "Export",
@@ -1125,10 +1155,62 @@ export function TRView({ reviewId, projectId }: Props) {
                         : []),
                     "Tabular Reviews",
                     review?.title || "Untitled Review",
-                    "Add workflow",
+                    "Apply template",
                 ]}
                 applying={applyingWorkflow}
             />
+
+            <SaveAsTemplateModal
+                open={saveTemplateOpen}
+                reviewTitle={review?.title || "Untitled Review"}
+                columns={columns}
+                practice={review?.practice ?? null}
+                onClose={() => setSaveTemplateOpen(false)}
+                onSaved={(template) => {
+                    setSaveTemplateOpen(false);
+                    setSavedTemplateName(template.title);
+                    // Replace any in-flight dismissal so a second save gets a
+                    // full window; the timer is also cleared on unmount.
+                    if (savedTemplateTimerRef.current) {
+                        clearTimeout(savedTemplateTimerRef.current);
+                    }
+                    savedTemplateTimerRef.current = setTimeout(
+                        () => setSavedTemplateName(null),
+                        8000,
+                    );
+                }}
+            />
+
+            {savedTemplateName && (
+                <div
+                    role="status"
+                    className="fixed bottom-5 right-5 z-[200] flex items-start gap-2.5 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-lg"
+                >
+                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-green-600" />
+                    <div className="text-xs text-gray-700">
+                        <p className="font-medium text-gray-900">
+                            Template saved
+                        </p>
+                        <p className="mt-0.5 max-w-[16rem] truncate text-gray-500">
+                            {savedTemplateName}
+                        </p>
+                        <Link
+                            href="/review-templates"
+                            className="mt-1 inline-block font-medium text-gray-700 underline underline-offset-2 hover:text-gray-900"
+                        >
+                            View templates
+                        </Link>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setSavedTemplateName(null)}
+                        aria-label="Dismiss"
+                        className="ml-1 rounded p-0.5 text-gray-300 transition-colors hover:text-gray-600"
+                    >
+                        <X className="h-3.5 w-3.5" />
+                    </button>
+                </div>
+            )}
 
             <ConfirmPopup
                 open={deleteReviewConfirmOpen}

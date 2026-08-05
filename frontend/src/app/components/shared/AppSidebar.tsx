@@ -12,6 +12,7 @@ import {
     ChevronsUpDown,
     ChevronDown,
     ClipboardCheck,
+    LayoutTemplate,
     Landmark,
     MapPin,
     Settings,
@@ -33,6 +34,9 @@ const NAV_ITEMS = [
     { href: "/assistant", label: "Assistant", icon: MessageSquare },
     { href: "/projects", label: "Matters", icon: FolderOpen },
     { href: "/tabular-reviews", label: "Tabular Review", icon: Table2 },
+    // Review templates (saved tabular schemas v1) — sits directly under
+    // Tabular Review; org and orgless users both see it.
+    { href: "/review-templates", label: "Templates", icon: LayoutTemplate },
     { href: "/workflows", label: "Workflows", icon: Library },
 ];
 

@@ -13,11 +13,16 @@ interface Props {
     onCreated: (workflow: Workflow) => void;
     editWorkflow?: Workflow;
     onUpdated?: (workflow: Workflow) => void;
+    /** Fixes the workflow type and hides the type chooser. The Workflows page
+     *  passes "assistant": tabular column sets are now review templates. */
+    lockedType?: Workflow["type"];
 }
 
-export function NewWorkflowModal({ open, onClose, onCreated, editWorkflow, onUpdated }: Props) {
+export function NewWorkflowModal({ open, onClose, onCreated, editWorkflow, onUpdated, lockedType }: Props) {
     const [title, setTitle] = useState("");
-    const [type, setType] = useState<"assistant" | "tabular">("assistant");
+    const [type, setType] = useState<"assistant" | "tabular">(
+        lockedType ?? "assistant",
+    );
     const [practice, setPractice] = useState<string>("");
     const [customPractice, setCustomPractice] = useState("");
     const [loading, setLoading] = useState(false);
@@ -85,7 +90,7 @@ export function NewWorkflowModal({ open, onClose, onCreated, editWorkflow, onUpd
 
     function resetForm() {
         setTitle("");
-        setType("assistant");
+        setType(lockedType ?? "assistant");
         setPractice("");
         setCustomPractice("");
         setError("");
@@ -131,7 +136,7 @@ export function NewWorkflowModal({ open, onClose, onCreated, editWorkflow, onUpd
                     autoFocus
                 />
 
-                {!isEditing && (
+                {!isEditing && !lockedType && (
                     <div className="mt-5">
                         <p className="mb-2 text-sm font-medium text-gray-500">Type</p>
                         <div className="flex items-center gap-2">

@@ -2,13 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-    Library,
-    Table2,
-    MessageSquare,
-    User,
-    ChevronDown,
-} from "lucide-react";
+import Link from "next/link";
+import { Library, User, ChevronDown } from "lucide-react";
 import {
     listWorkflows,
     deleteWorkflow,
@@ -68,20 +63,15 @@ export function WorkflowList() {
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [actionsOpen, setActionsOpen] = useState(false);
     const [practiceFilter, setPracticeFilter] = useState<string | null>(null);
-    const [typeFilter, setTypeFilter] = useState<Workflow["type"] | null>(
-        null,
-    );
     const [search, setSearch] = useState("");
     const actionsRef = useRef<HTMLDivElement>(null);
 
+    // Assistant workflows only — tabular review templates moved to their own
+    // Templates surface (/review-templates); the pointer line below says so.
     useEffect(() => {
-        Promise.all([
-            listWorkflows("assistant"),
-            listWorkflows("tabular"),
-            listHiddenWorkflows(),
-        ])
-            .then(([assistant, tabular, hidden]) => {
-                setCustom([...assistant, ...tabular]);
+        Promise.all([listWorkflows("assistant"), listHiddenWorkflows()])
+            .then(([assistant, hidden]) => {
+                setCustom(assistant);
                 setHiddenBuiltinIds(hidden);
             })
             .catch(() => setCustom([]))
@@ -91,7 +81,7 @@ export function WorkflowList() {
     useEffect(() => {
         setSelectedIds([]);
         setActionsOpen(false);
-    }, [activeScope, practiceFilter, typeFilter]);
+    }, [activeScope, practiceFilter]);
 
     useEffect(() => {
         function handleClick(e: MouseEvent) {
@@ -106,10 +96,13 @@ export function WorkflowList() {
         return () => document.removeEventListener("mousedown", handleClick);
     }, [actionsOpen]);
 
-    const hiddenBuiltins = BUILT_IN_WORKFLOWS.filter((wf) =>
+    const assistantBuiltins = BUILT_IN_WORKFLOWS.filter(
+        (wf) => wf.type === "assistant",
+    );
+    const hiddenBuiltins = assistantBuiltins.filter((wf) =>
         hiddenBuiltinIds.includes(wf.id),
     );
-    const visibleBuiltins = BUILT_IN_WORKFLOWS.filter(
+    const visibleBuiltins = assistantBuiltins.filter(
         (wf) => !hiddenBuiltinIds.includes(wf.id),
     );
     const all = [...visibleBuiltins, ...custom];
@@ -129,7 +122,6 @@ export function WorkflowList() {
     const q = search.toLowerCase();
     const filtered = byScope
         .filter((wf) => !practiceFilter || wf.practice === practiceFilter)
-        .filter((wf) => !typeFilter || wf.type === typeFilter)
         .filter((wf) => !q || wf.title.toLowerCase().includes(q));
 
     const allSelected =
@@ -193,34 +185,6 @@ export function WorkflowList() {
         setHiddenBuiltinIds((prev) => prev.filter((id) => !ids.includes(id)));
         await Promise.all(ids.map((id) => unhideWorkflow(id).catch(() => {})));
     }
-
-    const getTypeMeta = (type: Workflow["type"]) =>
-        type === "tabular"
-            ? { label: "Tabular", Icon: Table2, className: "text-violet-700" }
-            : {
-                  label: "Assistant",
-                  Icon: MessageSquare,
-                  className: "text-blue-700",
-              };
-
-    const typeFilterButton = (
-        <HeaderFilterDropdown
-            label="Filter by type"
-            value={typeFilter}
-            allLabel="All Types"
-            widthClassName="w-40"
-            options={(["assistant", "tabular"] as const).map((type) => {
-                const { label, Icon, className } = getTypeMeta(type);
-                return {
-                    value: type,
-                    label,
-                    icon: Icon,
-                    className,
-                };
-            })}
-            onChange={setTypeFilter}
-        />
-    );
 
     const practiceFilterButton = (
         <HeaderFilterDropdown
@@ -299,6 +263,20 @@ export function WorkflowList() {
                 actions={toolbarActions}
             />
 
+            {/* Pointer to the surface tabular review templates moved to. */}
+            <div className="shrink-0 px-4 pt-3 md:px-10">
+                <p className="rounded-lg border border-dashed border-gray-200 px-4 py-2.5 text-xs text-gray-500">
+                    Review templates have moved to{" "}
+                    <Link
+                        href="/review-templates"
+                        className="font-medium text-gray-700 underline underline-offset-2 hover:text-gray-900"
+                    >
+                        Templates
+                    </Link>
+                    .
+                </p>
+            </div>
+
             {/* Table */}
             <TableScrollArea>
                 {/* Column headers */}
@@ -319,13 +297,7 @@ export function WorkflowList() {
                             )}
                             <span>Name</span>
                         </TableStickyCell>
-                        <TableHeaderCell className="ml-auto w-28">
-                            <div className="flex items-center gap-1">
-                                <span>Type</span>
-                                {typeFilterButton}
-                            </div>
-                        </TableHeaderCell>
-                        <TableHeaderCell className="w-40">
+                        <TableHeaderCell className="ml-auto w-40">
                             <div className="flex items-center gap-1">
                                 <span>Practice</span>
                                 {practiceFilterButton}
@@ -350,10 +322,7 @@ export function WorkflowList() {
                                             <SkeletonLine className="h-3.5 w-48" />
                                         </div>
                                     </TableStickyCell>
-                                    <TableCell className="ml-auto w-28">
-                                        <SkeletonLine className="w-16" />
-                                    </TableCell>
-                                    <TableCell className="w-40">
+                                    <TableCell className="ml-auto w-40">
                                         <SkeletonLine className="w-24" />
                                     </TableCell>
                                     <TableCell className="w-28">
@@ -372,9 +341,8 @@ export function WorkflowList() {
                                         Custom Workflows
                                     </p>
                                     <p className="mt-1 text-xs text-gray-400 text-left">
-                                        Build reusable prompts and tabular
-                                        review templates tailored to your
-                                        practice.
+                                        Build reusable assistant prompts
+                                        tailored to your practice.
                                     </p>
                                     <button
                                         onClick={() => setNewModalOpen(true)}
@@ -403,7 +371,7 @@ export function WorkflowList() {
                                     </p>
                                     <p className="mt-1 text-xs text-gray-400 text-left">
                                         Automate document analysis with reusable
-                                        prompts and tabular review templates.
+                                        assistant prompts.
                                     </p>
                                 </>
                             )}
@@ -468,21 +436,7 @@ export function WorkflowList() {
                                     onSelectionChange={() => toggleOne(wf.id)}
                                     label={wf.title}
                                 />
-                                <TableCell className="ml-auto w-28">
-                                    {(() => {
-                                        const { label, Icon, className } =
-                                            getTypeMeta(wf.type);
-                                        return (
-                                            <span
-                                                className={`inline-flex items-center gap-1.5 text-xs font-medium ${className}`}
-                                            >
-                                                <Icon className="h-3.5 w-3.5" />
-                                                {label}
-                                            </span>
-                                        );
-                                    })()}
-                                </TableCell>
-                                <TableCell className="w-40">
+                                <TableCell className="ml-auto w-40">
                                     {wf.practice ? (
                                         <span className="text-xs font-medium text-gray-600">
                                             {wf.practice}
@@ -559,6 +513,7 @@ export function WorkflowList() {
 
             <NewWorkflowModal
                 open={newModalOpen}
+                lockedType="assistant"
                 onClose={() => setNewModalOpen(false)}
                 onCreated={(wf) => {
                     setCustom((prev) => [wf, ...prev]);
