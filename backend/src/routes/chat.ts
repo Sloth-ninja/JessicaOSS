@@ -699,7 +699,15 @@ chatRouter.post("/", requireAuth, asyncHandler(async (req, res) => {
             }
             return;
         }
-        console.error("[chat/stream] error:", safeErrorLog(err));
+        // An AssistantStreamError is the rethrow wrapper — its stack points at
+        // the rethrow site, and the true cause is already logged by chatTools'
+        // [chat/tools] line — so log only its name/message here.
+        console.error(
+            "[chat/stream] error:",
+            err instanceof AssistantStreamError
+                ? { name: err.name, message: err.message }
+                : safeErrorLog(err),
+        );
         const message = safeErrorMessage(err, "Stream error");
         const errorEvents = err instanceof AssistantStreamError
             ? stripTransientAssistantEvents(err.events)

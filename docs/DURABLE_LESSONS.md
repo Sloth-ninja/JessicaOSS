@@ -35,6 +35,7 @@
 - 2026-07-28 — `prettier --write` with no resolvable config reformats 4-space frontend files to 2-space wholesale — an unmergeable diff
 - 2026-07-28 — Soft-delete (tombstone) and access checks must compose: gate at the shared choke point, not per-route
 - 2026-08-03 — Continuous-refill rate-limit buckets make tests timing-flaky when the code does real CPU work between calls — freeze the clock
+- 2026-08-05 — Suites doing real KDF (scrypt) work need explicit generous timeouts; a timeout flake that passes in isolation is contention, not a defect
 - 2026-08-05 — Missing-column degrades: filters raise Postgres 42703, but UPDATE payloads raise PostgREST PGRST204 — cover both
 
 ## Lessons
@@ -452,6 +453,26 @@ SUCCEEDS at the provider, then the browser lands on ERR_CONNECTION_REFUSED at
 "http://127.0.0.1..."` / `|| \`http://localhost:${PORT}\`` fallback with no
 production guard.
 
+### 2026-08-05 — Real-KDF test suites need explicit generous timeouts under agent load
+
+Trigger: Stop-hook and full-suite runs flaked twice in one day on the
+scrypt-heavy suites (`userApiKeys.test.ts` once; `organisationApiKeys.test.ts`
++ `clio/connections.test.ts` together) with 5s/20s timeouts — every failing
+test passed in isolation. The machine was running concurrent builder-agent
+test loads; real scrypt key derivation is CPU-bound, so wall-clock contention
+stretches each derivation unpredictably and no "reasonable" ceiling is safe.
+
+Rule: any suite doing real KDF/crypto work (scrypt AES-256-GCM here) sets an
+explicit, generous per-file timeout (`vi.setConfig({ testTimeout: 120_000 })`)
+— never weaken the crypto parameters to make tests fast, and never chase the
+flake by nudging the ceiling up 2x at a time. A timeout failure in such a
+suite that passes standalone is CONTENTION, not a defect: do not "fix" the
+code. Watch for per-test timeout arguments (`it(..., 20_000)`) silently
+overriding a higher file-level ceiling — the per-test value wins in vitest.
+Debugging signature: timed-out tests concentrated in files doing scrypt/crypto
+work, green when run standalone, while the machine runs parallel agent suites
+or builds.
+
 ### 2026-08-05 (Review templates) — 42703 is not the only "missing column" code: UPDATE payloads surface PGRST204
 
 Trigger: PR #74 review. The templates seam degraded firm sharing on an
@@ -479,3 +500,4 @@ the column and "schema cache", means the degrade check only knows the
 Postgres codes. Also remember PostgREST schema-cache staleness has the
 inverse failure: the column EXISTS in Postgres but PGRST204 still fires until
 the cache reloads (`NOTIFY pgrst, 'reload schema'` / project restart).
+

@@ -7,6 +7,12 @@ import {
 
 const ORG = "org-1";
 
+// These tests run real scrypt AES-256-GCM key derivation. Real KDF work under
+// concurrent machine load (parallel agent suites) has blown vitest's default
+// ceiling while passing in isolation — that flake is contention, not a defect
+// (DURABLE_LESSONS 2026-08-05), so the ceiling is deliberately generous.
+vi.setConfig({ testTimeout: 120_000 });
+
 type OrgRow = {
   organisation_id: string;
   provider: string;

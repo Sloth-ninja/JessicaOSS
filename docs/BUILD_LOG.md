@@ -118,6 +118,91 @@ changed here.
 
 ---
 
+## 2026-08-05 — Composed-range review fix wave for the #71/#72 train (branch `fix-train-composed-findings`)
+
+**Scope:** the six findings from the composed-range multi-lens review of the
+04/08 pilot-feedback train (#71 Clio matter search, #72 error visibility),
+plus a coordinator addendum hardening the crypto-heavy test suites against
+machine-contention flakes. No new deps; no migrations/`.env`/schema/LICENSE
+touched.
+
+**Key changes.**
+1. **(S1) Clio tool executors log the original failure.** The catches in
+   `lib/clio/manageTools.ts` and `growTools.ts` now `console.error`
+   `"[clio/tools] tool failed"` with `{ toolName, error: safeErrorLog(err) }`
+   before collapsing to the fixed client-safe message. Clio's error
+   containment means chatTools' `[chat/tools]` stream-error log never fires
+   for Clio tools, so internal failures (Postgrest plain objects, R2, docx)
+   were previously logged NOWHERE. `ClioValidationError` (expected user-input
+   failures) stays unlogged.
+2. **(S2) Null Clio body is an error, not "0 matters".** `findMatter` throws
+   a user-safe `ClioApiError` ("Clio's response could not be read…") when
+   `clioRequest` returns null (204/unparseable body) instead of shaping it
+   into an authoritative empty list the model reports confidently.
+   Review follow-up: the same guard applied to the sibling read tools
+   `findContact` and `listMatterDocuments` (which passed a possibly-null body
+   straight to `clioToolOk`); `deleteTimeEntry` deliberately untouched — its
+   204→null IS success.
+3. **(N2) Filter guard re-applied to decoded page tokens.** A hand-crafted
+   token decoding to a bare cursor (`{"c":…}`, no query/status) used to issue
+   an UNFILTERED matter fetch, contradicting the binding the token exists
+   for; the at-least-one-filter validation now runs in the token branch too,
+   before any fetch.
+4. **(N3) Query bounded at token-mint time.** Free-text queries are capped at
+   256 chars (`MAX_MATTER_QUERY_LENGTH`, friendly validation error above
+   that). Review follow-up: the cap only bounds the COMMON case — the
+   reviewer measured encoder-minted tokens over the 1024 decode cap (256-char
+   CJK query → 1083; long cursor + 256 ASCII → 1310) — so the mint site now
+   also drops any minted token longer than `MAX_PAGE_TOKEN_LENGTH`, keeping
+   `has_more: true` (honest "more pages exist", no continuation token) rather
+   than handing the model a token its own decoder would refuse.
+5. **(N1) Stream-route catches stop logging the wrapper's stack.**
+   `routes/chat.ts`, `routes/projectChat.ts`, and `routes/tabular.ts` log
+   only `{ name, message }` when the caught error is an
+   `AssistantStreamError` — the wrapper's stack points at the rethrow site,
+   and the true cause is already logged by chatTools' `[chat/tools]` line.
+   Non-wrapper errors keep the full `safeErrorLog`.
+6. **(S3) CLAUDE.md** — `safeError.ts` added to the backend module map (Users
+   row: `safeErrorLog`/`safeErrorMessage`/`GENERIC_ERROR_DETAIL`/
+   `failRequest`, 56+ route sites), and Current status carries the one-line
+   #71/#72 train record. Review accuracy fixes: the stale "604 tests" figure
+   updated to 656 (post-#73), the train record reworded to "merged 04/08;
+   deploy pending owner action" (the deploy has NOT happened), and the
+   section header date bumped to 2026-08-05.
+7. **(Addendum) Contention-proof timeouts for real-KDF suites.** All seven
+   scrypt-heavy suites set a file-level
+   `vi.setConfig({ testTimeout: 120_000 })`: the three named in the addendum
+   (`organisationApiKeys.test.ts`, `clio/connections.test.ts`,
+   `userApiKeys.test.ts` — whose per-test `20_000` override was removed,
+   since per-test values beat the file-level ceiling in vitest) plus
+   `clio/manageTools.test.ts`, `growTools.test.ts`, `oauth.test.ts`, and
+   `client.test.ts`, after this branch's own gate run reproduced the exact
+   flake in manageTools (`clio_record_time` timed out at 20s under
+   concurrent load, green standalone). scrypt parameters untouched. New
+   DURABLE_LESSONS entry (2026-08-05): KDF suites get generous explicit
+   timeouts; a timeout flake that passes standalone under parallel agent
+   load is contention, not a defect.
+
+**Tests.** Nine new deterministic tests (backend suite 656): manage log-spy
+pair (`[clio/tools]` fires for a Postgrest-shaped throw with the original
+message and the generic client message intact; does NOT fire for a validation
+error) plus a combined grow-side spy test; null-body → error outcome for
+find_matter, find_contact, and list_matter_documents; oversize minted token
+(256-char CJK query) → `has_more: true` with no `next_page_token`;
+cursor-only token rejected with zero fetches; 257-char query rejected at mint
+with zero fetches.
+
+**Verification.** `npx tsc --noEmit` clean. Full `npx vitest run`: 656 tests
+passing (an earlier gate run hit a vitest-worker RPC timeout plus a 20s test
+timeout under concurrent agent load — the addendum's flake class,
+infrastructure not assertion; clean after the timeout hardening).
+`prettier --check` clean on all changed 2-space lib/test files — the single
+pre-existing wrap deviation in `organisationApiKeys.test.ts` predates this PR
+and was left per minimal-diff; route edits hand-matched to upstream 4-space
+style.
+
+---
+
 ## 2026-08-04 — Error-visibility hardening (branch `error-visibility-hardening`)
 
 **Scope:** fix the two defects behind today's production incident where real
