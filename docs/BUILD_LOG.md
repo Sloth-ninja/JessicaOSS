@@ -7,6 +7,91 @@
 
 ---
 
+## 2026-08-05 — Review templates backend: seam + routes (branch `templates-backend`, plan Tasks 2–3)
+
+**Scope:** backend half of the Review templates train
+(`docs/superpowers/plans/2026-08-04-review-templates.md`, spec
+`docs/TABULAR_TEMPLATES_SPEC.md`): the self-contained seam
+`lib/tabularTemplates.ts` plus thin `/tabular-templates` routes, mounted in
+`index.ts`. Storage stays in the existing `workflows` table (`type='tabular'`,
+`columns_config` jsonb) — no data migration in this PR. Task 1's migration
+(`20260804_01_workflow_firm_visibility.sql`) remains owner-blocked; everything
+here degrades cleanly on the unmigrated database (42703/42P01 on the
+visibility columns ⇒ `firmSharingSupported:false` / "unsupported"; personal
+templates fully functional). No new deps; no migrations/`.env`/schema/LICENSE
+touched. Frontend is the next PR.
+
+**Key changes.**
+1. **`backend/src/lib/tabularTemplates.ts`** — the seam, exporting exactly the
+   plan's interface (`TemplateColumn`/`TabularTemplate`/`TemplateList` types,
+   `MAX_TEMPLATE_COLUMNS` 30, `COLUMN_FORMATS` = the nine values from
+   `routes/tabular.ts formatPromptSuffix`, `validateTemplateColumns`,
+   `TemplateValidationError`, `listTemplates`, `createTemplate`,
+   `updateTemplate`, `deleteTemplate`, `setTemplateVisibility`,
+   `adminRevertTemplate`, `listFirmTemplatesForAdmin`) plus ONE addition,
+   `getTemplate` (by-id read for `GET /:id` — the plan's route table needs it
+   but its export list had no reader; nothing listed changed shape). Queries
+   hit `workflows` directly: always `type='tabular'`, `is_system=false` (the
+   14 built-ins stay client-side constants), `.is("deleted_at", null)` inside
+   every read path (choke-point rule, DURABLE_LESSONS 2026-07-28). Reads use
+   `select("*")` so a missing visibility column is absent-not-error; only
+   firm-filtered queries / visibility writes can hit 42703 and they degrade.
+   Owner guard + `is_system` block + tombstone exclusion are encoded in the
+   UPDATE predicates with select-back (zero rows ⇒ not_found). Flip-to-firm
+   STAMPS the caller's organisation_id; revert clears it; both flips and admin
+   reverts append best-effort `deletion_audit_logs` rows
+   (`firm_shared`/`firm_reverted` — existing action values). Delete follows
+   the existing workflows delete path: org members tombstone (audited
+   `requested`), orgless/unmigrated hard-delete. Column validation: name +
+   prompt required (≤120/≤4000 chars), format from the nine-value allowlist,
+   tags only on tag-format columns (≤50 tags, ≤100 chars each), ≤30 columns,
+   `index` re-derived from position, never trusted. NOTE `workflows` has no
+   `updated_at` column — `updatedAt` maps from `created_at` (documented in
+   code).
+2. **`backend/src/routes/tabularTemplates.ts`** — thin router, all
+   `requireAuth` + `asyncHandler` (2026-07-21 lesson): `GET /` (TemplateList,
+   org id via `getUserOrganisationId`), `POST /` (201), `GET /:id` (owner or
+   firm-visible-in-caller's-org), `PATCH /:id`, `DELETE /:id` (204),
+   `PATCH /:id/visibility` (orgless and unmigrated both ⇒ 409 fixed detail
+   "Firm sharing is not available."), plus `GET /admin/firm` +
+   `POST /:id/admin-revert` behind `requireAdmin`. Validation errors surface
+   the `TemplateValidationError` message as the 400 detail (user-safe by
+   construction); infra errors degrade to asyncHandler's fixed generic 500
+   (PR #72 contract). Not-found is a fixed "Template not found." for
+   non-owner/tombstoned/unknown alike (no existence leak). Mounted in
+   `index.ts` at `/tabular-templates` under the existing general limiter — no
+   new env vars.
+3. **Lifecycle verification (plan Task 3 step 3): PASS, no code needed.**
+   Account deletion already hard-deletes `workflows` by `user_id`
+   (`userDataCleanup.ts` `deleteUserAccountData`, plus `purgeWorkflowsByIds`
+   cascading `workflow_shares`/`hidden_workflows` on the purge path); SAR
+   export already selects `workflows` with `"*"` (`userDataExport.ts`), so
+   templates — and the new visibility columns once migrated — are covered
+   automatically.
+
+**Verification evidence:** TDD per the plan (both test files written first,
+red, then implementation to green). `npx tsc --noEmit` clean; full
+`npx vitest run` green — 46 files / 713 tests (647 baseline + 44 new seam
+tests: validation incl. reindex/over-length/unknown-format/tags-guard,
+mine/firm/orgless scoping, own-firm-rows-stay-in-mine, tombstone + is_system
+exclusion, 42703 degrade on list/flip/revert/admin-list, org stamping +
+clearing, audit attempts + audit-failure-non-fatal, tombstone-vs-hard delete
+paths; + 22 new route tests: 401/403 authz, happy paths per route, 400
+validation mapping, 409 orgless/unsupported, 404-shaped not_found, fixed
+generic 500). Prettier clean on all four new files (new-file style is
+prettier-default 2-space; existing 4-space backend files untouched). UK
+terminology: the UI word is "template" throughout; no "schema" in any
+user-facing string.
+
+**Decisions:** `updatedAt`←`created_at` mapping (no `updated_at` column on
+`workflows`; honest closest value, noted for the frontend task);
+`getTemplate` added as the one extra export (additive only);
+`listFirmTemplatesForAdmin` returns `isOwner:false` (admin surface acts on
+org scope, not ownership); admin revert on an unmigrated DB reports
+not_found (nothing can be firm-shared pre-migration).
+
+---
+
 ## 2026-08-04 — Error-visibility hardening (branch `error-visibility-hardening`)
 
 **Scope:** fix the two defects behind today's production incident where real
