@@ -30,7 +30,7 @@
 | `backend/src/routes/tabularTemplates.test.ts` (create) | route tests |
 | `backend/src/index.ts` (modify) | mount router at `/tabular-templates` |
 | `frontend/src/app/lib/mikeApi.ts` (modify) | 6 new API methods |
-| `frontend/src/app/(pages)/review-templates/page.tsx` (create) | Templates page (My/Firm/Built-in sections) |
+| `frontend/src/app/(pages)/review-templates/page.tsx` (create) | Templates page (My/Shared-with-me/Firm/Built-in sections) |
 | `frontend/src/app/(pages)/review-templates/[id]/page.tsx` (create) | template editor (reuses AddColumnModal) |
 | `frontend/src/app/components/tabular/SaveAsTemplateModal.tsx` (create) | Frame B modal |
 | `frontend/src/app/components/tabular/TabularReviewView.tsx` (modify) | header ⋯ menu "Save as template" entry |
@@ -65,12 +65,16 @@ export type TabularTemplate = {
   ownerUserId: string; ownerDisplayName: string | null;
   visibility: "private" | "firm"; isOwner: boolean; updatedAt: string | null;
 };
-export type TemplateList = { mine: TabularTemplate[]; firm: TabularTemplate[]; firmSharingSupported: boolean };
+export type TemplateList = { mine: TabularTemplate[]; shared: TabularTemplate[]; firm: TabularTemplate[]; firmSharingSupported: boolean };
+// `shared` = templates a colleague shared to the caller by email via the existing
+// workflow_shares rows (review-forced addition, PR #74 round 2 — without it,
+// email-shared templates would be orphaned when tabular rows leave the Workflows page).
 export const MAX_TEMPLATE_COLUMNS = 30;
 export const COLUMN_FORMATS: readonly string[]; // the 9 values from routes/tabular.ts formatPromptSuffix
 export function validateTemplateColumns(raw: unknown): TemplateColumn[]; // throws TemplateValidationError with a user-safe message
 export class TemplateValidationError extends Error {}
-export async function listTemplates(db, userId: string, orgId: string | null): Promise<TemplateList>;
+export async function listTemplates(db, userId: string, userEmail: string | null, orgId: string | null): Promise<TemplateList>;
+export async function getTemplate(db, userId: string, id: string, orgId: string | null): Promise<TabularTemplate | "not_found">;
 export async function createTemplate(db, userId: string, input: { title: string; practice?: string | null; columns: unknown }): Promise<TabularTemplate>;
 export async function updateTemplate(db, userId: string, id: string, patch: { title?: string; practice?: string | null; columns?: unknown }): Promise<TabularTemplate | "not_found">;
 export async function deleteTemplate(db, userId: string, id: string): Promise<"deleted" | "not_found">;
@@ -112,7 +116,7 @@ adminRevertTabularTemplate(id: string): Promise<void>
 ```
 
 - [ ] **Step 1:** mikeApi methods (match the file's existing fetch/auth idiom; 4-space).
-- [ ] **Step 2:** Templates page per mock-up Frame A: sections My/Firm/Built-in; built-ins from `BUILT_IN_WORKFLOWS.filter(w => w.type === "tabular")` with existing hide semantics (`hidden_workflows`); row actions per ownership as mocked; Firm chip on own shared rows; Firm section hidden when `firmSharingSupported === false` or orgless. Loading gate MUST have an error+retry state (no unbounded spinners — 21/07 lesson).
+- [ ] **Step 2:** Templates page per mock-up Frame A plus a "Shared with me" section (the `shared` bucket — templates colleagues shared by email; actions: Duplicate only): section order My templates / Shared with me / Firm templates / Built-in; built-ins from `BUILT_IN_WORKFLOWS.filter(w => w.type === "tabular")` with existing hide semantics (`hidden_workflows`); row actions per ownership as mocked; Firm chip on own shared rows; Firm section hidden when `firmSharingSupported === false` or orgless. Loading gate MUST have an error+retry state (no unbounded spinners — 21/07 lesson).
 - [ ] **Step 3:** Editor page: reuse `AddColumnModal` + `columnFormat.ts` exactly as `WorkflowDetailPage` does; `is_system` → read-only + Duplicate.
 - [ ] **Step 4:** `SaveAsTemplateModal` per Frame B (name prefilled from review title, practice select, "Cell contents are not saved." line); entry in `TabularReviewView` header ⋯ menu; success toast links to `/review-templates`.
 - [ ] **Step 5:** Picker relabels per Frame C ("Start from a template" / "Apply template"; sections mine/firm/built-in); `WorkflowList` drops `type === "tabular"` rows and shows the pointer line "Review templates have moved to Templates." linking `/review-templates`; sidebar entry added under Tabular Review.
@@ -125,4 +129,4 @@ adminRevertTabularTemplate(id: string): Promise<void>
 
 ## Self-Review (run)
 
-Spec coverage: model→Tasks 1-2; routes→Task 3; all five spec surfaces→Task 4 steps 2-5; audit/42703/tombstone→Task 2 rules+tests; lifecycle→Task 3 step 3; non-goals absent — no gaps found. Placeholder scan: none (the sidebar file is named "locate exact file at build time" deliberately — its path varies and the builder greps `Firm library` nav strings to find it; acceptable). Type consistency: `TemplateColumn` mirrors the existing backend `Column` (routes/tabular.ts:1771) plus optional fields; frontend consumes existing `ColumnConfig` — verified same shape.
+Spec coverage: model→Tasks 1-2; routes→Task 3; all five spec surfaces→Task 4 steps 2-5; audit/42703/tombstone→Task 2 rules+tests; lifecycle→Task 3 step 3; non-goals absent — no gaps found. Placeholder scan: none (the sidebar file is named "locate exact file at build time" deliberately — its path varies and the builder greps `Firm library` nav strings to find it; acceptable). Type consistency: `TemplateColumn` mirrors the existing backend `Column` (routes/tabular.ts:1805) plus optional fields; frontend consumes existing `ColumnConfig` — verified same shape.

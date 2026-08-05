@@ -53,7 +53,8 @@
    review (the copy becomes THEIRS); confirmation links to the Templates
    page.
 2. **Templates page** (`/review-templates`, sidebar entry in the Tabular
-   Review group): sections My templates / Firm templates / Built-in. Rows:
+   Review group): sections My templates / Shared with me (email-shared via
+   existing `workflow_shares`; Duplicate only) / Firm templates / Built-in. Rows:
    name, column count, practice tag, owner (firm section). Actions by
    ownership — owner: edit, rename, duplicate, delete, share to firm /
    revert to private; non-owner firm: duplicate (becomes theirs); built-in:

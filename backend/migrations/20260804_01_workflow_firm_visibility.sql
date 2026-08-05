@@ -9,6 +9,8 @@
 -- if this migration has not run. Orgless deployments see no change.
 -- Spec: docs/TABULAR_TEMPLATES_SPEC.md.
 
+-- App-enforced values: 'private' | 'firm'. No DB check constraint (additive
+-- safety, WS9 precedent — the column may carry legacy values on long-lived installs).
 alter table public.workflows
   add column if not exists visibility text not null default 'private',
   add column if not exists organisation_id uuid references public.organisations(id) on delete set null;
