@@ -54,6 +54,8 @@ export type TabularTemplate = {
 
 export type TemplateList = {
   mine: TabularTemplate[];
+  /** Templates email-shared with the caller via workflow_shares (isOwner false). */
+  shared: TabularTemplate[];
   firm: TabularTemplate[];
   firmSharingSupported: boolean;
 };
@@ -83,12 +85,28 @@ const MAX_TAG_LENGTH = 100;
 /** Thrown with a user-safe message; routes surface `message` as the 400 detail. */
 export class TemplateValidationError extends Error {}
 
-// Postgres "undefined_column" / "undefined_table" — migration 20260804_01 has
-// not run. Mirrors the isMissingTableOrColumn idiom in companySearchSaves.ts.
+// "Unmigrated database" error codes — migration 20260804_01 has not run.
+// Filters on a missing column surface Postgres 42703/42P01, but an UPDATE
+// PAYLOAD naming a missing column is rejected by PostgREST's schema cache as
+// PGRST204 before Postgres ever sees it — degrade checks must cover both
+// (DURABLE_LESSONS 2026-08-05). Extends the companySearchSaves.ts idiom.
 function isMissingColumnOrTable(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const code = (error as { code?: unknown }).code;
-  return code === "42703" || code === "42P01";
+  return code === "42703" || code === "42P01" || code === "PGRST204";
+}
+
+/**
+ * Strip control characters (incl. newlines) from a user-supplied value that is
+ * later interpolated into cell-generation prompts — defence against
+ * prompt-marker injection via firm-shared templates (the `[[${tag}]]`
+ * interpolation class). Control characters become a single space, whitespace
+ * collapses, ends trimmed.
+ */
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/g;
+function stripControlChars(value: string): string {
+  return value.replace(CONTROL_CHARS, " ").replace(/\s+/g, " ").trim();
 }
 
 /**
@@ -100,6 +118,9 @@ export function validateTemplateColumns(raw: unknown): TemplateColumn[] {
   if (!Array.isArray(raw)) {
     throw new TemplateValidationError("Template columns must be a list.");
   }
+  if (raw.length === 0) {
+    throw new TemplateValidationError("A template needs at least one column.");
+  }
   if (raw.length > MAX_TEMPLATE_COLUMNS) {
     throw new TemplateValidationError(
       `A template can have at most ${MAX_TEMPLATE_COLUMNS} columns.`,
@@ -107,11 +128,15 @@ export function validateTemplateColumns(raw: unknown): TemplateColumn[] {
   }
   return raw.map((entry, position) => {
     if (!entry || typeof entry !== "object") {
-      throw new TemplateValidationError("Each column must be an object.");
+      throw new TemplateValidationError(
+        "Each column needs a name and a prompt.",
+      );
     }
     const candidate = entry as Record<string, unknown>;
     const name =
-      typeof candidate.name === "string" ? candidate.name.trim() : "";
+      typeof candidate.name === "string"
+        ? stripControlChars(candidate.name)
+        : "";
     if (!name) {
       throw new TemplateValidationError("Each column needs a name.");
     }
@@ -156,7 +181,7 @@ export function validateTemplateColumns(raw: unknown): TemplateColumn[] {
         );
       }
       tags = candidate.tags.map((tag) => {
-        const value = typeof tag === "string" ? tag.trim() : "";
+        const value = typeof tag === "string" ? stripControlChars(tag) : "";
         if (!value) {
           throw new TemplateValidationError("Tags must be non-empty text.");
         }
@@ -298,15 +323,60 @@ async function enrichOwnerNames(
 }
 
 /**
- * List the caller's templates: their own (newest first) plus other members'
- * firm-shared templates in their organisation. The caller's own firm-shared
- * templates stay in `mine` (with visibility 'firm') and are excluded from
- * `firm`. Orgless callers, and org callers on an unmigrated database, get
- * `firmSharingSupported:false` with `mine` intact.
+ * Templates email-shared with the caller via `workflow_shares` (matched on the
+ * normalised email, as routes/workflows.ts resolveWorkflowAccess does). The
+ * caller's own rows are excluded (they live in `mine`), as are tombstoned and
+ * `is_system` rows.
+ */
+async function listEmailSharedTemplates(
+  db: Db,
+  userId: string,
+  userEmail: string | null,
+): Promise<TabularTemplate[]> {
+  const normalizedEmail = (userEmail ?? "").trim().toLowerCase();
+  if (!normalizedEmail) return [];
+  const sharesResult = await db
+    .from("workflow_shares")
+    .select("workflow_id")
+    .eq("shared_with_email", normalizedEmail);
+  if (sharesResult.error) throw sharesResult.error;
+  const workflowIds = [
+    ...new Set(
+      ((sharesResult.data ?? []) as { workflow_id?: unknown }[])
+        .map((row) => row.workflow_id)
+        .filter((id): id is string => typeof id === "string"),
+    ),
+  ];
+  if (workflowIds.length === 0) return [];
+  const sharedResult = await db
+    .from(TABLE)
+    .select("*")
+    .in("id", workflowIds)
+    .eq("type", "tabular")
+    .eq("is_system", false)
+    .neq("user_id", userId)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false });
+  if (sharedResult.error) throw sharedResult.error;
+  const shared = ((sharedResult.data ?? []) as WorkflowRow[]).map((row) =>
+    toTemplate(row, userId),
+  );
+  await enrichOwnerNames(db, shared);
+  return shared;
+}
+
+/**
+ * List the caller's templates: their own (newest first), templates
+ * email-shared with them via workflow_shares, and other members' firm-shared
+ * templates in their organisation. The caller's own firm-shared templates stay
+ * in `mine` (with visibility 'firm') and are excluded from `firm`. Orgless
+ * callers, and org callers on an unmigrated database, get
+ * `firmSharingSupported:false` with `mine` and `shared` intact.
  */
 export async function listTemplates(
   db: Db,
   userId: string,
+  userEmail: string | null,
   orgId: string | null,
 ): Promise<TemplateList> {
   const mineResult = await db
@@ -321,6 +391,8 @@ export async function listTemplates(
   const mine = ((mineResult.data ?? []) as WorkflowRow[]).map((row) =>
     toTemplate(row, userId),
   );
+
+  const shared = await listEmailSharedTemplates(db, userId, userEmail);
 
   let firm: TabularTemplate[] = [];
   let firmSharingSupported = false;
@@ -347,7 +419,7 @@ export async function listTemplates(
     }
   }
 
-  return { mine, firm, firmSharingSupported };
+  return { mine, shared, firm, firmSharingSupported };
 }
 
 /**
@@ -566,6 +638,7 @@ export async function adminRevertTemplate(
     .eq("visibility", "firm")
     .eq("type", "tabular")
     .eq("is_system", false)
+    .is("deleted_at", null)
     .select("id");
   if (error) {
     if (isMissingColumnOrTable(error)) return "not_found";

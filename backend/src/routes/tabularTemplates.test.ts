@@ -34,6 +34,7 @@ vi.mock("../middleware/auth", () => ({
       return;
     }
     res.locals.userId = "caller";
+    res.locals.userEmail = "caller@example.test";
     next();
   },
   requireAdmin: (
@@ -86,8 +87,11 @@ vi.mock("../lib/tabularTemplates", async (importOriginal) => {
 import { TemplateValidationError } from "../lib/tabularTemplates";
 import { tabularTemplatesRouter } from "./tabularTemplates";
 
+// Template ids are uuids; the router 404s any non-uuid `:id` up front.
+const ID = "3f8f3a54-9b5e-4f6e-a9d2-1c2b3d4e5f60";
+
 const TEMPLATE = {
-  id: "t1",
+  id: ID,
   title: "NDA review",
   practice: "Commercial",
   columns: [{ index: 0, name: "Parties", prompt: "Identify the parties." }],
@@ -122,9 +126,12 @@ beforeEach(() => {
   state.authed = true;
   state.isAdmin = true;
   state.orgId = "org-1";
-  listTemplates
-    .mockReset()
-    .mockResolvedValue({ mine: [], firm: [], firmSharingSupported: true });
+  listTemplates.mockReset().mockResolvedValue({
+    mine: [],
+    shared: [],
+    firm: [],
+    firmSharingSupported: true,
+  });
   getTemplate.mockReset().mockResolvedValue(TEMPLATE);
   createTemplate.mockReset().mockResolvedValue(TEMPLATE);
   updateTemplate.mockReset().mockResolvedValue(TEMPLATE);
@@ -149,7 +156,7 @@ describe("authz", () => {
     const listRes = await fetch(`${baseUrl}/tabular-templates/admin/firm`);
     expect(listRes.status).toBe(403);
     const revertRes = await fetch(
-      `${baseUrl}/tabular-templates/t1/admin-revert`,
+      `${baseUrl}/tabular-templates/${ID}/admin-revert`,
       { method: "POST" },
     );
     expect(revertRes.status).toBe(403);
@@ -159,9 +166,10 @@ describe("authz", () => {
 });
 
 describe("GET /tabular-templates", () => {
-  it("returns the caller's template list, threading their org id", async () => {
+  it("returns the caller's template list, threading their email and org id", async () => {
     listTemplates.mockResolvedValue({
       mine: [TEMPLATE],
+      shared: [],
       firm: [],
       firmSharingSupported: true,
     });
@@ -169,12 +177,14 @@ describe("GET /tabular-templates", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       mine: [TEMPLATE],
+      shared: [],
       firm: [],
       firmSharingSupported: true,
     });
     expect(listTemplates).toHaveBeenCalledWith(
       expect.anything(),
       "caller",
+      "caller@example.test",
       "org-1",
     );
   });
@@ -225,28 +235,42 @@ describe("POST /tabular-templates", () => {
 
 describe("GET /tabular-templates/:id", () => {
   it("returns the template", async () => {
-    const res = await fetch(`${baseUrl}/tabular-templates/t1`);
+    const res = await fetch(`${baseUrl}/tabular-templates/${ID}`);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(TEMPLATE);
     expect(getTemplate).toHaveBeenCalledWith(
       expect.anything(),
       "caller",
-      "t1",
+      ID,
       "org-1",
     );
   });
 
   it("returns a fixed 404 when not readable", async () => {
     getTemplate.mockResolvedValue("not_found");
-    const res = await fetch(`${baseUrl}/tabular-templates/t1`);
+    const res = await fetch(`${baseUrl}/tabular-templates/${ID}`);
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ detail: "Template not found." });
+  });
+
+  it("404s a non-uuid id up front (no seam call, no 22P02 500)", async () => {
+    const res = await fetch(`${baseUrl}/tabular-templates/not-a-uuid`);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ detail: "Template not found." });
+    expect(getTemplate).not.toHaveBeenCalled();
+  });
+
+  it("404s the mistyped /tabular-templates/admin rather than treating it as an id", async () => {
+    const res = await fetch(`${baseUrl}/tabular-templates/admin`);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ detail: "Template not found." });
+    expect(getTemplate).not.toHaveBeenCalled();
   });
 });
 
 describe("PATCH /tabular-templates/:id", () => {
   it("updates and returns the template", async () => {
-    const res = await fetch(`${baseUrl}/tabular-templates/t1`, {
+    const res = await fetch(`${baseUrl}/tabular-templates/${ID}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "Renamed" }),
@@ -256,14 +280,14 @@ describe("PATCH /tabular-templates/:id", () => {
     expect(updateTemplate).toHaveBeenCalledWith(
       expect.anything(),
       "caller",
-      "t1",
+      ID,
       { title: "Renamed" },
     );
   });
 
   it("returns the 404-shaped not_found for a non-owner", async () => {
     updateTemplate.mockResolvedValue("not_found");
-    const res = await fetch(`${baseUrl}/tabular-templates/t1`, {
+    const res = await fetch(`${baseUrl}/tabular-templates/${ID}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "Hijack" }),
@@ -276,7 +300,7 @@ describe("PATCH /tabular-templates/:id", () => {
     updateTemplate.mockRejectedValue(
       new TemplateValidationError("Unknown column format."),
     );
-    const res = await fetch(`${baseUrl}/tabular-templates/t1`, {
+    const res = await fetch(`${baseUrl}/tabular-templates/${ID}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ columns: [{ format: "emoji" }] }),
@@ -288,20 +312,20 @@ describe("PATCH /tabular-templates/:id", () => {
 
 describe("DELETE /tabular-templates/:id", () => {
   it("deletes and returns 204", async () => {
-    const res = await fetch(`${baseUrl}/tabular-templates/t1`, {
+    const res = await fetch(`${baseUrl}/tabular-templates/${ID}`, {
       method: "DELETE",
     });
     expect(res.status).toBe(204);
     expect(deleteTemplate).toHaveBeenCalledWith(
       expect.anything(),
       "caller",
-      "t1",
+      ID,
     );
   });
 
   it("returns the 404-shaped not_found for a non-owner", async () => {
     deleteTemplate.mockResolvedValue("not_found");
-    const res = await fetch(`${baseUrl}/tabular-templates/t1`, {
+    const res = await fetch(`${baseUrl}/tabular-templates/${ID}`, {
       method: "DELETE",
     });
     expect(res.status).toBe(404);
@@ -311,7 +335,7 @@ describe("DELETE /tabular-templates/:id", () => {
 
 describe("PATCH /tabular-templates/:id/visibility", () => {
   it("flips visibility and returns the template", async () => {
-    const res = await fetch(`${baseUrl}/tabular-templates/t1/visibility`, {
+    const res = await fetch(`${baseUrl}/tabular-templates/${ID}/visibility`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ visibility: "firm" }),
@@ -321,14 +345,24 @@ describe("PATCH /tabular-templates/:id/visibility", () => {
     expect(setTemplateVisibility).toHaveBeenCalledWith(
       expect.anything(),
       "caller",
-      "t1",
+      ID,
       "firm",
       "org-1",
     );
   });
 
+  it("404s a non-uuid id before validating the body", async () => {
+    const res = await fetch(`${baseUrl}/tabular-templates/nope/visibility`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ visibility: "firm" }),
+    });
+    expect(res.status).toBe(404);
+    expect(setTemplateVisibility).not.toHaveBeenCalled();
+  });
+
   it("rejects an invalid visibility with 400", async () => {
-    const res = await fetch(`${baseUrl}/tabular-templates/t1/visibility`, {
+    const res = await fetch(`${baseUrl}/tabular-templates/${ID}/visibility`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ visibility: "public" }),
@@ -342,7 +376,7 @@ describe("PATCH /tabular-templates/:id/visibility", () => {
 
   it("returns 409 for an orgless caller without calling the seam", async () => {
     state.orgId = null;
-    const res = await fetch(`${baseUrl}/tabular-templates/t1/visibility`, {
+    const res = await fetch(`${baseUrl}/tabular-templates/${ID}/visibility`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ visibility: "firm" }),
@@ -356,7 +390,7 @@ describe("PATCH /tabular-templates/:id/visibility", () => {
 
   it("returns the same 409 when the seam reports unsupported (unmigrated DB)", async () => {
     setTemplateVisibility.mockResolvedValue("unsupported");
-    const res = await fetch(`${baseUrl}/tabular-templates/t1/visibility`, {
+    const res = await fetch(`${baseUrl}/tabular-templates/${ID}/visibility`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ visibility: "firm" }),
@@ -369,7 +403,7 @@ describe("PATCH /tabular-templates/:id/visibility", () => {
 
   it("returns 404 when the seam reports not_found", async () => {
     setTemplateVisibility.mockResolvedValue("not_found");
-    const res = await fetch(`${baseUrl}/tabular-templates/t1/visibility`, {
+    const res = await fetch(`${baseUrl}/tabular-templates/${ID}/visibility`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ visibility: "firm" }),
@@ -402,7 +436,7 @@ describe("admin routes", () => {
   });
 
   it("POST /:id/admin-revert reverts and returns 204", async () => {
-    const res = await fetch(`${baseUrl}/tabular-templates/t1/admin-revert`, {
+    const res = await fetch(`${baseUrl}/tabular-templates/${ID}/admin-revert`, {
       method: "POST",
     });
     expect(res.status).toBe(204);
@@ -410,13 +444,13 @@ describe("admin routes", () => {
       expect.anything(),
       "caller",
       "org-1",
-      "t1",
+      ID,
     );
   });
 
   it("POST /:id/admin-revert returns 404 for another org's template", async () => {
     adminRevertTemplate.mockResolvedValue("not_found");
-    const res = await fetch(`${baseUrl}/tabular-templates/t1/admin-revert`, {
+    const res = await fetch(`${baseUrl}/tabular-templates/${ID}/admin-revert`, {
       method: "POST",
     });
     expect(res.status).toBe(404);

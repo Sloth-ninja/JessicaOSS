@@ -37,16 +37,22 @@ import {
 // Update:  .from(t).update(patch).eq()…​.select(cols)  (patch BEFORE predicate)
 // Delete:  .from(t).delete().eq()…​.select("id")
 // When `visibilityMissing` is set, any filter or payload touching the
-// `visibility` / `organisation_id` columns raises 42703 (the unmigrated DB).
+// `visibility` / `organisation_id` columns raises a missing-column error (the
+// unmigrated DB): Postgres 42703 by default, or `missingCode` — PostgREST
+// rejects unknown UPDATE-payload columns as PGRST204 from its schema cache.
 
 type Row = Record<string, unknown>;
-const ERR_42703 = { code: "42703", message: "column does not exist" } as const;
 const VISIBILITY_COLUMNS = ["visibility", "organisation_id"];
 
 function makeDb(opts: {
   tables?: Record<string, Row[]>;
   visibilityMissing?: boolean;
+  missingCode?: string;
 }) {
+  const missingError = {
+    code: opts.missingCode ?? "42703",
+    message: "column does not exist",
+  };
   const tables = opts.tables ?? {};
   let idCounter = 0;
 
@@ -80,7 +86,7 @@ function makeDb(opts: {
 
     function resolve(): Promise<{ data: Row[] | null; error: unknown }> {
       if (touchesMissingColumn()) {
-        return Promise.resolve({ data: null, error: ERR_42703 });
+        return Promise.resolve({ data: null, error: missingError });
       }
       if (mode === "insert") {
         const row = { id: `generated-${++idCounter}`, ...inserted };
@@ -192,7 +198,7 @@ function makeDb(opts: {
             iss.every(([c, v]) => (row[c] ?? null) === v),
         );
         const result = touchesMissingColumn()
-          ? { data: null, error: ERR_42703 }
+          ? { data: null, error: missingError }
           : { data: rows.map((r) => ({ ...r })), error: null };
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return Promise.resolve(result).then(onF as any, onR as any);
@@ -206,6 +212,7 @@ function makeDb(opts: {
 }
 
 const OWNER = "owner-user";
+const OWNER_EMAIL = "owner@example.test";
 const OTHER = "other-user";
 const ORG = "org-1";
 const OTHER_ORG = "org-2";
@@ -288,6 +295,38 @@ describe("validateTemplateColumns", () => {
     );
   });
 
+  it("requires at least one column", () => {
+    expect(() => validateTemplateColumns([])).toThrow(
+      "A template needs at least one column.",
+    );
+  });
+
+  it("rejects a non-object entry with the name-and-prompt message", () => {
+    expect(() => validateTemplateColumns(["oops"])).toThrow(
+      "Each column needs a name and a prompt.",
+    );
+  });
+
+  it("strips control characters and newlines from names and tags", () => {
+    const result = validateTemplateColumns([
+      {
+        name: "Governing\nlaw ",
+        prompt: "Which law governs?",
+        format: "tag",
+        tags: ["England\r\nand Wales", "Scotland"],
+      },
+    ]);
+    expect(result).toEqual([
+      {
+        index: 0,
+        name: "Governing law",
+        prompt: "Which law governs?",
+        format: "tag",
+        tags: ["England and Wales", "Scotland"],
+      },
+    ]);
+  });
+
   it("rejects a column with a missing or blank name", () => {
     expect(() =>
       validateTemplateColumns([{ prompt: "Identify the parties." }]),
@@ -357,8 +396,9 @@ describe("listTemplates", () => {
         ],
       },
     });
-    const list = await listTemplates(db, OWNER, null);
+    const list = await listTemplates(db, OWNER, OWNER_EMAIL, null);
     expect(list.mine.map((t) => t.id)).toEqual(["t1"]);
+    expect(list.shared).toEqual([]);
     expect(list.firm).toEqual([]);
     expect(list.firmSharingSupported).toBe(false);
     expect(list.mine[0]).toMatchObject({
@@ -401,7 +441,7 @@ describe("listTemplates", () => {
         user_profiles: [{ user_id: OTHER, display_name: "Sam Solicitor" }],
       },
     });
-    const list = await listTemplates(db, OWNER, ORG);
+    const list = await listTemplates(db, OWNER, OWNER_EMAIL, ORG);
     expect(list.firmSharingSupported).toBe(true);
     expect(list.mine.map((t) => t.id)).toEqual(["t1"]);
     expect(list.mine[0].visibility).toBe("firm");
@@ -420,10 +460,70 @@ describe("listTemplates", () => {
       tables: { workflows: [templateRow()] },
       visibilityMissing: true,
     });
-    const list = await listTemplates(db, OWNER, ORG);
+    const list = await listTemplates(db, OWNER, OWNER_EMAIL, ORG);
     expect(list.mine.map((t) => t.id)).toEqual(["t1"]);
     expect(list.firm).toEqual([]);
     expect(list.firmSharingSupported).toBe(false);
+  });
+
+  it("lists templates email-shared with the caller (normalised email), isOwner false", async () => {
+    const { db } = makeDb({
+      tables: {
+        workflows: [
+          templateRow({ id: "t2", user_id: OTHER, title: "Shared NDA" }),
+          templateRow({ id: "t3", user_id: OTHER }),
+        ],
+        workflow_shares: [
+          { workflow_id: "t2", shared_with_email: OWNER_EMAIL },
+        ],
+        user_profiles: [{ user_id: OTHER, display_name: "Sam Solicitor" }],
+      },
+    });
+    const list = await listTemplates(db, OWNER, "  Owner@Example.Test ", null);
+    expect(list.shared.map((t) => t.id)).toEqual(["t2"]);
+    expect(list.shared[0]).toMatchObject({
+      title: "Shared NDA",
+      isOwner: false,
+      ownerUserId: OTHER,
+      ownerDisplayName: "Sam Solicitor",
+    });
+  });
+
+  it("does not surface shares addressed to a different email", async () => {
+    const { db } = makeDb({
+      tables: {
+        workflows: [templateRow({ id: "t2", user_id: OTHER })],
+        workflow_shares: [
+          { workflow_id: "t2", shared_with_email: "someone-else@example.test" },
+        ],
+      },
+    });
+    const list = await listTemplates(db, OWNER, OWNER_EMAIL, null);
+    expect(list.shared).toEqual([]);
+  });
+
+  it("excludes tombstoned rows and the caller's own rows from shared", async () => {
+    const { db } = makeDb({
+      tables: {
+        workflows: [
+          // A share row pointing at the caller's OWN template must not
+          // duplicate it into `shared` — it stays in `mine`.
+          templateRow(),
+          templateRow({
+            id: "t2",
+            user_id: OTHER,
+            deleted_at: "2026-08-01T00:00:00Z",
+          }),
+        ],
+        workflow_shares: [
+          { workflow_id: "t1", shared_with_email: OWNER_EMAIL },
+          { workflow_id: "t2", shared_with_email: OWNER_EMAIL },
+        ],
+      },
+    });
+    const list = await listTemplates(db, OWNER, OWNER_EMAIL, null);
+    expect(list.mine.map((t) => t.id)).toEqual(["t1"]);
+    expect(list.shared).toEqual([]);
   });
 });
 
@@ -750,6 +850,20 @@ describe("setTemplateVisibility", () => {
     );
   });
 
+  it("returns unsupported when PostgREST rejects the payload column (PGRST204)", async () => {
+    // PostgREST validates UPDATE payload keys against its schema cache and
+    // returns PGRST204 (not 42703) for an unknown column — the live shape on
+    // an unmigrated database (DURABLE_LESSONS 2026-08-05).
+    const { db } = makeDb({
+      tables: { workflows: [templateRow()] },
+      visibilityMissing: true,
+      missingCode: "PGRST204",
+    });
+    expect(await setTemplateVisibility(db, OWNER, "t1", "firm", ORG)).toBe(
+      "unsupported",
+    );
+  });
+
   it("an audit failure is non-fatal", async () => {
     insertDeletionAudit.mockRejectedValue(new Error("audit table missing"));
     const { db } = makeDb({ tables: { workflows: [templateRow()] } });
@@ -818,6 +932,35 @@ describe("adminRevertTemplate", () => {
     expect(await adminRevertTemplate(db, "admin-user", ORG, "t1")).toBe(
       "not_found",
     );
+  });
+
+  it("degrades to not_found when PostgREST rejects the payload column (PGRST204)", async () => {
+    const { db } = makeDb({
+      tables: { workflows: [templateRow()] },
+      visibilityMissing: true,
+      missingCode: "PGRST204",
+    });
+    expect(await adminRevertTemplate(db, "admin-user", ORG, "t1")).toBe(
+      "not_found",
+    );
+  });
+
+  it("cannot revert a tombstoned template", async () => {
+    const { db, tables } = makeDb({
+      tables: {
+        workflows: [
+          templateRow({
+            visibility: "firm",
+            organisation_id: ORG,
+            deleted_at: "2026-08-01T00:00:00Z",
+          }),
+        ],
+      },
+    });
+    expect(await adminRevertTemplate(db, "admin-user", ORG, "t1")).toBe(
+      "not_found",
+    );
+    expect(tables.workflows[0]).toMatchObject({ visibility: "firm" });
   });
 });
 

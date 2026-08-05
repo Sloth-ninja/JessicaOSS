@@ -28,6 +28,22 @@ export const tabularTemplatesRouter = Router();
 const TEMPLATE_NOT_FOUND_DETAIL = "Template not found.";
 const FIRM_SHARING_UNAVAILABLE_DETAIL = "Firm sharing is not available.";
 
+// Template ids are uuids. A non-uuid `:id` (including the literal "admin" from
+// a mistyped /tabular-templates/admin) gets the uniform 404 up front rather
+// than reaching Postgres, where a malformed uuid raises 22P02 and would
+// surface as a generic 500.
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function rejectNonUuidId(
+  id: string,
+  res: { status: (n: number) => { json: (b: unknown) => void } },
+): boolean {
+  if (UUID_RE.test(id)) return false;
+  res.status(404).json({ detail: TEMPLATE_NOT_FOUND_DETAIL });
+  return true;
+}
+
 /** 400 with the validation message for TemplateValidationError; rethrow rest. */
 function handleValidationError(
   err: unknown,
@@ -63,6 +79,7 @@ tabularTemplatesRouter.post(
   requireAdmin,
   asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
+    if (rejectNonUuidId(req.params.id, res)) return;
     const db = createServerSupabase();
     const orgId = await getUserOrganisationId(db, userId);
     if (!orgId) {
@@ -78,15 +95,17 @@ tabularTemplatesRouter.post(
 
 // ── Member surface ───────────────────────────────────────────────────────────
 
-// GET /tabular-templates — mine + firm-shared, with the firm-support flag.
+// GET /tabular-templates — mine + email-shared + firm-shared, with the
+// firm-support flag.
 tabularTemplatesRouter.get(
   "/",
   requireAuth,
   asyncHandler(async (_req, res) => {
     const userId = res.locals.userId as string;
+    const userEmail = (res.locals.userEmail as string | undefined) ?? null;
     const db = createServerSupabase();
     const orgId = await getUserOrganisationId(db, userId);
-    res.json(await listTemplates(db, userId, orgId));
+    res.json(await listTemplates(db, userId, userEmail, orgId));
   }),
 );
 
@@ -122,6 +141,7 @@ tabularTemplatesRouter.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
+    if (rejectNonUuidId(req.params.id, res)) return;
     const db = createServerSupabase();
     const orgId = await getUserOrganisationId(db, userId);
     const template = await getTemplate(db, userId, req.params.id, orgId);
@@ -138,6 +158,7 @@ tabularTemplatesRouter.patch(
   requireAuth,
   asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
+    if (rejectNonUuidId(req.params.id, res)) return;
     const body = (req.body ?? {}) as Record<string, unknown>;
     const patch: {
       title?: string;
@@ -169,6 +190,7 @@ tabularTemplatesRouter.delete(
   requireAuth,
   asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
+    if (rejectNonUuidId(req.params.id, res)) return;
     const db = createServerSupabase();
     const outcome = await deleteTemplate(db, userId, req.params.id);
     if (outcome !== "deleted") {
@@ -184,6 +206,7 @@ tabularTemplatesRouter.patch(
   requireAuth,
   asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
+    if (rejectNonUuidId(req.params.id, res)) return;
     const visibility = (req.body as { visibility?: unknown } | null)
       ?.visibility;
     if (visibility !== "private" && visibility !== "firm") {
