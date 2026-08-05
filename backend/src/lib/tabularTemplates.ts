@@ -620,6 +620,17 @@ export async function deleteTemplate(
  * block and tombstone exclusion live in the UPDATE predicate. Orgless callers
  * and unmigrated databases (42703/42P01) get "unsupported". Flips are audited
  * best-effort as firm_shared / firm_reverted.
+ *
+ * Sharing to the firm additionally re-validates the STORED columns first. Rows
+ * written before this seam existed (the old workflow editor, or the legacy
+ * POST/PATCH /workflows routes, which still accept type:'tabular' payloads
+ * without these checks) can carry oversize or control-character values that
+ * `createTemplate`/`updateTemplate` would reject — and a firm-shared template's
+ * tags are interpolated into every colleague's cell-generation prompts. Sharing
+ * is the moment a private row becomes other people's input, so it is the right
+ * choke point: an invalid row reports "invalid_columns" and stays private until
+ * its owner reopens and re-saves it (which runs the same validation). Reverting
+ * to private is never blocked — that direction only ever reduces exposure.
  */
 export async function setTemplateVisibility(
   db: Db,
@@ -627,8 +638,27 @@ export async function setTemplateVisibility(
   id: string,
   visibility: "private" | "firm",
   orgId: string | null,
-): Promise<TabularTemplate | "not_found" | "unsupported"> {
+): Promise<TabularTemplate | "not_found" | "unsupported" | "invalid_columns"> {
   if (!orgId) return "unsupported";
+  if (visibility === "firm") {
+    const existing = await db
+      .from(TABLE)
+      .select("columns_config")
+      .eq("id", id)
+      .eq("user_id", userId)
+      .eq("type", "tabular")
+      .eq("is_system", false)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (existing.error) throw existing.error;
+    if (!existing.data) return "not_found";
+    try {
+      validateTemplateColumns((existing.data as WorkflowRow).columns_config);
+    } catch (err) {
+      if (err instanceof TemplateValidationError) return "invalid_columns";
+      throw err;
+    }
+  }
   const { data, error } = await db
     .from(TABLE)
     .update({
@@ -743,9 +773,11 @@ export async function listFirmTemplatesForAdmin(
     if (isMissingColumnOrTable(error)) return [];
     throw error;
   }
-  const templates = ((data ?? []) as WorkflowRow[])
-    .filter((row) => row.is_system !== true)
-    .map((row) => toTemplate(row, ""));
+  // NOTE no client-side is_system re-filter: `.eq("is_system", false)` above
+  // already excludes built-ins in the query.
+  const templates = ((data ?? []) as WorkflowRow[]).map((row) =>
+    toTemplate(row, ""),
+  );
   await enrichOwnerNames(db, templates);
   return templates;
 }

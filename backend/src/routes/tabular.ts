@@ -44,6 +44,29 @@ import {
     setResourceVisibility,
 } from "../lib/firmVisibility";
 
+// tabular_reviews.workflow_id is a uuid FK to workflows.id — the template a
+// review was started from (what the firm usage dashboard attributes runs to).
+// Built-in templates are client-side constants with ids like
+// "builtin-nda", so a caller starting from one sends no workflow_id at all;
+// anything else that is not a uuid is a client bug and gets a fixed 400 rather
+// than reaching Postgres, where a malformed uuid raises 22P02 and would surface
+// as a generic 500.
+const UUID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const WORKFLOW_ID_DETAIL = "workflow_id must be a template id or null";
+
+/** null (clear) / a uuid string / undefined (absent) — or "invalid". */
+function parseWorkflowId(
+    raw: unknown,
+): string | null | undefined | "invalid" {
+    if (raw === undefined) return undefined;
+    if (raw === null) return null;
+    if (typeof raw !== "string") return "invalid";
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    return UUID_RE.test(trimmed) ? trimmed : "invalid";
+}
+
 function formatPromptSuffix(format?: string, tags?: string[]): string {
     switch (format) {
         case "bulleted_list":
@@ -140,6 +163,10 @@ tabularRouter.post("/", requireAuth, asyncHandler(async (req, res) => {
             project_id?: string;
         };
 
+    const workflowId = parseWorkflowId(workflow_id);
+    if (workflowId === "invalid")
+        return void res.status(400).json({ detail: WORKFLOW_ID_DETAIL });
+
     const db = createServerSupabase();
     if (project_id) {
         const access = await checkProjectAccess(
@@ -167,7 +194,7 @@ tabularRouter.post("/", requireAuth, asyncHandler(async (req, res) => {
             columns_config,
             document_ids: allowedDocumentIds,
             project_id: project_id ?? null,
-            workflow_id: workflow_id ?? null,
+            workflow_id: workflowId ?? null,
         })
         .select("*")
         .single();
@@ -425,6 +452,12 @@ tabularRouter.patch("/:reviewId", requireAuth, asyncHandler(async (req, res) => 
             detail: "project_id must be a non-empty string or null",
         });
     }
+    // Applying a template to an existing review re-points its template linkage
+    // (or clears it, when the caller picks a built-in). Owner-only, gated with
+    // columns_config below — the two always move together in the UI.
+    const workflowIdUpdate = parseWorkflowId(req.body.workflow_id);
+    if (workflowIdUpdate === "invalid")
+        return void res.status(400).json({ detail: WORKFLOW_ID_DETAIL });
     // shared_with edits are owner-only — gated below after we know who's
     // making the call. Normalize lowercase + dedupe + drop empties.
     let sharedWithUpdate: string[] | undefined;
@@ -471,6 +504,14 @@ tabularRouter.patch("/:reviewId", requireAuth, asyncHandler(async (req, res) => 
             });
         }
         updates.columns_config = req.body.columns_config;
+    }
+    if (workflowIdUpdate !== undefined) {
+        if (!access.isOwner) {
+            return void res.status(403).json({
+                detail: "Only the review owner can change columns",
+            });
+        }
+        updates.workflow_id = workflowIdUpdate;
     }
     if (sharedWithUpdate !== undefined) {
         if (!access.isOwner)

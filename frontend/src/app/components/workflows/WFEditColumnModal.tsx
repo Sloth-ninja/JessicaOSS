@@ -29,9 +29,18 @@ interface Props {
     onClose: () => void;
     onSave: (col: ColumnConfig) => void;
     onDelete: () => void;
+    /** Root breadcrumb of the surface that opened this modal — the review
+     *  template editor shows "Templates", the workflow editor "Workflows". */
+    breadcrumbRoot?: string;
 }
 
-export function WFEditColumnModal({ column, onClose, onSave, onDelete }: Props) {
+export function WFEditColumnModal({
+    column,
+    onClose,
+    onSave,
+    onDelete,
+    breadcrumbRoot = "Workflows",
+}: Props) {
     const [draft, setDraft] = useState<ColumnDraft>({
         name: column.name,
         prompt: column.prompt,
@@ -122,7 +131,7 @@ export function WFEditColumnModal({ column, onClose, onSave, onDelete }: Props) 
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 pt-5 pb-2">
                     <div className="flex items-center gap-1.5 text-xs text-gray-400">
-                        <span>Workflows</span>
+                        <span>{breadcrumbRoot}</span>
                         <span>›</span>
                         <span>Edit column</span>
                     </div>

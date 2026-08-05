@@ -9,15 +9,22 @@ import { Modal } from "../shared/Modal";
 interface Props {
     col: ColumnConfig;
     onClose: () => void;
+    /** Root breadcrumb of the surface that opened this modal — the review
+     *  template editor shows "Templates", the workflow editor "Workflows". */
+    breadcrumbRoot?: string;
 }
 
-export function WFColumnViewModal({ col, onClose }: Props) {
+export function WFColumnViewModal({
+    col,
+    onClose,
+    breadcrumbRoot = "Workflows",
+}: Props) {
     const FormatIcon = formatIcon(col.format ?? "text");
     return (
         <Modal
             open
             onClose={onClose}
-            breadcrumbs={["Workflows", col.name]}
+            breadcrumbs={[breadcrumbRoot, col.name]}
             primaryAction={{
                 label: "Close",
                 onClick: onClose,

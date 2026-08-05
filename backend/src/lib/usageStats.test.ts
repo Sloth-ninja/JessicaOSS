@@ -34,9 +34,20 @@ type Review = {
     created_at: string;
 };
 type Doc = { id: string; user_id: string; created_at: string };
-type Workflow = { id: string; title: string | null };
+type Workflow = {
+    id: string;
+    title: string | null;
+    // Title resolution is org-scoped: a template is nameable on this firm's
+    // dashboard only if a member owns it, or it is firm-shared into this org.
+    user_id?: string | null;
+    visibility?: string | null;
+    organisation_id?: string | null;
+};
 
 interface Seed {
+    /** Simulate an unmigrated database: any `workflows` query filtering on the
+     *  firm-visibility columns raises Postgres 42703 (migration 20260804_01). */
+    workflowVisibilityMissing?: boolean;
     profiles: Profile[];
     chats?: Chat[];
     tabular_reviews?: Review[];
@@ -91,10 +102,27 @@ function makeDb(seed: Seed) {
             },
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             then(resolve: any, reject: any) {
-                return Promise.resolve({ data: rows(), error: null }).then(
-                    resolve,
-                    reject,
-                );
+                // Unmigrated database: only the `workflows` firm-visibility
+                // filter raises 42703 (user_profiles.organisation_id predates
+                // it, so member resolution is unaffected).
+                const missing =
+                    seed.workflowVisibilityMissing &&
+                    table === "workflows" &&
+                    eqFilters.some(
+                        ([c]) =>
+                            c === "visibility" || c === "organisation_id",
+                    );
+                return Promise.resolve(
+                    missing
+                        ? {
+                              data: null,
+                              error: {
+                                  code: "42703",
+                                  message: "column does not exist",
+                              },
+                          }
+                        : { data: rows(), error: null },
+                ).then(resolve, reject);
             },
         };
         return b;
@@ -201,7 +229,9 @@ describe("getOrganisationUsage — totals & member rows", () => {
                 { id: "r1", user_id: "u1", workflow_id: "w1", created_at: dayAt(-1) },
             ],
             documents: [{ id: "d1", user_id: "u2", created_at: dayAt(-1) }],
-            workflows: [{ id: "w1", title: "NDA first-look review" }],
+            workflows: [
+                { id: "w1", title: "NDA first-look review", user_id: "u1" },
+            ],
             authUsers: [
                 { id: "u1", email: "a@firm.example" },
                 { id: "u2", email: "r@firm.example" },
@@ -326,7 +356,13 @@ describe("getOrganisationUsage — workflow-template 7d/30d columns", () => {
                 // Null workflow_id: counts to totals but not the template table.
                 { id: "r4", user_id: "u1", workflow_id: null, created_at: dayAt(-1) },
             ],
-            workflows: [{ id: "w1", title: "Client onboarding checklist" }],
+            workflows: [
+                {
+                    id: "w1",
+                    title: "Client onboarding checklist",
+                    user_id: "u1",
+                },
+            ],
         };
         const usage = await run(seed, 7);
         // Totals workflowRuns counts only the requested (7d) window incl. the
@@ -340,6 +376,147 @@ describe("getOrganisationUsage — workflow-template 7d/30d columns", () => {
             runs30d: 3,
             lastRun: dayAt(-1),
         });
+    });
+});
+
+describe("getOrganisationUsage — template titles are ORG-SCOPED", () => {
+    // tabular_reviews.workflow_id is stored verbatim from whichever template a
+    // member started from, including one a colleague was email-shared from
+    // OUTSIDE the firm. Resolving those titles unscoped would print an
+    // outsider's template name (often a client or matter name) on this firm's
+    // dashboard.
+    it("does not resolve a template owned by a non-member (name never surfaces)", async () => {
+        const seed: Seed = {
+            profiles: [profile({ user_id: "u1" })],
+            tabular_reviews: [
+                {
+                    id: "r1",
+                    user_id: "u1",
+                    workflow_id: "foreign",
+                    created_at: dayAt(-1),
+                },
+            ],
+            workflows: [
+                {
+                    id: "foreign",
+                    title: "Project Nightingale — Acquiror DD",
+                    user_id: "outsider",
+                },
+            ],
+        };
+        const usage = await run(seed, 7);
+        // The run still counts everywhere it did before…
+        expect(usage.totals.workflowRuns).toBe(1);
+        expect(usage.members[0].workflowRuns).toBe(1);
+        // …but the unresolved id drops out of the per-template table entirely,
+        // the same path an already-deleted template id has always taken.
+        expect(usage.workflows).toEqual([]);
+    });
+
+    it("does not resolve another firm's firm-shared template", async () => {
+        const seed: Seed = {
+            profiles: [profile({ user_id: "u1" })],
+            tabular_reviews: [
+                {
+                    id: "r1",
+                    user_id: "u1",
+                    workflow_id: "other-firm",
+                    created_at: dayAt(-1),
+                },
+            ],
+            workflows: [
+                {
+                    id: "other-firm",
+                    title: "Rival LLP standard form",
+                    user_id: "outsider",
+                    visibility: "firm",
+                    organisation_id: OTHER_ORG,
+                },
+            ],
+        };
+        const usage = await run(seed, 7);
+        expect(usage.totals.workflowRuns).toBe(1);
+        expect(usage.workflows).toEqual([]);
+    });
+
+    it("resolves a template owned by a member", async () => {
+        const seed: Seed = {
+            profiles: [profile({ user_id: "u1" })],
+            tabular_reviews: [
+                {
+                    id: "r1",
+                    user_id: "u1",
+                    workflow_id: "w1",
+                    created_at: dayAt(-1),
+                },
+            ],
+            workflows: [{ id: "w1", title: "Lease report", user_id: "u1" }],
+        };
+        const usage = await run(seed, 7);
+        expect(usage.workflows).toHaveLength(1);
+        expect(usage.workflows[0]).toMatchObject({
+            workflowId: "w1",
+            title: "Lease report",
+        });
+    });
+
+    it("resolves a template firm-shared into this org even if its owner has left", async () => {
+        const seed: Seed = {
+            profiles: [profile({ user_id: "u1" })],
+            tabular_reviews: [
+                {
+                    id: "r1",
+                    user_id: "u1",
+                    workflow_id: "shared",
+                    created_at: dayAt(-1),
+                },
+            ],
+            workflows: [
+                {
+                    id: "shared",
+                    title: "Firm SPA checklist",
+                    // Owner is no longer in the firm's member list, but the
+                    // template is still firm-shared into this organisation.
+                    user_id: "former-member",
+                    visibility: "firm",
+                    organisation_id: ORG,
+                },
+            ],
+        };
+        const usage = await run(seed, 7);
+        expect(usage.workflows).toHaveLength(1);
+        expect(usage.workflows[0]).toMatchObject({
+            workflowId: "shared",
+            title: "Firm SPA checklist",
+        });
+    });
+
+    it("unmigrated DB (42703 on the visibility filter): member-owned titles still resolve", async () => {
+        const seed: Seed = {
+            workflowVisibilityMissing: true,
+            profiles: [profile({ user_id: "u1" })],
+            tabular_reviews: [
+                {
+                    id: "r1",
+                    user_id: "u1",
+                    workflow_id: "w1",
+                    created_at: dayAt(-1),
+                },
+                {
+                    id: "r2",
+                    user_id: "u1",
+                    workflow_id: "foreign",
+                    created_at: dayAt(-1),
+                },
+            ],
+            workflows: [
+                { id: "w1", title: "Lease report", user_id: "u1" },
+                { id: "foreign", title: "Outsider form", user_id: "outsider" },
+            ],
+        };
+        const usage = await run(seed, 7);
+        expect(usage.workflows).toHaveLength(1);
+        expect(usage.workflows[0]).toMatchObject({ title: "Lease report" });
     });
 });
 

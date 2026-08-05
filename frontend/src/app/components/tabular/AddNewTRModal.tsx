@@ -15,6 +15,7 @@ import { Modal } from "../shared/Modal";
 import {
     builtInTemplateOptions,
     loadTemplateOptions,
+    persistableTemplateId,
     templateGroupOf,
     type TemplateOption,
 } from "./templateOptions";
@@ -27,6 +28,8 @@ interface Props {
         projectId?: string,
         documentIds?: string[],
         columnsConfig?: Workflow["columns_config"],
+        /** Saved template the review was started from (built-ins: undefined). */
+        workflowId?: string,
     ) => void;
     projects?: Project[];
     /** When provided, skip the project/directory picker and show only these docs */
@@ -144,6 +147,9 @@ export function AddNewTRModal({
             underProject ? selectedProjectId : undefined,
             selectedDocIds.size > 0 ? [...selectedDocIds] : undefined,
             selectedWorkflow?.columns_config ?? undefined,
+            // Record which saved template this review came from, so the firm
+            // usage dashboard can attribute the run to it.
+            persistableTemplateId(selectedWorkflow),
         );
         handleClose();
     }

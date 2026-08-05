@@ -104,6 +104,11 @@ export function WorkflowPickerModal({
             cancelled = true;
             cancelAnimationFrame(frame);
         };
+        // NOTE `loadOptions` is a dependency, so callers must pass a STABLE
+        // function (a module-level function or one wrapped in useCallback). An
+        // inline arrow would be a new identity on every render and re-run this
+        // effect — refetching the template list in a loop while the modal is
+        // open. Today's callers pass the module-level loadTemplateOptions.
     }, [initialWorkflowId, open, workflowType, loadOptions]);
 
     if (!open) return null;

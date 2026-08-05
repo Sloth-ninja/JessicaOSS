@@ -425,6 +425,9 @@ export type GovernedResourceType =
 
 export interface PendingDeletion {
     resourceType: GovernedResourceType;
+    /** Sub-kind within the resource's table (workflows: 'tabular' = a review
+     *  template). Null where the table has no sub-kind. */
+    resourceSubtype: string | null;
     id: string;
     displayName: string | null;
     deletedBy: string | null;
@@ -1399,6 +1402,9 @@ export async function updateTabularReview(
         document_ids?: string[];
         project_id?: string | null;
         shared_with?: string[];
+        /** Saved template this review is built from; null clears the linkage
+         *  (a built-in template was applied). Owner-only, server-side. */
+        workflow_id?: string | null;
     },
 ): Promise<TabularReview> {
     return apiRequest<TabularReview>(`/tabular-review/${reviewId}`, {

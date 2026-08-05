@@ -54,6 +54,13 @@ const DISPLAY_COLUMN: Partial<Record<GovernedResourceType, string>> = {
     workflow: "title",
 };
 
+// Extra column that distinguishes sub-kinds sharing one table. `workflows`
+// holds both prompt workflows and review templates (type='tabular'), and the
+// admin Pending-deletions list must name each honestly.
+const SUBTYPE_COLUMN: Partial<Record<GovernedResourceType, string>> = {
+    workflow: "type",
+};
+
 export function resourceTypeToTable(value: string): string | null {
     return (RESOURCE_TABLE as Record<string, string>)[value] ?? null;
 }
@@ -573,6 +580,10 @@ async function getOrganisationRetentionDays(
 
 export interface PendingDeletion {
     resourceType: GovernedResourceType;
+    /** Sub-kind within the resource's table (workflows: 'tabular' = a review
+     *  template, anything else = a prompt workflow). Null where the table has
+     *  no sub-kind, or on an unmigrated/absent column. */
+    resourceSubtype: string | null;
     id: string;
     displayName: string | null;
     deletedBy: string | null;
@@ -602,8 +613,10 @@ export async function listPendingDeletions(
     for (const resourceType of GOVERNED_RESOURCE_TYPES) {
         const table = RESOURCE_TABLE[resourceType];
         const displayColumn = DISPLAY_COLUMN[resourceType];
+        const subtypeColumn = SUBTYPE_COLUMN[resourceType];
         const columns = ["id", "user_id", "deleted_at", "deleted_by"];
         if (displayColumn) columns.push(displayColumn);
+        if (subtypeColumn) columns.push(subtypeColumn);
         let rows: Array<Record<string, unknown>>;
         try {
             // Cap at Supabase's default 1000-row ceiling (pilot-scale; a firm's
@@ -642,6 +655,10 @@ export async function listPendingDeletions(
                     : null;
             pending.push({
                 resourceType,
+                resourceSubtype:
+                    subtypeColumn && typeof row[subtypeColumn] === "string"
+                        ? (row[subtypeColumn] as string)
+                        : null,
                 id,
                 displayName,
                 deletedBy:

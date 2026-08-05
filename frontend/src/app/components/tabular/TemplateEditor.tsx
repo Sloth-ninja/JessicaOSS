@@ -79,6 +79,33 @@ export function TemplateEditor({ templateId }: { templateId: string }) {
     const [deleteStatus, setDeleteStatus] = useState<
         "idle" | "loading" | "complete"
     >("idle");
+    const [leaveOpen, setLeaveOpen] = useState(false);
+
+    // A draft lives only in the browser until "Create template" is pressed, so
+    // leaving the page throws the work away. Saved templates auto-save every
+    // change and need no guard.
+    const draftDirty = isDraft && (!!title.trim() || columns.length > 0);
+
+    useEffect(() => {
+        if (!draftDirty) return;
+        const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+        window.addEventListener("beforeunload", warn);
+        return () => window.removeEventListener("beforeunload", warn);
+    }, [draftDirty]);
+
+    // In-app navigation away from the draft goes through the breadcrumb, so the
+    // confirm hangs off it. (Next's App Router exposes no navigation-blocking
+    // API; the beforeunload above covers reloads and closing the tab.)
+    function leaveEditor() {
+        router.push("/review-templates");
+    }
+    function requestLeave() {
+        if (draftDirty) {
+            setLeaveOpen(true);
+            return;
+        }
+        leaveEditor();
+    }
 
     // Built-ins and templates owned by someone else open read-only with a
     // Duplicate action; only a draft or the caller's own template is editable.
@@ -142,10 +169,15 @@ export function TemplateEditor({ templateId }: { templateId: string }) {
             // what the server holds.
             setColumns(previous);
             setSaveStatus("idle");
+            // A 404 means the template is gone (deleted in another tab, or an
+            // admin/owner action) — "please try again" would be a lie, so say
+            // what actually happened.
             setActionError(
-                err instanceof MikeApiError && err.message
-                    ? err.message
-                    : "Could not save the template. Your last change was undone — please try again.",
+                err instanceof MikeApiError && err.status === 404
+                    ? "This template no longer exists. It may have been deleted in another tab."
+                    : err instanceof MikeApiError && err.message
+                      ? err.message
+                      : "Could not save the template. Your last change was undone — please try again.",
             );
         }
     }
@@ -245,7 +277,7 @@ export function TemplateEditor({ templateId }: { templateId: string }) {
     const breadcrumbs = [
         {
             label: "Templates",
-            onClick: () => router.push("/review-templates"),
+            onClick: requestLeave,
             title: "Back to Templates",
         },
         {
@@ -558,6 +590,7 @@ export function TemplateEditor({ templateId }: { templateId: string }) {
                 <WFColumnViewModal
                     col={viewingColumn}
                     onClose={() => setViewingColumn(null)}
+                    breadcrumbRoot="Templates"
                 />
             )}
 
@@ -571,6 +604,7 @@ export function TemplateEditor({ templateId }: { templateId: string }) {
             {editingColumn && (
                 <WFEditColumnModal
                     column={editingColumn}
+                    breadcrumbRoot="Templates"
                     onClose={() => setEditingColumn(null)}
                     onSave={handleColumnSaved}
                     onDelete={() => {
@@ -599,6 +633,18 @@ export function TemplateEditor({ templateId }: { templateId: string }) {
                     setPractice(updated.practice);
                     setDetailsOpen(false);
                 }}
+            />
+
+            <ConfirmPopup
+                open={leaveOpen}
+                title="Discard this template?"
+                message="This template has not been created yet. Leaving now discards the name and columns you have added."
+                confirmLabel="Discard"
+                onConfirm={() => {
+                    setLeaveOpen(false);
+                    leaveEditor();
+                }}
+                onCancel={() => setLeaveOpen(false)}
             />
 
             <ConfirmPopup

@@ -418,6 +418,19 @@ describe("PATCH /tabular-templates/:id/visibility", () => {
     });
   });
 
+  it("returns 400 with re-save guidance when the seam reports invalid_columns", async () => {
+    setTemplateVisibility.mockResolvedValue("invalid_columns");
+    const res = await fetch(`${baseUrl}/tabular-templates/${ID}/visibility`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ visibility: "firm" }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      detail: "Reopen and re-save this template before sharing it.",
+    });
+  });
+
   it("returns 404 when the seam reports not_found", async () => {
     setTemplateVisibility.mockResolvedValue("not_found");
     const res = await fetch(`${baseUrl}/tabular-templates/${ID}/visibility`, {

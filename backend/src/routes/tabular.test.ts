@@ -23,6 +23,8 @@ const state = vi.hoisted(() => ({
   // WS8×WS9: when true, getTombstonedIds reports the review as soft-deleted so
   // ensureReviewAccess denies it at the choke point.
   reviewTombstoned: false,
+  // Last UPDATE payload seen by the fake db (template-linkage assertions).
+  lastUpdate: null as Record<string, unknown> | null,
 }));
 
 vi.mock("../middleware/auth", () => ({
@@ -39,7 +41,9 @@ vi.mock("../middleware/auth", () => ({
 }));
 
 // Minimal fake: the route reads the review via
-// .from("tabular_reviews").select(...).eq("id", …).single().
+// .from("tabular_reviews").select(...).eq("id", …).single(), and PATCH writes it
+// back via .update(patch).eq("id", …).select("*").single(). The last update
+// payload is captured in state so the template-linkage tests can assert it.
 vi.mock("../lib/supabase", () => ({
   createServerSupabase: () => ({
     from: () => ({
@@ -52,6 +56,20 @@ vi.mock("../lib/supabase", () => ({
             }),
         }),
       }),
+      update: (patch: Record<string, unknown>) => {
+        state.lastUpdate = patch;
+        return {
+          eq: () => ({
+            select: () => ({
+              single: () =>
+                Promise.resolve({
+                  data: { ...state.review, ...patch },
+                  error: null,
+                }),
+            }),
+          }),
+        };
+      },
     }),
   }),
 }));
@@ -118,6 +136,7 @@ beforeEach(() => {
   state.outcome = "updated";
   state.review = { id: "r1", user_id: "owner", project_id: null };
   state.reviewTombstoned = false;
+  state.lastUpdate = null;
   getUserOrganisationId.mockReset().mockImplementation(() =>
     Promise.resolve(state.orgId),
   );
@@ -201,6 +220,58 @@ describe("PATCH /tabular-review/:reviewId/visibility", () => {
     const res = await patchVisibility("r1", { visibility: "firm" });
     expect(res.status).toBe(404);
     expect(insertDeletionAudit).not.toHaveBeenCalled();
+  });
+});
+
+// Template linkage: tabular_reviews.workflow_id names the template a review was
+// started from — the value the firm usage dashboard attributes runs to. It is a
+// uuid FK, so built-in templates (client-side constants with "builtin-…" ids)
+// must never be sent, and applying one in-grid CLEARS the linkage.
+describe("PATCH /tabular-review/:reviewId — template linkage (workflow_id)", () => {
+  const patchReview = (body: unknown) =>
+    fetch(`${baseUrl}/tabular-review/r1`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  it("stores a uuid workflow_id when a saved template is applied", async () => {
+    const templateId = "11111111-2222-4333-8444-555555555555";
+    const res = await patchReview({ workflow_id: templateId });
+    expect(res.status).toBe(200);
+    expect(state.lastUpdate).toMatchObject({ workflow_id: templateId });
+  });
+
+  it("clears the linkage when null is sent (a built-in was applied)", async () => {
+    const res = await patchReview({ workflow_id: null });
+    expect(res.status).toBe(200);
+    expect(state.lastUpdate).toMatchObject({ workflow_id: null });
+  });
+
+  it("leaves the linkage untouched when workflow_id is absent", async () => {
+    const res = await patchReview({ title: "Renamed" });
+    expect(res.status).toBe(200);
+    expect(state.lastUpdate).not.toHaveProperty("workflow_id");
+  });
+
+  it("rejects a built-in id with a fixed 400 before touching the database", async () => {
+    const res = await patchReview({ workflow_id: "builtin-nda" });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      detail: "workflow_id must be a template id or null",
+    });
+    expect(state.lastUpdate).toBeNull();
+  });
+
+  it("rejects a non-owner's attempt to re-point the template", async () => {
+    state.review = { id: "r1", user_id: "someone-else", project_id: null };
+    const res = await patchReview({
+      workflow_id: "11111111-2222-4333-8444-555555555555",
+    });
+    // A non-owner cannot even read this review in the fake (shared_with is
+    // absent), so the access check answers first — either way, no write.
+    expect([403, 404]).toContain(res.status);
+    expect(state.lastUpdate).toBeNull();
   });
 });
 

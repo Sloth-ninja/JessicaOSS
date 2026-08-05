@@ -41,6 +41,10 @@ import type {
     Workflow,
 } from "../shared/types";
 import { AddColumnModal } from "./AddColumnModal";
+import {
+    MAX_TEMPLATE_COLUMNS,
+    persistableTemplateId,
+} from "./templateOptions";
 import { TRWorkflowModal } from "./TRWorkflowModal";
 import { SaveAsTemplateModal } from "./SaveAsTemplateModal";
 import { AddDocumentsModal } from "../shared/AddDocumentsModal";
@@ -196,12 +200,19 @@ export function TRView({ reviewId, projectId }: Props) {
         );
     }
 
-    async function saveColumnsConfig(nextColumns: ColumnConfig[]) {
+    // `workflowId` is only passed when a template is applied: the saved
+    // template's uuid, or null for a built-in (which clears any previous
+    // linkage). Omitted on ordinary column edits, leaving the linkage as-is.
+    async function saveColumnsConfig(
+        nextColumns: ColumnConfig[],
+        workflowId?: string | null,
+    ) {
         setSavingColumnsConfig(true);
         try {
             const updated = await updateTabularReview(reviewId, {
                 columns_config: nextColumns,
                 document_ids: documents.map((document) => document.id),
+                ...(workflowId !== undefined && { workflow_id: workflowId }),
             });
             setReview(updated);
             setColumns(updated.columns_config || nextColumns);
@@ -643,7 +654,10 @@ export function TRView({ reviewId, projectId }: Props) {
         setColumns(nextColumns);
         setCells([]);
         try {
-            await saveColumnsConfig(nextColumns);
+            await saveColumnsConfig(
+                nextColumns,
+                persistableTemplateId(workflow) ?? null,
+            );
             if (documents.length > 0) {
                 try {
                     await clearTabularCells(
@@ -755,7 +769,19 @@ export function TRView({ reviewId, projectId }: Props) {
                                                 icon: BookmarkPlus,
                                                 onSelect: () =>
                                                     setSaveTemplateOpen(true),
-                                                disabled: columns.length === 0,
+                                                // A template holds at most 30
+                                                // columns (server-enforced), so
+                                                // say so here rather than
+                                                // letting the save 400.
+                                                disabled:
+                                                    columns.length === 0 ||
+                                                    columns.length >
+                                                        MAX_TEMPLATE_COLUMNS,
+                                                title:
+                                                    columns.length >
+                                                    MAX_TEMPLATE_COLUMNS
+                                                        ? `A template can hold at most ${MAX_TEMPLATE_COLUMNS} columns — this review has ${columns.length}.`
+                                                        : undefined,
                                             },
                                             {
                                                 label: "Export",
