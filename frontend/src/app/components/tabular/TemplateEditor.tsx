@@ -122,7 +122,10 @@ export function TemplateEditor({ templateId }: { templateId: string }) {
         setReloadKey((k) => k + 1);
     };
 
-    async function persistColumns(next: ColumnConfig[]) {
+    async function persistColumns(
+        next: ColumnConfig[],
+        previous: ColumnConfig[],
+    ) {
         if (isDraft || !template || !template.isOwner) return;
         setSaveStatus("saving");
         setActionError(null);
@@ -134,19 +137,24 @@ export function TemplateEditor({ templateId }: { templateId: string }) {
             setSaveStatus("saved");
             setTimeout(() => setSaveStatus("idle"), 2000);
         } catch (err) {
+            // Snapshot + rollback (the admin card's pattern): a failed save
+            // restores the previous columns so what is shown always matches
+            // what the server holds.
+            setColumns(previous);
             setSaveStatus("idle");
-            const message = err instanceof Error ? err.message : "";
             setActionError(
-                message && message.length < 200
-                    ? message
-                    : "Could not save the template. Please try again.",
+                err instanceof MikeApiError && err.message
+                    ? err.message
+                    : "Could not save the template. Your last change was undone — please try again.",
             );
         }
     }
 
+    // Optimistic write with the previous state captured for rollback.
     function applyColumns(next: ColumnConfig[]) {
+        const previous = columns;
         setColumns(next);
-        void persistColumns(next);
+        void persistColumns(next, previous);
     }
 
     function handleColumnsAdded(added: ColumnConfig[]) {
@@ -194,10 +202,9 @@ export function TemplateEditor({ templateId }: { templateId: string }) {
             });
             router.replace(`/review-templates/${created.id}`);
         } catch (err) {
-            const message = err instanceof Error ? err.message : "";
             setActionError(
-                message && message.length < 200
-                    ? message
+                err instanceof MikeApiError && err.message
+                    ? err.message
                     : "Could not create the template. Please try again.",
             );
             setCreating(false);
@@ -213,8 +220,12 @@ export function TemplateEditor({ templateId }: { templateId: string }) {
                 columns,
             });
             router.push(`/review-templates/${created.id}`);
-        } catch {
-            setActionError("Could not duplicate that template.");
+        } catch (err) {
+            setActionError(
+                err instanceof MikeApiError && err.message
+                    ? err.message
+                    : "Could not duplicate that template.",
+            );
         }
     }
 

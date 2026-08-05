@@ -93,6 +93,9 @@ export function TRView({ reviewId, projectId }: Props) {
     const [savedTemplateName, setSavedTemplateName] = useState<string | null>(
         null,
     );
+    const savedTemplateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+        null,
+    );
     const [deleteReviewConfirmOpen, setDeleteReviewConfirmOpen] =
         useState(false);
     const [deleteReviewStatus, setDeleteReviewStatus] = useState<
@@ -131,6 +134,16 @@ export function TRView({ reviewId, projectId }: Props) {
     const apiKeys = profile?.apiKeys;
     const localModels = profile?.localModels ?? [];
     const tabularModel = profile?.tabularModel ?? "gemini-3-flash-preview";
+
+    // Drop the template-saved notice timer if the view unmounts first.
+    useEffect(
+        () => () => {
+            if (savedTemplateTimerRef.current) {
+                clearTimeout(savedTemplateTimerRef.current);
+            }
+        },
+        [],
+    );
 
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
@@ -1156,7 +1169,15 @@ export function TRView({ reviewId, projectId }: Props) {
                 onSaved={(template) => {
                     setSaveTemplateOpen(false);
                     setSavedTemplateName(template.title);
-                    setTimeout(() => setSavedTemplateName(null), 8000);
+                    // Replace any in-flight dismissal so a second save gets a
+                    // full window; the timer is also cleared on unmount.
+                    if (savedTemplateTimerRef.current) {
+                        clearTimeout(savedTemplateTimerRef.current);
+                    }
+                    savedTemplateTimerRef.current = setTimeout(
+                        () => setSavedTemplateName(null),
+                        8000,
+                    );
                 }}
             />
 

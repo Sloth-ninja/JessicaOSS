@@ -24,6 +24,7 @@ import {
     createTabularTemplate,
     deleteTabularTemplate,
     hideWorkflow,
+    MikeApiError,
     listHiddenWorkflows,
     listTabularTemplates,
     setTabularTemplateVisibility,
@@ -68,6 +69,100 @@ function metaLine(count: number, practice: string | null): string {
     return practice
         ? `${columnCountLabel(count)} · ${practice}`
         : columnCountLabel(count);
+}
+
+// Module scope, not nested in the page component: a component defined inside
+// another is a fresh type on every parent render, so every state change would
+// remount the row subtrees and close any open ⋯ menu.
+function TemplateRow({
+    id,
+    name,
+    meta,
+    trailing,
+    badge,
+    menuItems,
+    busy = false,
+    dimmed = false,
+    onOpen,
+}: {
+    id: string;
+    name: string;
+    meta: string;
+    trailing: string;
+    badge?: React.ReactNode;
+    menuItems: HeaderActionsMenuItem[];
+    busy?: boolean;
+    dimmed?: boolean;
+    onOpen: (id: string) => void;
+}) {
+    const open = () => onOpen(id);
+    return (
+        <tr
+            role="link"
+            tabIndex={0}
+            aria-label={`Open ${name}`}
+            onClick={open}
+            onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    open();
+                }
+            }}
+            className={`cursor-pointer border-b border-gray-100 transition-colors last:border-b-0 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none ${
+                dimmed ? "opacity-60" : ""
+            }`}
+        >
+            <td className="px-4 py-3">
+                <div className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-sm font-medium text-gray-900">
+                        {name}
+                    </span>
+                    {badge}
+                    {busy && (
+                        <span className="text-[11px] text-gray-400">
+                            Working…
+                        </span>
+                    )}
+                </div>
+            </td>
+            <td className="whitespace-nowrap px-4 py-3 text-xs tabular-nums text-gray-500">
+                {meta}
+            </td>
+            <td className="whitespace-nowrap px-4 py-3 text-right text-xs text-gray-500">
+                {trailing}
+            </td>
+            <td
+                className="w-10 px-2 py-3 text-right"
+                onClick={(e) => e.stopPropagation()}
+                // Enter/Space on the ⋯ trigger must open the menu, not
+                // activate the row's keyboard handler above it.
+                onKeyDown={(e) => e.stopPropagation()}
+            >
+                <HeaderActionsMenu items={menuItems} title="Template actions" />
+            </td>
+        </tr>
+    );
+}
+
+function Section({
+    label,
+    children,
+}: {
+    label: string;
+    children: React.ReactNode;
+}) {
+    return (
+        <section className="mt-7 first:mt-0">
+            <h2 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                {label}
+            </h2>
+            <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+                <table className="w-full border-collapse">
+                    <tbody>{children}</tbody>
+                </table>
+            </div>
+        </section>
+    );
 }
 
 export default function ReviewTemplatesPage() {
@@ -141,6 +236,11 @@ export default function ReviewTemplatesPage() {
 
     // ── Actions ─────────────────────────────────────────────────────────────
 
+    const openTemplate = useCallback(
+        (id: string) => router.push(`/review-templates/${id}`),
+        [router],
+    );
+
     async function duplicateTemplate(source: {
         title: string;
         practice: string | null;
@@ -157,8 +257,12 @@ export default function ReviewTemplatesPage() {
             });
             reload();
             router.push(`/review-templates/${created.id}`);
-        } catch {
-            setActionError("Could not duplicate that template.");
+        } catch (err) {
+            setActionError(
+                err instanceof MikeApiError && err.message
+                    ? err.message
+                    : "Could not duplicate that template.",
+            );
         } finally {
             setBusyId(null);
         }
@@ -174,10 +278,11 @@ export default function ReviewTemplatesPage() {
             await setTabularTemplateVisibility(template.id, visibility);
             reload();
         } catch (err) {
-            const message = err instanceof Error ? err.message : "";
+            // Server details here are fixed, user-safe strings (e.g. "Firm
+            // sharing is not available."); anything else is generic.
             setActionError(
-                message && message.length < 200
-                    ? message
+                err instanceof MikeApiError && err.message
+                    ? err.message
                     : "Could not change who can see that template.",
             );
         } finally {
@@ -324,93 +429,6 @@ export default function ReviewTemplatesPage() {
 
     // ── Rendering ───────────────────────────────────────────────────────────
 
-    function TemplateRow({
-        id,
-        name,
-        meta,
-        trailing,
-        badge,
-        menuItems,
-        dimmed = false,
-    }: {
-        id: string;
-        name: string;
-        meta: string;
-        trailing: string;
-        badge?: React.ReactNode;
-        menuItems: HeaderActionsMenuItem[];
-        dimmed?: boolean;
-    }) {
-        const open = () => router.push(`/review-templates/${id}`);
-        return (
-            <tr
-                role="link"
-                tabIndex={0}
-                aria-label={`Open ${name}`}
-                onClick={open}
-                onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        open();
-                    }
-                }}
-                className={`cursor-pointer border-b border-gray-100 transition-colors last:border-b-0 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none ${
-                    dimmed ? "opacity-60" : ""
-                }`}
-            >
-                <td className="px-4 py-3">
-                    <div className="flex min-w-0 items-center gap-2">
-                        <span className="truncate text-sm font-medium text-gray-900">
-                            {name}
-                        </span>
-                        {badge}
-                        {busyId === id && (
-                            <span className="text-[11px] text-gray-400">
-                                Working…
-                            </span>
-                        )}
-                    </div>
-                </td>
-                <td className="whitespace-nowrap px-4 py-3 text-xs tabular-nums text-gray-500">
-                    {meta}
-                </td>
-                <td className="whitespace-nowrap px-4 py-3 text-right text-xs text-gray-500">
-                    {trailing}
-                </td>
-                <td
-                    className="w-10 px-2 py-3 text-right"
-                    onClick={(e) => e.stopPropagation()}
-                >
-                    <HeaderActionsMenu
-                        items={menuItems}
-                        title="Template actions"
-                    />
-                </td>
-            </tr>
-        );
-    }
-
-    function Section({
-        label,
-        children,
-    }: {
-        label: string;
-        children: React.ReactNode;
-    }) {
-        return (
-            <section className="mt-7 first:mt-0">
-                <h2 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-                    {label}
-                </h2>
-                <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-                    <table className="w-full border-collapse">
-                        <tbody>{children}</tbody>
-                    </table>
-                </div>
-            </section>
-        );
-    }
-
     return (
         <div className="flex h-full flex-col overflow-y-auto">
             <PageHeader
@@ -470,6 +488,8 @@ export default function ReviewTemplatesPage() {
                                 list.mine.map((template) => (
                                     <TemplateRow
                                         key={template.id}
+                                        onOpen={openTemplate}
+                                        busy={busyId === template.id}
                                         id={template.id}
                                         name={template.title}
                                         meta={metaLine(
@@ -503,6 +523,8 @@ export default function ReviewTemplatesPage() {
                                 {list.shared.map((template) => (
                                     <TemplateRow
                                         key={template.id}
+                                        onOpen={openTemplate}
+                                        busy={busyId === template.id}
                                         id={template.id}
                                         name={template.title}
                                         meta={metaLine(
@@ -527,6 +549,8 @@ export default function ReviewTemplatesPage() {
                                     list.firm.map((template) => (
                                         <TemplateRow
                                             key={template.id}
+                                            onOpen={openTemplate}
+                                            busy={busyId === template.id}
                                             id={template.id}
                                             name={template.title}
                                             meta={metaLine(
@@ -561,6 +585,8 @@ export default function ReviewTemplatesPage() {
                                 visibleBuiltIns.map((template) => (
                                     <TemplateRow
                                         key={template.id}
+                                        onOpen={openTemplate}
+                                        busy={busyId === template.id}
                                         id={template.id}
                                         name={template.title}
                                         meta={metaLine(
@@ -614,6 +640,11 @@ export default function ReviewTemplatesPage() {
                                                     (template) => (
                                                         <TemplateRow
                                                             key={template.id}
+                                                            onOpen={openTemplate}
+                                                            busy={
+                                                                busyId ===
+                                                                template.id
+                                                            }
                                                             id={template.id}
                                                             name={
                                                                 template.title

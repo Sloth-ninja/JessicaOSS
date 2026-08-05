@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { MikeApiError } from "@/app/lib/mikeApi";
 import { Modal } from "../shared/Modal";
 import { PRACTICE_OPTIONS } from "../workflows/practices";
 
@@ -84,12 +85,12 @@ function TemplateDetailsForm({
                 practice: effectivePractice,
             });
         } catch (err) {
-            // Backend template errors carry a fixed, user-safe detail; anything
-            // else falls back to a generic line rather than leaking internals.
-            const message = err instanceof Error ? err.message : "";
+            // Only MikeApiError carries a server detail (user-safe by
+            // construction). A bare Error here is a network/runtime failure —
+            // surfacing its message would render internals as user copy.
             setError(
-                message && message.length < 200
-                    ? message
+                err instanceof MikeApiError && err.message
+                    ? err.message
                     : "Could not save the template. Please try again.",
             );
             setSaving(false);

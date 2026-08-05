@@ -9,5 +9,8 @@ interface Props {
 
 export default function ReviewTemplatePage({ params }: Props) {
     const { id } = use(params);
-    return <TemplateEditor templateId={id} />;
+    // Keyed by id so the editor's state re-initialises per template segment:
+    // without it, navigating built-in → Duplicate → Back reuses the previous
+    // template's state, and createDraft's replace() flashes read-only.
+    return <TemplateEditor key={id} templateId={id} />;
 }

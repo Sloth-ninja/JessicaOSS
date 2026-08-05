@@ -34,7 +34,7 @@ export function TRWorkflowModal({
             loadOptions={loadTemplateOptions}
             groupLabelFor={templateGroupOf}
             emptyMessage="No templates found"
-            searchPlaceholder="Search templates..."
+            searchPlaceholder="Search templates…"
             disabledWorkflow={(workflow) => !workflow.columns_config?.length}
         />
     );

@@ -80,11 +80,39 @@ merged — awaiting review.
    mirroring the WS9 Firm library card (`SectionCard` + `LoadErrorRow`,
    optimistic removal with rollback).
 
-**Verification evidence:** `npx tsc --noEmit` clean. `npm run lint`:
-**112 problems (34 errors, 78 warnings) — byte-identical to the same command
-run with these changes stashed**, i.e. zero new findings; every error is
-pre-existing repo baseline, and the six new files contribute none. `npm run
-build` succeeds, emitting `/review-templates` (static) and
+**Independent review: PASSED** with three should-fixes and five cheap nits,
+all taken in the second push (MFA gating explicitly out of scope for this PR —
+it lands as a follow-up backend+frontend PR, so the admin card's copy is
+unchanged):
+1. **Editor stale state across `[id]` navigations** — `<TemplateEditor
+   key={id} …>` in the route segment, so state re-initialises per template;
+   fixes built-in → Duplicate → Back showing the previous template's content
+   and the read-only flash after `createDraft`'s `replace()`.
+2. **Keyboard activation leak** — the row's actions `<td>` now stops
+   propagation on `onKeyDown` as well as `onClick`, so Enter/Space on the ⋯
+   trigger opens the menu instead of navigating the row.
+3. **Column auto-save failure** — `applyColumns` captures the previous
+   columns and `persistColumns` **restores them on failure** with an inline
+   error ("Your last change was undone — please try again."), the
+   snapshot+rollback pattern from the admin card
+   (`firm-settings/page.tsx:1033-1044`); UI and server can no longer silently
+   diverge.
+Nits: `TemplateRow`/`Section` moved to module scope (a component defined
+inside another is a new type each render, remounting row subtrees and closing
+open menus); Duplicate failures surface the server detail at both call sites;
+the `err instanceof Error ? err.message : ""` idiom replaced with the house
+`err instanceof MikeApiError && err.message` at all four flagged sites, so
+network `TypeError`s can never render as user copy; the save-notice timer is
+now cleared on unmount and replaced on re-save; "Search templates…" ellipsis.
+Recorded for the composed-range review / QA rather than fixed here:
+`AbortController` time-boxes (consistent with existing pages), a
+`beforeunload` draft guard, and the assistant-picker wrapper `div`.
+
+**Verification evidence (re-run after the review fixes):** `npx tsc --noEmit`
+clean. `npm run lint`: **112 problems (34 errors, 78 warnings) — byte-identical
+to the same command run with these changes stashed**, i.e. zero new findings;
+every error is pre-existing repo baseline, and the six new files contribute
+none. `npm run build` succeeds, emitting `/review-templates` (static) and
 `/review-templates/[id]` (dynamic) among 27 pages. (First build attempt
 failed prerendering the untouched `/account/api-keys` with "supabaseUrl is
 required" — this fresh worktree has no `.env.local`, which hard rule 2
