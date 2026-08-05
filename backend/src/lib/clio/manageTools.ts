@@ -106,8 +106,10 @@ export function matterPageTokenFromNext(next: unknown): string | undefined {
 // garbage or abuse, refused before decoding.
 const MAX_PAGE_TOKEN_LENGTH = 1024;
 
-// Bound the free-text query at mint time so encodeMatterPageToken can never
-// produce a token its own decoder refuses at MAX_PAGE_TOKEN_LENGTH.
+// Bound the free-text query at mint time. This bounds the COMMON case of an
+// oversize token; it is not a guarantee (multi-byte queries and long Clio
+// cursors can still push the envelope past MAX_PAGE_TOKEN_LENGTH), so the
+// mint site additionally drops any token its own decoder would refuse.
 const MAX_MATTER_QUERY_LENGTH = 256;
 
 /**
@@ -449,10 +451,19 @@ async function findMatter(
   const rawNext = body?.meta?.paging?.next;
   const hasMore = typeof rawNext === "string" && rawNext.length > 0;
   const nextCursor = matterPageTokenFromNext(rawNext);
-  const nextPageToken =
+  let nextPageToken =
     nextCursor !== undefined
       ? encodeMatterPageToken(nextCursor, query, status)
       : undefined;
+  // A minted token longer than the decoder's cap (multi-byte query, long Clio
+  // cursor) would be refused on the follow-up call — omit it instead, keeping
+  // has_more true: honest "more pages exist", just no continuation token.
+  if (
+    nextPageToken !== undefined &&
+    nextPageToken.length > MAX_PAGE_TOKEN_LENGTH
+  ) {
+    nextPageToken = undefined;
+  }
   return clioToolOk("manage", "clio_find_matter", {
     matters,
     count: matters.length,
@@ -479,6 +490,13 @@ async function findContact(
       query: { query, limit: 10 },
     },
   );
+  // Same class as findMatter: a null (204/unparseable) body must not be fed
+  // back to the model as an authoritative empty result.
+  if (!body || typeof body !== "object") {
+    throw new ClioApiError(
+      "Clio's response could not be read. Please try again.",
+    );
+  }
   return clioToolOk("manage", "clio_find_contact", body);
 }
 
@@ -571,6 +589,13 @@ async function listMatterDocuments(
       query: { matter_id: matterId, limit: 25 },
     },
   );
+  // Same class as findMatter: a null (204/unparseable) body must not be fed
+  // back to the model as an authoritative empty result.
+  if (!body || typeof body !== "object") {
+    throw new ClioApiError(
+      "Clio's response could not be read. Please try again.",
+    );
+  }
   return clioToolOk("manage", "clio_list_matter_documents", body);
 }
 

@@ -386,6 +386,34 @@ describe("clio_find_matter — happy path + error mapping", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("omits a minted token that exceeds the decoder's cap, keeping has_more honest", async () => {
+    const db = await connectedDb();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        json({
+          data: [{ id: 1 }],
+          meta: {
+            paging: {
+              next: "https://eu.app.clio.com/api/v4/matters.json?limit=100&page_token=abc123",
+            },
+          },
+        }),
+      ),
+    );
+    // 256 CJK chars pass the mint-side length cap but weigh 3 UTF-8 bytes
+    // each, pushing the base64url envelope past MAX_PAGE_TOKEN_LENGTH — a
+    // token our own decoder would refuse on the follow-up call.
+    const { content } = await executeClioManageToolCall(
+      "clio_find_matter",
+      { query: "亜".repeat(256) },
+      ctx(db),
+    );
+    const payload = JSON.parse(content);
+    expect(payload.has_more).toBe(true);
+    expect(payload.next_page_token).toBeUndefined();
+  });
+
   it("maps an upstream 500 to a fixed generic error (no raw text)", async () => {
     const db = await connectedDb();
     vi.stubGlobal(
@@ -399,6 +427,38 @@ describe("clio_find_matter — happy path + error mapping", () => {
     );
     expect(event.status).toBe("error");
     expect(event.error).not.toMatch(/secret/);
+  });
+});
+
+describe("null-body guard on the sibling read tools", () => {
+  it("clio_find_contact maps a null (204) body to an error", async () => {
+    const db = await connectedDb();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 204 })),
+    );
+    const { event } = await executeClioManageToolCall(
+      "clio_find_contact",
+      { query: "Jane" },
+      ctx(db),
+    );
+    expect(event.status).toBe("error");
+    expect(event.error).toMatch(/could not be read/i);
+  });
+
+  it("clio_list_matter_documents maps a null (204) body to an error", async () => {
+    const db = await connectedDb();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 204 })),
+    );
+    const { event } = await executeClioManageToolCall(
+      "clio_list_matter_documents",
+      { matter_id: "7" },
+      ctx(db),
+    );
+    expect(event.status).toBe("error");
+    expect(event.error).toMatch(/could not be read/i);
   });
 });
 

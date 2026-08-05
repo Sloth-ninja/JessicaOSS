@@ -28,6 +28,10 @@ touched.
    a user-safe `ClioApiError` ("Clio's response could not be read…") when
    `clioRequest` returns null (204/unparseable body) instead of shaping it
    into an authoritative empty list the model reports confidently.
+   Review follow-up: the same guard applied to the sibling read tools
+   `findContact` and `listMatterDocuments` (which passed a possibly-null body
+   straight to `clioToolOk`); `deleteTimeEntry` deliberately untouched — its
+   204→null IS success.
 3. **(N2) Filter guard re-applied to decoded page tokens.** A hand-crafted
    token decoding to a bare cursor (`{"c":…}`, no query/status) used to issue
    an UNFILTERED matter fetch, contradicting the binding the token exists
@@ -35,8 +39,12 @@ touched.
    before any fetch.
 4. **(N3) Query bounded at token-mint time.** Free-text queries are capped at
    256 chars (`MAX_MATTER_QUERY_LENGTH`, friendly validation error above
-   that) so `encodeMatterPageToken` can never mint a token its own decoder
-   refuses at `MAX_PAGE_TOKEN_LENGTH` (1024).
+   that). Review follow-up: the cap only bounds the COMMON case — the
+   reviewer measured encoder-minted tokens over the 1024 decode cap (256-char
+   CJK query → 1083; long cursor + 256 ASCII → 1310) — so the mint site now
+   also drops any minted token longer than `MAX_PAGE_TOKEN_LENGTH`, keeping
+   `has_more: true` (honest "more pages exist", no continuation token) rather
+   than handing the model a token its own decoder would refuse.
 5. **(N1) Stream-route catches stop logging the wrapper's stack.**
    `routes/chat.ts`, `routes/projectChat.ts`, and `routes/tabular.ts` log
    only `{ name, message }` when the caught error is an
@@ -46,7 +54,10 @@ touched.
 6. **(S3) CLAUDE.md** — `safeError.ts` added to the backend module map (Users
    row: `safeErrorLog`/`safeErrorMessage`/`GENERIC_ERROR_DETAIL`/
    `failRequest`, 56+ route sites), and Current status carries the one-line
-   #71/#72 train record.
+   #71/#72 train record. Review accuracy fixes: the stale "604 tests" figure
+   updated to 656 (post-#73), the train record reworded to "merged 04/08;
+   deploy pending owner action" (the deploy has NOT happened), and the
+   section header date bumped to 2026-08-05.
 7. **(Addendum) Contention-proof timeouts for real-KDF suites.** All seven
    scrypt-heavy suites set a file-level
    `vi.setConfig({ testTimeout: 120_000 })`: the three named in the addendum
@@ -61,20 +72,23 @@ touched.
    timeouts; a timeout flake that passes standalone under parallel agent
    load is contention, not a defect.
 
-**Tests.** Six new deterministic tests (backend suite 653): manage log-spy
+**Tests.** Nine new deterministic tests (backend suite 656): manage log-spy
 pair (`[clio/tools]` fires for a Postgrest-shaped throw with the original
 message and the generic client message intact; does NOT fire for a validation
-error) plus a combined grow-side spy test; null-body → error outcome;
+error) plus a combined grow-side spy test; null-body → error outcome for
+find_matter, find_contact, and list_matter_documents; oversize minted token
+(256-char CJK query) → `has_more: true` with no `next_page_token`;
 cursor-only token rejected with zero fetches; 257-char query rejected at mint
 with zero fetches.
 
-**Verification.** `npx tsc --noEmit` clean. Full `npx vitest run`: 653 tests
-passing (first run hit a vitest-worker RPC timeout under concurrent agent
-load — the addendum's flake class, infrastructure not assertion; clean on
-re-run). `prettier --check` clean on all changed 2-space lib/test files — the
-single pre-existing wrap deviation in `organisationApiKeys.test.ts` predates
-this PR and was left per minimal-diff; route edits hand-matched to upstream
-4-space style.
+**Verification.** `npx tsc --noEmit` clean. Full `npx vitest run`: 656 tests
+passing (an earlier gate run hit a vitest-worker RPC timeout plus a 20s test
+timeout under concurrent agent load — the addendum's flake class,
+infrastructure not assertion; clean after the timeout hardening).
+`prettier --check` clean on all changed 2-space lib/test files — the single
+pre-existing wrap deviation in `organisationApiKeys.test.ts` predates this PR
+and was left per minimal-diff; route edits hand-matched to upstream 4-space
+style.
 
 ---
 
