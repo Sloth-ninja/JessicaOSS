@@ -12,6 +12,7 @@
 // failures return a fixed, friendly error rather than leaking raw Clio text.
 
 import type { OpenAIToolSchema } from "../llm";
+import { safeErrorLog } from "../safeError";
 import { createServerSupabase } from "../supabase";
 import { clioRequest } from "./client";
 import {
@@ -177,6 +178,14 @@ export async function executeClioGrowToolCall(
         return clioToolError("grow", name, `Unknown Clio tool '${name}'.`);
     }
   } catch (err) {
+    // Log the ORIGINAL failure before it collapses into the fixed client-safe
+    // message (see executeClioManageToolCall — same containment rationale).
+    if (!(err instanceof ClioValidationError)) {
+      console.error("[clio/tools] tool failed", {
+        toolName: name,
+        error: safeErrorLog(err),
+      });
+    }
     return clioToolError("grow", name, safeToolMessage(err));
   }
 }

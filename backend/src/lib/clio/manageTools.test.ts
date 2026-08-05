@@ -29,10 +29,11 @@ import {
 const asDb = (db: unknown) => db as any;
 
 // These tests perform real scrypt AES-256-GCM key derivation via
-// saveClioConnection/loadClioConnection. Under the full 43-file suite that CPU
-// work can blow vitest's 5s default and flake (same class as the #61
-// userApiKeys fix); raise the ceiling so the suite is deterministically green.
-vi.setConfig({ testTimeout: 20_000 });
+// saveClioConnection/loadClioConnection. Real KDF work under concurrent
+// machine load (parallel agent suites) has blown 5s AND 20s ceilings while
+// passing in isolation — that flake is contention, not a defect
+// (DURABLE_LESSONS 2026-08-05), so the ceiling is deliberately generous.
+vi.setConfig({ testTimeout: 120_000 });
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -323,6 +324,54 @@ describe("clio_find_matter — happy path + error mapping", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("rejects a hand-crafted cursor-only token (no bound filters) before any fetch", async () => {
+    const db = await connectedDb();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    // Decodes fine ({ c }), but carries neither query nor status — issuing it
+    // would be the UNFILTERED fetch the token binding exists to prevent.
+    const bare = Buffer.from(JSON.stringify({ c: "abc123" })).toString(
+      "base64url",
+    );
+    const { event } = await executeClioManageToolCall(
+      "clio_find_matter",
+      { page_token: bare },
+      ctx(db),
+    );
+    expect(event.status).toBe("error");
+    expect(event.error).toMatch(/query and\/or a status filter/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an over-length (257-char) query at token-mint time", async () => {
+    const db = await connectedDb();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { event } = await executeClioManageToolCall(
+      "clio_find_matter",
+      { query: "a".repeat(257) },
+      ctx(db),
+    );
+    expect(event.status).toBe("error");
+    expect(event.error).toMatch(/too long/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("maps a null (204/unparseable) body to an error, never an authoritative empty list", async () => {
+    const db = await connectedDb();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 204 })),
+    );
+    const { event } = await executeClioManageToolCall(
+      "clio_find_matter",
+      { query: "Acme" },
+      ctx(db),
+    );
+    expect(event.status).toBe("error");
+    expect(event.error).toMatch(/could not be read/i);
+  });
+
   it("rejects an over-length page_token before decoding", async () => {
     const db = await connectedDb();
     const fetchMock = vi.fn();
@@ -335,6 +384,34 @@ describe("clio_find_matter — happy path + error mapping", () => {
     expect(event.status).toBe("error");
     expect(event.error).toMatch(/page token is not valid/i);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("omits a minted token that exceeds the decoder's cap, keeping has_more honest", async () => {
+    const db = await connectedDb();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        json({
+          data: [{ id: 1 }],
+          meta: {
+            paging: {
+              next: "https://eu.app.clio.com/api/v4/matters.json?limit=100&page_token=abc123",
+            },
+          },
+        }),
+      ),
+    );
+    // 256 CJK chars pass the mint-side length cap but weigh 3 UTF-8 bytes
+    // each, pushing the base64url envelope past MAX_PAGE_TOKEN_LENGTH — a
+    // token our own decoder would refuse on the follow-up call.
+    const { content } = await executeClioManageToolCall(
+      "clio_find_matter",
+      { query: "亜".repeat(256) },
+      ctx(db),
+    );
+    const payload = JSON.parse(content);
+    expect(payload.has_more).toBe(true);
+    expect(payload.next_page_token).toBeUndefined();
   });
 
   it("maps an upstream 500 to a fixed generic error (no raw text)", async () => {
@@ -350,6 +427,96 @@ describe("clio_find_matter — happy path + error mapping", () => {
     );
     expect(event.status).toBe("error");
     expect(event.error).not.toMatch(/secret/);
+  });
+});
+
+describe("null-body guard on the sibling read tools", () => {
+  it("clio_find_contact maps a null (204) body to an error", async () => {
+    const db = await connectedDb();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 204 })),
+    );
+    const { event } = await executeClioManageToolCall(
+      "clio_find_contact",
+      { query: "Jane" },
+      ctx(db),
+    );
+    expect(event.status).toBe("error");
+    expect(event.error).toMatch(/could not be read/i);
+  });
+
+  it("clio_list_matter_documents maps a null (204) body to an error", async () => {
+    const db = await connectedDb();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 204 })),
+    );
+    const { event } = await executeClioManageToolCall(
+      "clio_list_matter_documents",
+      { matter_id: "7" },
+      ctx(db),
+    );
+    expect(event.status).toBe("error");
+    expect(event.error).toMatch(/could not be read/i);
+  });
+});
+
+describe("executor failure logging (error containment)", () => {
+  it("logs the original error via [clio/tools] for an internal (Postgrest-shaped) throw", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      // Postgrest errors reach the executor as PLAIN objects, not Errors —
+      // exactly the shape that used to vanish (chatTools' stream-error log
+      // never fires for Clio tools because the executor contains the throw).
+      const db = {
+        from() {
+          throw {
+            message: "permission denied for table documents",
+            code: "42501",
+          };
+        },
+      };
+      const { event } = await executeClioManageToolCall(
+        "clio_save_document_to_matter",
+        { document_id: "doc-1", matter_id: "7" },
+        ctx(db),
+      );
+      expect(event.status).toBe("error");
+      // The client-facing message stays fixed and generic.
+      expect(event.error).not.toMatch(/permission denied/);
+      const call = spy.mock.calls.find(
+        (c) => c[0] === "[clio/tools] tool failed",
+      );
+      expect(call).toBeTruthy();
+      const details = call?.[1] as {
+        toolName: string;
+        error: { message: string };
+      };
+      expect(details.toolName).toBe("clio_save_document_to_matter");
+      expect(details.error.message).toMatch(/permission denied/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("does NOT log expected validation failures", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const db = await connectedDb();
+      vi.stubGlobal("fetch", vi.fn());
+      const { event } = await executeClioManageToolCall(
+        "clio_find_matter",
+        {},
+        ctx(db),
+      );
+      expect(event.status).toBe("error");
+      expect(
+        spy.mock.calls.filter((c) => c[0] === "[clio/tools] tool failed"),
+      ).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

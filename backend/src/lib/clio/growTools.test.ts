@@ -8,10 +8,11 @@ import { executeClioGrowToolCall, type ClioGrowToolContext } from "./growTools";
 const asDb = (db: unknown) => db as any;
 
 // These tests perform real scrypt AES-256-GCM key derivation via
-// saveClioConnection/loadClioConnection. Under the full 43-file suite that CPU
-// work can blow vitest's 5s default and flake (same class as the #61
-// userApiKeys fix); raise the ceiling so the suite is deterministically green.
-vi.setConfig({ testTimeout: 20_000 });
+// saveClioConnection/loadClioConnection. Real KDF work under concurrent
+// machine load (parallel agent suites) has blown 5s AND 20s ceilings while
+// passing in isolation — that flake is contention, not a defect
+// (DURABLE_LESSONS 2026-08-05), so the ceiling is deliberately generous.
+vi.setConfig({ testTimeout: 120_000 });
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -138,5 +139,57 @@ describe("clio_add_intake_note", () => {
       ctx(db),
     );
     expect(event.status).toBe("error");
+  });
+});
+
+describe("executor failure logging (error containment)", () => {
+  it("logs the original internal error via [clio/tools] but not validation errors", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      // Internal failure: a Postgrest-shaped PLAIN object thrown from the db
+      // layer — contained by the executor, so it must be logged here or it is
+      // logged nowhere.
+      const badDb = {
+        from() {
+          throw {
+            message: "permission denied for table user_clio_connections",
+            code: "42501",
+          };
+        },
+      };
+      const internal = await executeClioGrowToolCall(
+        "clio_intake_status",
+        {},
+        ctx(badDb),
+      );
+      expect(internal.event.status).toBe("error");
+      expect(internal.event.error).not.toMatch(/permission denied/);
+      const call = spy.mock.calls.find(
+        (c) => c[0] === "[clio/tools] tool failed",
+      );
+      expect(call).toBeTruthy();
+      const details = call?.[1] as {
+        toolName: string;
+        error: { message: string };
+      };
+      expect(details.toolName).toBe("clio_intake_status");
+      expect(details.error.message).toMatch(/permission denied/);
+
+      spy.mockClear();
+      // Expected validation failure (missing matter id): unlogged.
+      const db = await connectedDb();
+      vi.stubGlobal("fetch", vi.fn());
+      const validation = await executeClioGrowToolCall(
+        "clio_intake_notes",
+        {},
+        ctx(db),
+      );
+      expect(validation.event.status).toBe("error");
+      expect(
+        spy.mock.calls.filter((c) => c[0] === "[clio/tools] tool failed"),
+      ).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
