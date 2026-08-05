@@ -82,6 +82,10 @@ const MAX_COLUMN_PROMPT_LENGTH = 4000;
 const MAX_TAGS = 50;
 const MAX_TAG_LENGTH = 100;
 
+// Max ids per `.in()` filter — PostgREST encodes the list into the query
+// string, so unbounded lists risk a 414 (URL too long).
+const IN_CHUNK_SIZE = 100;
+
 /** Thrown with a user-safe message; routes surface `message` as the 400 detail. */
 export class TemplateValidationError extends Error {}
 
@@ -107,6 +111,17 @@ function isMissingColumnOrTable(error: unknown): boolean {
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/g;
 function stripControlChars(value: string): string {
   return value.replace(CONTROL_CHARS, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Tag values additionally drop `[`, `]` and `|` — the `[[tag]]` prompt-marker
+ * interpolation vocabulary in routes/tabular.ts formatPromptSuffix — so a
+ * crafted tag on a firm-shared template cannot smuggle extra markers into the
+ * cell-generation prompt. Column names keep the control-char strip only.
+ */
+const TAG_MARKER_CHARS = /[[\]|]/g;
+function stripTagValue(value: string): string {
+  return stripControlChars(value.replace(TAG_MARKER_CHARS, " "));
 }
 
 /**
@@ -181,7 +196,7 @@ export function validateTemplateColumns(raw: unknown): TemplateColumn[] {
         );
       }
       tags = candidate.tags.map((tag) => {
-        const value = typeof tag === "string" ? stripControlChars(tag) : "";
+        const value = typeof tag === "string" ? stripTagValue(tag) : "";
         if (!value) {
           throw new TemplateValidationError("Tags must be non-empty text.");
         }
@@ -348,19 +363,28 @@ async function listEmailSharedTemplates(
     ),
   ];
   if (workflowIds.length === 0) return [];
-  const sharedResult = await db
-    .from(TABLE)
-    .select("*")
-    .in("id", workflowIds)
-    .eq("type", "tabular")
-    .eq("is_system", false)
-    .neq("user_id", userId)
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false });
-  if (sharedResult.error) throw sharedResult.error;
-  const shared = ((sharedResult.data ?? []) as WorkflowRow[]).map((row) =>
-    toTemplate(row, userId),
+  // Chunk the `.in()` id list: PostgREST encodes it into the query string, so
+  // an unbounded list risks a 414 (URL too long) on share-heavy accounts.
+  const rows: WorkflowRow[] = [];
+  for (let i = 0; i < workflowIds.length; i += IN_CHUNK_SIZE) {
+    const chunk = workflowIds.slice(i, i + IN_CHUNK_SIZE);
+    const sharedResult = await db
+      .from(TABLE)
+      .select("*")
+      .in("id", chunk)
+      .eq("type", "tabular")
+      .eq("is_system", false)
+      .neq("user_id", userId)
+      .is("deleted_at", null);
+    if (sharedResult.error) throw sharedResult.error;
+    rows.push(...((sharedResult.data ?? []) as WorkflowRow[]));
+  }
+  // Per-chunk queries lose global ordering; sort newest-first here (ISO
+  // timestamps compare lexicographically).
+  rows.sort((a, b) =>
+    String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")),
   );
+  const shared = rows.map((row) => toTemplate(row, userId));
   await enrichOwnerNames(db, shared);
   return shared;
 }
@@ -412,9 +436,12 @@ export async function listTemplates(
       // Unmigrated database: firm sharing stays dormant.
     } else {
       firmSharingSupported = true;
-      firm = ((firmResult.data ?? []) as WorkflowRow[]).map((row) =>
-        toTemplate(row, userId),
-      );
+      // A template can be BOTH email-shared with the caller and firm-visible;
+      // shared wins — it never appears twice.
+      const sharedIds = new Set(shared.map((template) => template.id));
+      firm = ((firmResult.data ?? []) as WorkflowRow[])
+        .filter((row) => !sharedIds.has(String(row.id)))
+        .map((row) => toTemplate(row, userId));
       await enrichOwnerNames(db, firm);
     }
   }
@@ -423,15 +450,18 @@ export async function listTemplates(
 }
 
 /**
- * Fetch one template the caller may read: their own, or a firm-visible one in
- * their organisation (route seam for GET /tabular-templates/:id — an addition
- * alongside the planned exports; nothing listed in the plan changed shape).
+ * Fetch one template the caller may read: their own, a firm-visible one in
+ * their organisation, or one email-shared with them via `workflow_shares`
+ * (read semantics identical to the `shared` list entries). Route seam for
+ * GET /tabular-templates/:id — an addition alongside the planned exports;
+ * nothing listed in the plan changed shape.
  */
 export async function getTemplate(
   db: Db,
   userId: string,
   id: string,
   orgId: string | null,
+  userEmail?: string | null,
 ): Promise<TabularTemplate | "not_found"> {
   const { data, error } = await db
     .from(TABLE)
@@ -450,9 +480,25 @@ export async function getTemplate(
     orgId !== null &&
     row.visibility === "firm" &&
     row.organisation_id === orgId;
-  if (!firmVisible) return "not_found";
-  await enrichOwnerNames(db, [template]);
-  return template;
+  if (firmVisible) {
+    await enrichOwnerNames(db, [template]);
+    return template;
+  }
+  const normalizedEmail = (userEmail ?? "").trim().toLowerCase();
+  if (normalizedEmail) {
+    const shareResult = await db
+      .from("workflow_shares")
+      .select("id")
+      .eq("workflow_id", id)
+      .eq("shared_with_email", normalizedEmail)
+      .maybeSingle();
+    if (shareResult.error) throw shareResult.error;
+    if (shareResult.data) {
+      await enrichOwnerNames(db, [template]);
+      return template;
+    }
+  }
+  return "not_found";
 }
 
 /** Create a private template owned by the caller. Validates title + columns. */
@@ -596,7 +642,15 @@ export async function setTemplateVisibility(
     .is("deleted_at", null)
     .select("*");
   if (error) {
-    if (isMissingColumnOrTable(error)) return "unsupported";
+    if (isMissingColumnOrTable(error)) {
+      // Loud enough to catch a post-migration typo (a wrong column name would
+      // silently 409 forever otherwise); expected only pre-migration.
+      console.warn(
+        "[tabularTemplates] visibility flip degraded — visibility columns missing (run migration 20260804_01)",
+        safeErrorLog(error),
+      );
+      return "unsupported";
+    }
     throw error;
   }
   const row = ((data ?? []) as WorkflowRow[])[0];
@@ -641,7 +695,13 @@ export async function adminRevertTemplate(
     .is("deleted_at", null)
     .select("id");
   if (error) {
-    if (isMissingColumnOrTable(error)) return "not_found";
+    if (isMissingColumnOrTable(error)) {
+      console.warn(
+        "[tabularTemplates] admin revert degraded — visibility columns missing (run migration 20260804_01)",
+        safeErrorLog(error),
+      );
+      return "not_found";
+    }
     throw error;
   }
   if (((data ?? []) as unknown[]).length === 0) return "not_found";

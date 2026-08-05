@@ -135,16 +135,24 @@ tabularTemplatesRouter.post(
   }),
 );
 
-// GET /tabular-templates/:id — owner or firm-visible-in-caller's-org only.
+// GET /tabular-templates/:id — owner, firm-visible in the caller's org, or
+// email-shared with the caller.
 tabularTemplatesRouter.get(
   "/:id",
   requireAuth,
   asyncHandler(async (req, res) => {
     const userId = res.locals.userId as string;
+    const userEmail = (res.locals.userEmail as string | undefined) ?? null;
     if (rejectNonUuidId(req.params.id, res)) return;
     const db = createServerSupabase();
     const orgId = await getUserOrganisationId(db, userId);
-    const template = await getTemplate(db, userId, req.params.id, orgId);
+    const template = await getTemplate(
+      db,
+      userId,
+      req.params.id,
+      orgId,
+      userEmail,
+    );
     if (template === "not_found") {
       return void res.status(404).json({ detail: TEMPLATE_NOT_FOUND_DETAIL });
     }

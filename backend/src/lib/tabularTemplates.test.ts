@@ -307,13 +307,14 @@ describe("validateTemplateColumns", () => {
     );
   });
 
-  it("strips control characters and newlines from names and tags", () => {
+  it("strips control characters from names, and prompt-marker characters from tags", () => {
     const result = validateTemplateColumns([
       {
-        name: "Governing\nlaw ",
+        name: "Governing\nlaw\u0000",
         prompt: "Which law governs?",
         format: "tag",
-        tags: ["England\r\nand Wales", "Scotland"],
+        // Tags also lose [ ] | (the [[tag]] prompt-marker vocabulary).
+        tags: ["England\r\nand Wales", "\u0007[[Scotland|other]]"],
       },
     ]);
     expect(result).toEqual([
@@ -322,7 +323,7 @@ describe("validateTemplateColumns", () => {
         name: "Governing law",
         prompt: "Which law governs?",
         format: "tag",
-        tags: ["England and Wales", "Scotland"],
+        tags: ["England and Wales", "Scotland other"],
       },
     ]);
   });
@@ -525,6 +526,43 @@ describe("listTemplates", () => {
     expect(list.mine.map((t) => t.id)).toEqual(["t1"]);
     expect(list.shared).toEqual([]);
   });
+
+  it("a template both email-shared and firm-visible appears in shared only", async () => {
+    const { db } = makeDb({
+      tables: {
+        workflows: [
+          templateRow({
+            id: "t2",
+            user_id: OTHER,
+            visibility: "firm",
+            organisation_id: ORG,
+          }),
+        ],
+        workflow_shares: [
+          { workflow_id: "t2", shared_with_email: OWNER_EMAIL },
+        ],
+      },
+    });
+    const list = await listTemplates(db, OWNER, OWNER_EMAIL, ORG);
+    expect(list.shared.map((t) => t.id)).toEqual(["t2"]);
+    expect(list.firm).toEqual([]);
+  });
+
+  it("chunks the shared-id lookup (>100 shares) and returns every match", async () => {
+    const count = 105; // spans two `.in()` chunks of 100
+    const workflows = Array.from({ length: count }, (_, i) =>
+      templateRow({ id: `s${i}`, user_id: OTHER }),
+    );
+    const shares = workflows.map((row) => ({
+      workflow_id: row.id,
+      shared_with_email: OWNER_EMAIL,
+    }));
+    const { db } = makeDb({
+      tables: { workflows, workflow_shares: shares },
+    });
+    const list = await listTemplates(db, OWNER, OWNER_EMAIL, null);
+    expect(list.shared).toHaveLength(count);
+  });
 });
 
 // ── createTemplate ───────────────────────────────────────────────────────────
@@ -641,6 +679,38 @@ describe("getTemplate", () => {
       tables: { workflows: [templateRow({ is_system: true })] },
     });
     expect(await getTemplate(db, OWNER, "t1", null)).toBe("not_found");
+  });
+
+  it("returns a template email-shared with the caller", async () => {
+    const { db } = makeDb({
+      tables: {
+        workflows: [templateRow({ user_id: OTHER })],
+        workflow_shares: [
+          { workflow_id: "t1", shared_with_email: OWNER_EMAIL },
+        ],
+        user_profiles: [{ user_id: OTHER, display_name: "Sam Solicitor" }],
+      },
+    });
+    const template = await getTemplate(db, OWNER, "t1", null, OWNER_EMAIL);
+    expect(template).toMatchObject({
+      id: "t1",
+      isOwner: false,
+      ownerDisplayName: "Sam Solicitor",
+    });
+  });
+
+  it("still hides a template shared with a different email", async () => {
+    const { db } = makeDb({
+      tables: {
+        workflows: [templateRow({ user_id: OTHER })],
+        workflow_shares: [
+          { workflow_id: "t1", shared_with_email: "someone-else@example.test" },
+        ],
+      },
+    });
+    expect(await getTemplate(db, OWNER, "t1", null, OWNER_EMAIL)).toBe(
+      "not_found",
+    );
   });
 });
 

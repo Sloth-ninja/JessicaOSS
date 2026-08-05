@@ -30,13 +30,20 @@ touched. Frontend is the next PR.
    `updateTemplate`, `deleteTemplate`, `setTemplateVisibility`,
    `adminRevertTemplate`, `listFirmTemplatesForAdmin`) plus ONE addition,
    `getTemplate` (by-id read for `GET /:id` — the plan's route table needs it
-   but its export list had no reader). **Review-forced interface change (the
+   but its export list had no reader; final signature
+   `getTemplate(db, userId, id, orgId, userEmail?)` — the delta review found
+   the shared bucket unreachable by id, so a `workflow_shares`
+   normalised-email match is its third access path, read semantics identical
+   to `shared` list entries). **Review-forced interface change (the
    frontend task consumes this): `TemplateList` gains a third bucket
    `shared: TabularTemplate[]` — templates email-shared with the caller via
    `workflow_shares` (normalised-email match as
    routes/workflows.ts resolveWorkflowAccess, isOwner false, own rows
-   excluded, tombstone/is_system excluded) — and `listTemplates` now takes
-   the caller's email: `listTemplates(db, userId, userEmail, orgId)`.**
+   excluded, tombstone/is_system excluded; the id lookup is chunked at 100
+   per `.in()` against URL-length 414s, and a template both email-shared and
+   firm-visible appears in `shared` only — shared wins) — and `listTemplates`
+   now takes the caller's email:
+   `listTemplates(db, userId, userEmail, orgId)`.**
    (Spec always said "mine + email-shared + firm-visible"; without it,
    email-shared tabular templates would orphan once the Workflows page drops
    tabular rows.) Queries hit `workflows` directly: always `type='tabular'`,
@@ -59,8 +66,12 @@ touched. Frontend is the next PR.
    chars), format from the nine-value allowlist, tags only on tag-format
    columns (≤50 tags, ≤100 chars each), ≤30 columns, `index` re-derived from
    position, never trusted; control characters (incl. newlines) stripped from
-   names and tag values (defence against prompt-marker injection via
-   firm-shared templates — the `[[tag]]` interpolation class). NOTE
+   names and tag values, and tag values additionally lose `[` `]` `|` — the
+   `[[tag]]` prompt-marker interpolation vocabulary (defence against
+   prompt-marker injection via firm-shared templates). The
+   PGRST204/42703 degrade in `setTemplateVisibility`/`adminRevertTemplate`
+   now `console.warn`s with `safeErrorLog` so a post-migration column typo is
+   visible rather than silently 409ing. NOTE
    `workflows` has no `updated_at` column — `updatedAt` maps from
    `created_at` (documented in code).
 2. **`backend/src/routes/tabularTemplates.ts`** — thin router, all
@@ -89,7 +100,8 @@ touched. Frontend is the next PR.
 
 **Verification evidence:** TDD per the plan (both test files written first,
 red, then implementation to green). `npx tsc --noEmit` clean; full
-`npx vitest run` green — 46 files / 725 tests (647 baseline + 53 seam tests:
+`npx vitest run` green — **738 tests / 46 files** at the delta-review push,
+of which 82 are this PR's (57 seam + 25 route) (initial wave 53 seam:
 validation incl. reindex/over-length/unknown-format/tags-guard/≥1-column/
 control-char stripping, mine/shared/firm/orgless scoping,
 own-firm-rows-stay-in-mine, email-share matching (normalised email;
@@ -103,8 +115,15 @@ files (new-file style is prettier-default 2-space; existing 4-space backend
 files untouched). UK terminology: the UI word is "template" throughout; no
 "schema" in any user-facing string. Independent review of the first push
 PASSED with two should-fixes (PGRST204 degrade, email-shared bucket) + five
-nits — all taken in the second push; the dead-filter/empty-catch tidy nits
-are deferred to the composed-range review.
+nits — all taken in the second push. The delta review PASSED (merge-eligible)
+with one final should-fix (getTemplate could not read email-shared templates
+— the frontend editor/duplicate flow would 404; fixed via the optional
+`userEmail` param) + four hardening nits (chunked `.in()`, shared-wins
+dedupe, tag-marker strip, degrade warn), all taken in the third push. The
+dead-filter/empty-catch tidy nits are deferred to the composed-range review.
+Branch kept current with main through two conflict merges (#73, #75 — both
+docs-only conflicts, entries kept newest-first, both 2026-08-05
+DURABLE_LESSONS entries preserved).
 
 **Decisions:** `updatedAt`←`created_at` mapping (no `updated_at` column on
 `workflows`; honest closest value, noted for the frontend task);
@@ -114,7 +133,9 @@ org scope, not ownership); admin revert on an unmigrated DB reports
 not_found (nothing can be firm-shared pre-migration);
 `lib/firmVisibility.ts` shares the two-code missing-column idiom but its
 migration has run in production — flagged as follow-up hardening, not
-changed here.
+changed here; `hidden_workflows` hide semantics apply to built-ins on the
+Templates page per the plan — a DB-row shared template reappearing after
+hide is accepted v1 behaviour, recorded as a frontend-task decision.
 
 ---
 

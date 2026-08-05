@@ -243,6 +243,7 @@ describe("GET /tabular-templates/:id", () => {
       "caller",
       ID,
       "org-1",
+      "caller@example.test",
     );
   });
 
