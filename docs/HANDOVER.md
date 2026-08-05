@@ -27,7 +27,43 @@ Quill/Unity + HMLR integration briefs).
 Deploy gotchas are in DURABLE_LESSONS (OpenNext packager/bun.lock, wrangler
 autoconfig delegation, piped-exit-code trap, Express-async crash class).
 
-## 0. CURRENT PICKUP — 4 August 2026 (read this, then CLAUDE.md Current status)
+## 0. CURRENT PICKUP — 5 August 2026 (read this, then CLAUDE.md Current status)
+
+State: everything through PR #78 is merged. Two trains completed 04-05/08: the
+pilot-feedback fix train (#70-#73, deployed as Fly v20 by the owner 05/08) and
+the **Review templates train (#74-#78, code-complete, NOT yet deployed)**. The
+Matters-page incident is resolved (migration `20260728_02` had never actually
+applied; re-run + diagnostic-verified 05/08 — see the DURABLE_LESSONS entry).
+
+**To ship the templates train (in order):**
+1. Deploy backend (`fly deploy` from `backend/` — owner runs it or grants the
+   permission) and frontend (`npm run deploy` from `frontend/`).
+2. Owner runs migration `20260804_01_workflow_firm_visibility.sql` in
+   production Supabase (whole file, nothing highlighted; it ends with a proving
+   select). Until then firm sharing degrades cleanly; personal templates work.
+3. Verify live: `/review-templates` 200, save-as-template → apply round-trip,
+   template picker in the new-review modal, Firm section after the migration.
+4. In-browser QA (owner): share a template to firm on one account, see it on
+   the other; admin revert (now MFA-stepped); WS9 firm-library QA still pending
+   too.
+
+**Next roadmap (owner order, 05/08):** Practice Management surface (spec →
+mock-up → approval first — Clio-backed matters tab + in-app time records;
+subsumes the pilot's "Clio matters should appear in Matters", "preloaded
+matters", and "time recording records" asks) → voice dictation (Azure Speech
+via a backend seam; OS-dictation stopgap note for PILOT.md) → hide-AI-working
+for members. Owner-decision candidates open: reject `type:'tabular'` on legacy
+`/workflows` writes (#78 PR body); solicitor sign-offs and M365/DMARC/HMLR per
+§5.
+
+**Operating note (owner feedback 05/08):** ALWAYS pass explicit model
+overrides on sub-agent dispatch — Opus for builders/independent reviewers,
+Sonnet for mechanical work; omitting the override inherits the top-level
+model and burns usage (see memory `model-split-discipline`).
+
+---
+
+## 0a. (Historical) pickup — 4 August 2026
 
 State: everything through PR #69 is merged + deployed + live. Clio connector
 v1 shipped (#62–#66) and survived first pilot contact: the 03/08 incident

@@ -7,6 +7,42 @@
 
 ---
 
+## 2026-08-05 — Session close-out: templates train complete, Matters incident resolved (branch `templates-closeout`)
+
+**Scope:** docs-only close-out of the 04-05/08 session. Two trains completed:
+pilot-feedback fixes (#70 verification record, #71 Clio matter search, #72
+error visibility, #73 composed-range wave — deployed as Fly v20 by the owner
+05/08) and Review templates (#74 backend, #75 migration+spec+plan, #76
+frontend, #77 MFA alignment, #78 composed-range wave — code-complete, deploy +
+migration `20260804_01` pending owner). Updates CLAUDE.md Current status,
+HANDOVER §0 (new pickup with the shipping checklist), and DURABLE_LESSONS
+(migration-verification lesson).
+
+**Matters incident closed (05/08):** root cause — migration `20260728_02` was
+recorded as run 03/08 but had applied ZERO statements (selection-run class);
+diagnosed via a signature/column diagnostic, re-run end-to-end by the owner,
+re-verified by the same diagnostic; Matters + Firm library confirmed loading
+on both pilot accounts (screenshots reviewed — blank = genuinely matter-less
+accounts). The "Clio matters should appear in Matters" expectation is
+recorded as the Practice Management surface (next roadmap item, owner order
+05/08). Lesson appended to DURABLE_LESSONS; the incident also produced the
+error-visibility hardening in #72 (raw-error leaks closed, logs unblinded).
+
+**Verification evidence:** all five templates-train PRs merged with 3 green CI
+checks + independent review each; composed-range review over
+`8e1023f...5da6d5c` PASS (its three Important findings fixed in #78, verified
+by the same reviewer at head `9652f8d`); backend suite 757/757; frontend
+lint at baseline parity, build clean. Live: api.jessicaoss.com/health ok,
+Fly v20 current (templates train not yet deployed).
+
+**Open at close:** owner ships the train (deploy both sides + run
+`20260804_01` + in-browser QA per HANDOVER §0); owner-decision candidate —
+reject `type:'tabular'` on legacy `/workflows` writes; M365/DMARC/HMLR
+unchanged; nit queue: FK-23503 existence-oracle mapping on review
+`workflow_id` writes, dead `.catch` in AddNewTRModal.
+
+---
+
 ## 2026-08-05 — Review-templates train: composed-range fix wave (branch `templates-train-fixes`)
 
 **Scope:** the composed-range multi-lens review of the whole Review-templates
