@@ -9,6 +9,7 @@ import { projectChatRouter } from "./routes/projectChat";
 import { documentsRouter } from "./routes/documents";
 import { tabularRouter } from "./routes/tabular";
 import { workflowsRouter } from "./routes/workflows";
+import { tabularTemplatesRouter } from "./routes/tabularTemplates";
 import { userRouter } from "./routes/user";
 import { adminRouter } from "./routes/admin";
 import { firmLibraryRouter } from "./routes/firmLibrary";
@@ -178,6 +179,8 @@ app.use("/projects/:projectId/chat", projectChatRouter);
 app.use("/single-documents", documentsRouter);
 app.use("/tabular-review", tabularRouter);
 app.use("/workflows", workflowsRouter);
+// Review templates (saved tabular schemas v1) — covered by the general limiter.
+app.use("/tabular-templates", tabularTemplatesRouter);
 app.use("/user", userRouter);
 app.use("/users", userRouter);
 app.use("/admin", adminRouter);

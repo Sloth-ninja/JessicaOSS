@@ -36,6 +36,7 @@
 - 2026-07-28 — Soft-delete (tombstone) and access checks must compose: gate at the shared choke point, not per-route
 - 2026-08-03 — Continuous-refill rate-limit buckets make tests timing-flaky when the code does real CPU work between calls — freeze the clock
 - 2026-08-05 — Suites doing real KDF (scrypt) work need explicit generous timeouts; a timeout flake that passes in isolation is contention, not a defect
+- 2026-08-05 — Missing-column degrades: filters raise Postgres 42703, but UPDATE payloads raise PostgREST PGRST204 — cover both
 
 ## Lessons
 
@@ -471,3 +472,32 @@ overriding a higher file-level ceiling — the per-test value wins in vitest.
 Debugging signature: timed-out tests concentrated in files doing scrypt/crypto
 work, green when run standalone, while the machine runs parallel agent suites
 or builds.
+
+### 2026-08-05 (Review templates) — 42703 is not the only "missing column" code: UPDATE payloads surface PGRST204
+
+Trigger: PR #74 review. The templates seam degraded firm sharing on an
+unmigrated database via the usual `code === "42703" || code === "42P01"`
+check — but that only covers a missing column referenced in a FILTER
+(`.eq("visibility", …)`), where PostgREST forwards Postgres's
+undefined_column error. When the missing column appears in an **UPDATE
+payload** (`.update({ visibility: … })`), PostgREST validates the payload keys
+against its own schema cache and rejects the request as **`PGRST204`
+("Could not find the '<col>' column ... in the schema cache")** before
+Postgres ever sees it. So `setTemplateVisibility` / `adminRevertTemplate`
+would have 500'd instead of degrading on every pre-migration database — a
+LIVE path here, since migration `20260804_01` had not run anywhere yet.
+
+Rule: a "missing table/column" degrade check on a supabase-js write must
+accept all three codes — `42703`, `42P01`, **and `PGRST204`** — whenever the
+missing column can appear in the write payload (filters alone are fine with
+the Postgres pair). Note `lib/firmVisibility.ts` (`isMissingColumnOrTable`,
+~lines 40-44) shares the two-code idiom on its visibility updates; its
+migration (`20260728_02`) has run in production so it is not live-broken —
+flagged as a follow-up hardening, deliberately not changed in PR #74.
+Debugging signature: an "unmigrated DB" code path that works for reads/lists
+but 500s on the flip/write, with logs showing `PGRST204` and a message naming
+the column and "schema cache", means the degrade check only knows the
+Postgres codes. Also remember PostgREST schema-cache staleness has the
+inverse failure: the column EXISTS in Postgres but PGRST204 still fires until
+the cache reloads (`NOTIFY pgrst, 'reload schema'` / project restart).
+
