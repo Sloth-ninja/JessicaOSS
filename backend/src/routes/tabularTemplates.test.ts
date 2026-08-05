@@ -17,6 +17,7 @@ import type { AddressInfo } from "node:net";
 const state = vi.hoisted(() => ({
   authed: true,
   isAdmin: true,
+  mfaOk: true,
   orgId: "org-1" as string | null,
 }));
 
@@ -44,6 +45,20 @@ vi.mock("../middleware/auth", () => ({
   ) => {
     if (!state.isAdmin) {
       res.status(403).json({ detail: "Administrator access is required." });
+      return;
+    }
+    next();
+  },
+  requireMfaIfEnrolled: (
+    _req: unknown,
+    res: { status: (n: number) => { json: (b: unknown) => void } },
+    next: () => void,
+  ) => {
+    if (!state.mfaOk) {
+      res.status(403).json({
+        code: "mfa_verification_required",
+        detail: "MFA verification required",
+      });
       return;
     }
     next();
@@ -125,6 +140,7 @@ afterAll(
 beforeEach(() => {
   state.authed = true;
   state.isAdmin = true;
+  state.mfaOk = true;
   state.orgId = "org-1";
   listTemplates.mockReset().mockResolvedValue({
     mine: [],
@@ -447,6 +463,20 @@ describe("admin routes", () => {
       "org-1",
       ID,
     );
+  });
+
+  it("POST /:id/admin-revert returns 403 without MFA step-up", async () => {
+    // Alignment with routes/admin.ts: an enrolled-but-unverified admin cannot
+    // mutate. The revert seam must never be reached.
+    state.mfaOk = false;
+    const res = await fetch(`${baseUrl}/tabular-templates/${ID}/admin-revert`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual(
+      expect.objectContaining({ code: "mfa_verification_required" }),
+    );
+    expect(adminRevertTemplate).not.toHaveBeenCalled();
   });
 
   it("POST /:id/admin-revert returns 404 for another org's template", async () => {
