@@ -502,7 +502,6 @@ Postgres codes. Also remember PostgREST schema-cache staleness has the
 inverse failure: the column EXISTS in Postgres but PGRST204 still fires until
 the cache reloads (`NOTIFY pgrst, 'reload schema'` / project restart).
 
-
 ### 2026-08-05 (Matters incident) — "Migration recorded as run" is not "migration applied": verify with a diagnostic, and beware selection-runs
 
 Trigger: CLAUDE.md recorded migration `20260728_02_firm_visibility.sql` as "run

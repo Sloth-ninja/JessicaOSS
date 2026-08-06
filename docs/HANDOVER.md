@@ -40,7 +40,13 @@ applied; re-run + diagnostic-verified 05/08 — see the DURABLE_LESSONS entry).
    permission) and frontend (`npm run deploy` from `frontend/`).
 2. Owner runs migration `20260804_01_workflow_firm_visibility.sql` in
    production Supabase (whole file, nothing highlighted; it ends with a proving
-   select). Until then firm sharing degrades cleanly; personal templates work.
+   select) — then pastes back the proving-select output, and the runner
+   re-verifies with an `information_schema.columns` check on
+   `workflows.visibility` / `workflows.organisation_id` before ticking step 3
+   (05/08 lesson: recorded-as-run ≠ applied). Deploy-before-migration order is
+   safe HERE only because the seam's 42703/PGRST204 degrade covers the gap;
+   until the migration runs, firm sharing degrades cleanly and personal
+   templates work.
 3. Verify live: `/review-templates` 200, save-as-template → apply round-trip,
    template picker in the new-review modal, Firm section after the migration.
 4. In-browser QA (owner): share a template to firm on one account, see it on

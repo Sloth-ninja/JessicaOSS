@@ -30,8 +30,9 @@ error-visibility hardening in #72 (raw-error leaks closed, logs unblinded).
 
 **Verification evidence:** all five templates-train PRs merged with 3 green CI
 checks + independent review each; composed-range review over
-`8e1023f...5da6d5c` PASS (its three Important findings fixed in #78, verified
-by the same reviewer at head `9652f8d`); backend suite 757/757; frontend
+`8e1023f...5da6d5c` PASS (its Important findings — I1–I3 as recorded in the
+#78 entry — fixed in #78, verified by the same reviewer at head `9652f8d`);
+backend suite 757/757; frontend
 lint at baseline parity, build clean. Live: api.jessicaoss.com/health ok,
 Fly v20 current (templates train not yet deployed).
 
