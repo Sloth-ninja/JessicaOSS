@@ -38,7 +38,7 @@
 - 2026-08-05 — Suites doing real KDF (scrypt) work need explicit generous timeouts; a timeout flake that passes in isolation is contention, not a defect
 - 2026-08-05 — Missing-column degrades: filters raise Postgres 42703, but UPDATE payloads raise PostgREST PGRST204 — cover both
 - 2026-08-05 — "Migration recorded as run" ≠ applied: verify with a pg_proc/columns diagnostic; the SQL editor runs only highlighted text
-- 2026-08-06 — A route that 404s before deploy can stay 404 for a year (edge-cached s-maxage): purge the URL when a deploy adds routes
+- 2026-08-06 — Every page is edge-cached a year with no revalidation: purge the Cloudflare cache after EVERY frontend deploy
 
 ## Lessons
 
@@ -539,10 +539,15 @@ Cloudflare edge-cached it with `cache-control: s-maxage=31536000` (one year), so
 the new worker version never got asked. Fixed by a dashboard Custom Purge of the
 exact URL.
 
-Rule: when a frontend deploy ADDS a route, purge that route's URL (or purge
-everything) in Cloudflare immediately after deploying — and when verifying,
-treat "bare URL 404 but cache-busted URL 200" as the definitive cache signature,
-not a deploy failure. Corollary for checks: probing a route BEFORE its deploy
+Rule (broadened after review measured EVERY page serving
+`s-maxage=31536000` with no stale-while-revalidate — `/`, `/company-search`,
+`/legislation` all the same): purge the Cloudflare cache after EVERY frontend
+deploy — purge-everything is the safe default, since changed pages can serve
+stale HTML for up to a year, not just added routes. When verifying, treat
+"bare URL 404/stale but cache-busted URL correct" as the definitive cache
+signature, not a deploy failure. Structural follow-up (queued): shorten
+s-maxage / add stale-while-revalidate at the OpenNext layer, or script the
+purge into `npm run deploy` so it does not depend on human memory. Corollary for checks: probing a route BEFORE its deploy
 can itself plant the year-long 404 — verify new routes only after the deploy, or
 always with a cache-buster. Debugging signature: deploy logs show the route
 built and uploaded (grep the build output), worker version id is new, `/`
