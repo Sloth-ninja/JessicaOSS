@@ -37,6 +37,7 @@
 - 2026-08-03 — Continuous-refill rate-limit buckets make tests timing-flaky when the code does real CPU work between calls — freeze the clock
 - 2026-08-05 — Suites doing real KDF (scrypt) work need explicit generous timeouts; a timeout flake that passes in isolation is contention, not a defect
 - 2026-08-05 — Missing-column degrades: filters raise Postgres 42703, but UPDATE payloads raise PostgREST PGRST204 — cover both
+- 2026-08-05 — "Migration recorded as run" ≠ applied: verify with a pg_proc/columns diagnostic; the SQL editor runs only highlighted text
 
 ## Lessons
 
@@ -501,3 +502,29 @@ Postgres codes. Also remember PostgREST schema-cache staleness has the
 inverse failure: the column EXISTS in Postgres but PGRST204 still fires until
 the cache reloads (`NOTIFY pgrst, 'reload schema'` / project restart).
 
+### 2026-08-05 (Matters incident) — "Migration recorded as run" is not "migration applied": verify with a diagnostic, and beware selection-runs
+
+Trigger: CLAUDE.md recorded migration `20260728_02_firm_visibility.sql` as "run
+in production Supabase by the owner 03/08", but a live incident (Matters page
+"Could not load matters." for a pilot solicitor, `GET /firm-library` failing
+for the admin) led to a signature/column diagnostic that showed the database
+had ZERO statements from that migration applied — the overview RPCs still had
+their old signatures and none of the new columns existed. The WS9 backend had
+been calling the new 3-parameter RPC into a database that only had the
+2-parameter one since its deploy. Likeliest mechanism: the Supabase SQL editor
+runs ONLY the highlighted text when any selection exists, so a partial
+selection (or a wrong-tab paste) reports success while applying nothing; the
+editor's ambiguous "Success" reporting (22/07 lesson) hides it.
+
+Rules: (1) a migration is "run" only when a verification query proves it —
+check function signatures via `pg_proc`/`pg_get_function_identity_arguments`
+and columns via `information_schema.columns`, not the editor's success banner;
+migrations should end with a proving `select` (22/07 lesson) AND the runner
+should execute a diagnostic afterwards. (2) When instructing a human to run
+SQL in the Supabase editor: paste into a FRESH query tab, click once so
+nothing is highlighted, then Run — and paste back the post-Run output, not
+just downstream symptoms. (3) When docs and observed behaviour disagree about
+DB state, trust neither — run the diagnostic. Debugging signature: a feature
+dark-launched behind a migration works in dev but its production surfaces
+throw "function ... not found in the schema cache" / PGRST202-class errors,
+while deploy checks stay green because only the DB-dependent paths fail.
