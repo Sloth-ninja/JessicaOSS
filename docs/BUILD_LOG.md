@@ -7,6 +7,33 @@
 
 ---
 
+## 2026-08-06 — Templates train SHIPPED: deploys, migration verified, owner QA (branch `templates-shipped`)
+
+**Scope:** docs-only record of the templates train going live 06/08. Backend
+deployed as Fly v21 (health ok; `/tabular-templates` live, 401 unauthenticated
+as designed). Frontend deployed (new Worker version; `/review-templates` 200
+after a Cloudflare purge — see below). Migration `20260804_01` run in
+production by the owner: proving select returned `workflows_rows 0 /
+firm_visible 0`, and the independent `information_schema.columns` check
+returned both `workflows.organisation_id` and `workflows.visibility` (the
+05/08 lesson's verification step, applied). Owner in-browser QA passed:
+Templates page with built-ins, save-as-template, start-from-template, and
+share-to-firm visible to the second account.
+
+**Deploy gotcha (lesson appended):** `/review-templates` initially 404'd live
+despite a successful deploy — the pre-deploy 404 had been edge-cached with a
+one-year `s-maxage`; cache-busted requests returned 200. Fixed by a dashboard
+Custom Purge of the URL. Rule: purge route URLs when a deploy adds routes;
+verify new routes with a cache-buster.
+
+**Also updates:** CLAUDE.md Current status (train marked SHIPPED with dates
+and verification evidence). Next: Practice Management surface — owner
+decisions taken 06/08 (Clio-backed Matters tab; v1 = my-matters preload +
+firm search + matter detail + time entries view/edit + linked workspaces;
+live reads, no DB copy); API-verification spike running before the spec.
+
+---
+
 ## 2026-08-05 — Session close-out: templates train complete, Matters incident resolved (branch `templates-closeout`)
 
 **Scope:** docs-only close-out of the 04-05/08 session. Two trains completed:

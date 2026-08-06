@@ -38,6 +38,7 @@
 - 2026-08-05 — Suites doing real KDF (scrypt) work need explicit generous timeouts; a timeout flake that passes in isolation is contention, not a defect
 - 2026-08-05 — Missing-column degrades: filters raise Postgres 42703, but UPDATE payloads raise PostgREST PGRST204 — cover both
 - 2026-08-05 — "Migration recorded as run" ≠ applied: verify with a pg_proc/columns diagnostic; the SQL editor runs only highlighted text
+- 2026-08-06 — A route that 404s before deploy can stay 404 for a year (edge-cached s-maxage): purge the URL when a deploy adds routes
 
 ## Lessons
 
@@ -528,3 +529,21 @@ DB state, trust neither — run the diagnostic. Debugging signature: a feature
 dark-launched behind a migration works in dev but its production surfaces
 throw "function ... not found in the schema cache" / PGRST202-class errors,
 while deploy checks stay green because only the DB-dependent paths fail.
+
+### 2026-08-06 (templates deploy) — A route that 404s before deploy can stay 404 for a year: purge the edge cache when a deploy adds routes
+
+Trigger: after deploying the Review-templates frontend, `jessicaoss.com/review-templates`
+kept returning 404 while the same URL with a cache-busting query string returned
+200. The pre-deploy 404 had been visited (by checks and/or the owner) and
+Cloudflare edge-cached it with `cache-control: s-maxage=31536000` (one year), so
+the new worker version never got asked. Fixed by a dashboard Custom Purge of the
+exact URL.
+
+Rule: when a frontend deploy ADDS a route, purge that route's URL (or purge
+everything) in Cloudflare immediately after deploying — and when verifying,
+treat "bare URL 404 but cache-busted URL 200" as the definitive cache signature,
+not a deploy failure. Corollary for checks: probing a route BEFORE its deploy
+can itself plant the year-long 404 — verify new routes only after the deploy, or
+always with a cache-buster. Debugging signature: deploy logs show the route
+built and uploaded (grep the build output), worker version id is new, `/`
+serves 200, but the new path 404s bare and 200s with `?cb=<anything>`.
