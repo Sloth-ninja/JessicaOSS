@@ -121,26 +121,26 @@ function Financials({
     const currency = financials.currencyCode;
     return (
         <dl className="m-0">
+            {/* Amount and hours are separately redactable in Clio, so they are
+                rendered independently: a hidden amount must not swallow the
+                fact that the hours are hidden too — stating each is the whole
+                point of this surface. */}
             <Row label="Unbilled WIP">
                 {financials.unbilledAmountHidden ? (
                     <Hidden />
                 ) : financials.unbilledAmount === null ? (
                     <Dash />
                 ) : (
-                    <>
-                        {formatMoney(financials.unbilledAmount, currency)}
-                        {financials.unbilledHoursHidden ? (
-                            <span className="text-gray-400 italic">
-                                {" "}
-                                · {HIDDEN_COPY}
-                            </span>
-                        ) : financials.unbilledHours !== null ? (
-                            <span className="text-gray-500">
-                                {" "}
-                                · {financials.unbilledHours.toFixed(2)}h
-                            </span>
-                        ) : null}
-                    </>
+                    formatMoney(financials.unbilledAmount, currency)
+                )}
+            </Row>
+            <Row label="Unbilled hours">
+                {financials.unbilledHoursHidden ? (
+                    <Hidden />
+                ) : financials.unbilledHours === null ? (
+                    <Dash />
+                ) : (
+                    `${financials.unbilledHours.toFixed(2)}h`
                 )}
             </Row>
             <Row label="In trust">
@@ -197,10 +197,15 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
 
     const [link, setLink] = useState<ClioWorkspaceLink | null>(null);
     const [workspaceBusy, setWorkspaceBusy] = useState(false);
-    const [actionError, setActionError] = useState<string | null>(null);
+    // Action failures are reported where the action lives, not at the top of the
+    // page: a refusal to unlink belongs in the Workspace card, and a refused
+    // delete belongs beside the time entries it applies to.
+    const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+    const [entryError, setEntryError] = useState<string | null>(null);
     const [confirmUnlink, setConfirmUnlink] = useState(false);
 
     const matterSeq = useRef(0);
+    const contactsSeq = useRef(0);
     const activitySeq = useRef(0);
 
     // ── Matter + link ────────────────────────────────────────────────────────
@@ -236,6 +241,9 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
 
     // ── Key people ───────────────────────────────────────────────────────────
     useEffect(() => {
+        // Same monotonic guard as its two siblings: a slow earlier response must
+        // never overwrite a newer matter's contacts.
+        const seq = ++contactsSeq.current;
         const controller = new AbortController();
         const run = async () => {
             try {
@@ -243,10 +251,11 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
                     (signal) => getClioMatterContacts(matterId, signal),
                     controller.signal,
                 );
+                if (contactsSeq.current !== seq) return;
                 setContacts(loaded.contacts);
                 setContactsError(false);
             } catch (err) {
-                if (isAbort(err)) return;
+                if (isAbort(err) || contactsSeq.current !== seq) return;
                 setContacts([]);
                 setContactsError(true);
             }
@@ -295,7 +304,8 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
         setContacts(null);
         setActivities(null);
         setActivitiesError(null);
-        setActionError(null);
+        setWorkspaceError(null);
+        setEntryError(null);
         setReloadKey((k) => k + 1);
     }, []);
 
@@ -307,7 +317,7 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
 
     async function handleStartWorkspace() {
         setWorkspaceBusy(true);
-        setActionError(null);
+        setWorkspaceError(null);
         try {
             const created = await createWorkspaceForClioMatter(matterId);
             setLink(created.link);
@@ -317,7 +327,7 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
             setWorkspaceBusy(false);
             // Fixed, user-safe server details — including the three distinct
             // "already linked" refusals, which each mean something different.
-            setActionError(
+            setWorkspaceError(
                 err instanceof MikeApiError && err.message
                     ? err.message
                     : "Could not start a workspace for this matter.",
@@ -329,14 +339,17 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
         if (!link) return;
         setConfirmUnlink(false);
         setWorkspaceBusy(true);
-        setActionError(null);
+        setWorkspaceError(null);
         try {
             await unlinkWorkspaceFromClioMatter(link.projectId);
             setLink(null);
             setWorkspaceBusy(false);
         } catch (err) {
             setWorkspaceBusy(false);
-            setActionError(
+            // Includes the owner-only 403: the link payload carries no
+            // ownership signal, so a non-owner only learns here. Shown inside
+            // the Workspace card, next to the button they pressed.
+            setWorkspaceError(
                 err instanceof MikeApiError && err.message
                     ? err.message
                     : "Could not unlink this workspace.",
@@ -347,6 +360,7 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
     async function confirmDeleteEntry() {
         if (!deleting) return;
         setDeleteStatus("loading");
+        setEntryError(null);
         try {
             await deleteClioActivity(deleting.id);
             setDeleteStatus("complete");
@@ -358,7 +372,7 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
         } catch (err) {
             setDeleteStatus("idle");
             setDeleting(null);
-            setActionError(
+            setEntryError(
                 err instanceof MikeApiError && err.message
                     ? err.message
                     : "Could not delete that time entry.",
@@ -425,15 +439,6 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
                             </p>
                         )}
 
-                        {actionError && (
-                            <p
-                                role="alert"
-                                className="mt-3 text-xs text-red-600"
-                            >
-                                {actionError}
-                            </p>
-                        )}
-
                         <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1.4fr_1fr]">
                             <div className="flex flex-col gap-4">
                                 <Card title="Overview">
@@ -490,6 +495,17 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
                                                 onClick={() =>
                                                     setEveryone((v) => !v)
                                                 }
+                                                aria-pressed={everyone}
+                                                title={
+                                                    everyone
+                                                        ? "Show only the time you recorded"
+                                                        : "Show everyone's time on this matter"
+                                                }
+                                                aria-label={
+                                                    everyone
+                                                        ? "Showing everyone on this matter — switch to only mine"
+                                                        : "Showing only mine — switch to everyone on this matter"
+                                                }
                                                 className="font-medium text-gray-500 underline underline-offset-2 transition-colors hover:text-gray-800"
                                             >
                                                 {everyone
@@ -506,6 +522,14 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
                                         </div>
                                     }
                                 >
+                                    {entryError && (
+                                        <p
+                                            role="alert"
+                                            className="mb-3 text-xs text-red-600"
+                                        >
+                                            {entryError}
+                                        </p>
+                                    )}
                                     <TimeEntries
                                         activities={activities}
                                         error={activitiesError}
@@ -574,6 +598,14 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
                                 </Card>
 
                                 <Card title="Workspace">
+                                    {workspaceError && (
+                                        <p
+                                            role="alert"
+                                            className="mb-3 text-xs text-red-600"
+                                        >
+                                            {workspaceError}
+                                        </p>
+                                    )}
                                     {link ? (
                                         <div className="flex flex-col gap-3">
                                             <p className="text-[13px] text-gray-500">
@@ -794,6 +826,13 @@ function TimeEntries({
                             {entry.locked ? (
                                 <span className="text-[11px] text-gray-400">
                                     Billed — locked
+                                </span>
+                            ) : entry.isOwn && entry.quantityRedacted ? (
+                                // Own entry, but Clio withholds its duration —
+                                // the edit form would have nothing truthful to
+                                // prefill, so it is not offered.
+                                <span className="text-[11px] text-gray-400">
+                                    Not editable here
                                 </span>
                             ) : entry.isOwn ? (
                                 <span className="flex items-center gap-1">
