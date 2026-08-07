@@ -1,14 +1,36 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import {
+    useCallback,
+    useEffect,
+    useRef,
+    useState,
+    useSyncExternalStore,
+} from "react";
 import { useRouter } from "next/navigation";
 import { FolderOpen, ChevronDown } from "lucide-react";
-import { listProjects, updateProject, deleteProject } from "@/app/lib/mikeApi";
+import {
+    getClioStatus,
+    listProjects,
+    updateProject,
+    deleteProject,
+} from "@/app/lib/mikeApi";
 import { OwnerOnlyModal } from "@/app/components/shared/OwnerOnlyModal";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Project } from "@/app/components/shared/types";
 import { NewProjectModal } from "./NewProjectModal";
+import { ClioMattersTable } from "./ClioMattersTable";
+import { LinkClioMatterModal } from "./LinkClioMatterModal";
+import {
+    isAbort,
+    readStoredMattersTab,
+    storeMattersTab,
+    subscribeToMattersTab,
+    timeBoxed,
+    type MattersTab,
+} from "@/app/lib/clioMatters";
 import { TableToolbar } from "@/app/components/shared/TableToolbar";
+import { HeaderFilterDropdown } from "@/app/components/shared/HeaderFilterDropdown";
 import {
     RowActionMenuItems,
     RowActions,
@@ -50,6 +72,22 @@ function getProjectOwnerLabel(project: Project, currentUserId?: string | null) {
 
 type ProjectFilter = "all" | "mine" | "shared-with-me";
 
+/**
+ * Whether this solicitor's own Clio Manage login is connected. "unknown" means
+ * the status call itself failed — the Clio tabs stay reachable in that case,
+ * because the list below has its own error+retry; only a definite "no" folds
+ * the page back to Workspaces.
+ */
+type ClioState = "loading" | "connected" | "disconnected" | "unknown";
+
+const MATTER_STATUSES = [
+    { value: "open", label: "Open" },
+    { value: "pending", label: "Pending" },
+    { value: "closed", label: "Closed" },
+];
+
+const SEARCH_DEBOUNCE_MS = 350;
+
 export function ProjectsOverview() {
     const [projects, setProjects] = useState<Project[]>([]);
     const [loading, setLoading] = useState(true);
@@ -67,6 +105,81 @@ export function ProjectsOverview() {
     const actionsRef = useRef<HTMLDivElement>(null);
     const router = useRouter();
     const { user, isAuthenticated, authLoading } = useAuth();
+
+    // ── Clio-backed tabs (Practice Management) ───────────────────────────────
+    const [clioState, setClioState] = useState<ClioState>("loading");
+    // The remembered tab is external state (localStorage), so it is read through
+    // useSyncExternalStore with a null server snapshot — a useState initialiser
+    // would render one tab on the server and hydrate a different one. The
+    // override keeps the page working when storage writes are unavailable
+    // (private mode), and null still means "no preference yet".
+    const storedTab = useSyncExternalStore(
+        subscribeToMattersTab,
+        readStoredMattersTab,
+        () => null,
+    );
+    const [tabOverride, setTabOverride] = useState<MattersTab | null>(null);
+    const tabPref = tabOverride ?? storedTab;
+    const [statusFilter, setStatusFilter] = useState<string | null>(null);
+    const [debouncedQuery, setDebouncedQuery] = useState("");
+    const [linkingProject, setLinkingProject] = useState<Project | null>(null);
+
+    useEffect(() => {
+        if (authLoading || !isAuthenticated) return;
+        const controller = new AbortController();
+        const run = async () => {
+            try {
+                // Time-boxed: an unanswered status call must never leave the
+                // tab bar stuck in "loading" (login-spinner lesson, 21/07).
+                const status = await timeBoxed(
+                    (signal) => getClioStatus(signal),
+                    controller.signal,
+                );
+                setClioState(
+                    status.manage.connected ? "connected" : "disconnected",
+                );
+            } catch (err) {
+                if (isAbort(err)) return;
+                setClioState("unknown");
+            }
+        };
+        void run();
+        return () => controller.abort();
+    }, [authLoading, isAuthenticated, user?.id]);
+
+    const clioConnected = clioState === "connected";
+    // A definite "not connected" folds the page back to Workspaces — the
+    // Clio tabs are then absent rather than disabled (the WS8 pattern).
+    const clioTabsAvailable = clioState !== "disconnected";
+    const activeTab: MattersTab =
+        tabPref === null
+            ? clioConnected
+                ? "mine"
+                : "workspaces"
+            : !clioTabsAvailable && tabPref !== "workspaces"
+              ? "workspaces"
+              : tabPref;
+    const isClioTab = activeTab !== "workspaces";
+
+    const selectTab = useCallback((tab: MattersTab) => {
+        setTabOverride(tab);
+        storeMattersTab(tab);
+    }, []);
+
+    const handleReconnectNeeded = useCallback(() => {
+        setClioState("disconnected");
+    }, []);
+
+    // Debounce the search box before it becomes a Clio query — typing must not
+    // spend the 50 req/min per-user budget a keystroke at a time.
+    useEffect(() => {
+        const trimmed = search.trim();
+        const timer = setTimeout(
+            () => setDebouncedQuery(trimmed),
+            trimmed ? SEARCH_DEBOUNCE_MS : 0,
+        );
+        return () => clearTimeout(timer);
+    }, [search]);
 
     useEffect(() => {
         if (authLoading) {
@@ -201,6 +314,51 @@ export function ProjectsOverview() {
         }
     }
 
+    // The three top-level tabs. Absent — not disabled — when this solicitor has
+    // no Clio connection, so the page is exactly today's Workspaces list.
+    const mattersTabs: { id: MattersTab; label: string }[] = [
+        { id: "mine", label: "My matters" },
+        { id: "all", label: "All matters" },
+        { id: "workspaces", label: "Workspaces" },
+    ];
+
+    const statusFilterControl = (
+        <div className="flex items-center gap-1 text-xs text-gray-500">
+            <span>
+                {MATTER_STATUSES.find((s) => s.value === statusFilter)?.label ??
+                    "Any status"}
+            </span>
+            <HeaderFilterDropdown
+                label="Filter matters by status"
+                value={statusFilter}
+                allLabel="Any status"
+                options={MATTER_STATUSES}
+                onChange={setStatusFilter}
+                widthClassName="w-40"
+            />
+        </div>
+    );
+
+    // On the Workspaces tab these sit beside the tabs rather than replacing
+    // them, so both levels of filtering stay reachable at once.
+    const workspaceFilterButtons = (
+        <div className="flex items-center gap-4">
+            {filters.map((item) => (
+                <button
+                    key={item.id}
+                    onClick={() => setActiveFilter(item.id)}
+                    className={`text-xs transition-colors ${
+                        activeFilter === item.id
+                            ? "font-medium text-gray-700"
+                            : "font-normal text-gray-500 hover:text-gray-700"
+                    }`}
+                >
+                    {item.label}
+                </button>
+            ))}
+        </div>
+    );
+
     const toolbarActions = (
         <>
             {selectedIds.length > 0 && (
@@ -231,18 +389,20 @@ export function ProjectsOverview() {
         <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
             {/* Page header */}
             <PageHeader
-                loading={loading}
+                loading={isClioTab ? false : loading}
                 actions={[
                     {
                         type: "search",
                         value: search,
                         onChange: setSearch,
-                        placeholder: "Search matters…",
+                        placeholder: isClioTab
+                            ? "Search matters…"
+                            : "Search workspaces…",
                     },
                     {
                         type: "new",
                         onClick: () => setModalOpen(true),
-                        title: "New matter",
+                        title: "New workspace",
                     },
                 ]}
             >
@@ -251,14 +411,51 @@ export function ProjectsOverview() {
                 </h1>
             </PageHeader>
 
-            <TableToolbar
-                items={filters}
-                active={activeFilter}
-                onChange={setActiveFilter}
-                actions={toolbarActions}
-            />
+            {clioTabsAvailable ? (
+                <TableToolbar
+                    items={mattersTabs}
+                    active={activeTab}
+                    onChange={selectTab}
+                    actions={
+                        <>
+                            {isClioTab
+                                ? statusFilterControl
+                                : workspaceFilterButtons}
+                            {!isClioTab && toolbarActions}
+                        </>
+                    }
+                />
+            ) : (
+                <TableToolbar
+                    items={filters}
+                    active={activeFilter}
+                    onChange={setActiveFilter}
+                    actions={toolbarActions}
+                />
+            )}
 
-            {/* Table */}
+            {clioState === "disconnected" && (
+                <p className="shrink-0 border-b border-gray-100 bg-gray-50/60 px-4 py-2 text-xs text-gray-500 md:px-10">
+                    <span className="font-medium text-gray-700">
+                        Clio not connected.
+                    </span>{" "}
+                    Showing your JessicaOS workspaces. Connect Clio in Account →
+                    Connectors to see your firm&rsquo;s matters here.
+                </p>
+            )}
+
+            {isClioTab ? (
+                <ClioMattersTable
+                    tab={activeTab}
+                    query={debouncedQuery}
+                    status={statusFilter}
+                    // A 401 from Clio means the connection needs re-authorising:
+                    // fold to Workspaces and show the Frame C banner, which
+                    // carries the route back to Account → Connectors.
+                    onReconnectNeeded={handleReconnectNeeded}
+                />
+            ) : (
+            /* Table */
             <TableScrollArea>
                 {/* Column headers */}
                 <TableHeaderRow>
@@ -391,6 +588,14 @@ export function ProjectsOverview() {
                                                           project.id,
                                                       );
                                                   }}
+                                                  onLinkClioMatter={
+                                                      clioConnected
+                                                          ? () =>
+                                                                setLinkingProject(
+                                                                    project,
+                                                                )
+                                                          : undefined
+                                                  }
                                                   onDelete={async () => {
                                                       await deleteProject(
                                                           project.id,
@@ -498,6 +703,14 @@ export function ProjectsOverview() {
                                                 );
                                                 setCmEditingId(project.id);
                                             }}
+                                            onLinkClioMatter={
+                                                clioConnected
+                                                    ? () =>
+                                                          setLinkingProject(
+                                                              project,
+                                                          )
+                                                    : undefined
+                                            }
                                             onDelete={async () => {
                                                 await deleteProject(project.id);
                                                 setProjects((prev) =>
@@ -516,14 +729,26 @@ export function ProjectsOverview() {
                     </TableBody>
                 )}
             </TableScrollArea>
+            )}
 
             <NewProjectModal
                 open={modalOpen}
                 onClose={() => setModalOpen(false)}
                 onCreated={(p) => {
                     setProjects((prev) => [p, ...prev]);
+                    // A workspace created from a Clio tab would otherwise land
+                    // in a list the user cannot see — move them to Workspaces
+                    // so the thing they just made is where they come back to.
+                    if (isClioTab) selectTab("workspaces");
                     router.push(`/projects/${p.id}`);
                 }}
+            />
+
+            <LinkClioMatterModal
+                open={linkingProject !== null}
+                projectId={linkingProject?.id ?? null}
+                projectName={linkingProject?.name ?? null}
+                onClose={() => setLinkingProject(null)}
             />
 
             <OwnerOnlyModal

@@ -7,6 +7,132 @@
 
 ---
 
+## 2026-08-07 — Practice Management frontend: Clio-backed Matters tabs + matter detail (branch `pm-frontend`)
+
+**Scope:** Task 3 of `docs/superpowers/plans/2026-08-07-practice-management.md`
+— the frontend half of the Clio-backed Matters surface
+(`docs/PRACTICE_MANAGEMENT_SPEC.md`), built to the owner-approved mock-up frames
+A/B/C. Consumes the `/clio-matters` routes merged in #81; no backend change.
+
+**Key changes:**
+- `frontend/src/app/lib/mikeApi.ts`: nine methods + the mirrored types for
+  `/clio-matters` (list, detail, contacts, activities, activity update/delete,
+  create-workspace, link, unlink). `getClioStatus` gained an optional
+  `AbortSignal` so the connected-state probe can be time-boxed.
+- `frontend/src/app/lib/clioMatters.ts` (new, self-contained per the 22/07
+  architectural rule): `timeBoxed` (aborts *and* races a 20s deadline, so a
+  callee that ignores its signal still cannot hang the UI), `isAbort`, en-GB
+  date/money/hours formatting, and the remembered-tab localStorage helpers.
+- Matters page (`components/projects/ProjectsOverview.tsx`, Frame A): three tabs
+  — **My matters** (default when Clio is connected) / **All matters** /
+  **Workspaces** (today's list, unchanged, and the fallback everywhere else).
+  Tab choice is remembered in `localStorage`; the effective tab is *derived*
+  from the stored preference + connection state rather than written back from an
+  effect. Search is debounced 350ms before it becomes a Clio `query`; a status
+  filter (open/pending/closed, defaulting to **any**) sits beside the tabs.
+- `components/projects/ClioMattersTable.tsx` (new): the live list — matter
+  number + description, client, responsible/originating solicitor, practice
+  area, status chip, opened date. Honest counts from `capped`/`totalEntries`
+  ("Showing 200 of 1,920 …"), no pagination UI, and a monotonic sequence guard
+  so a slow earlier request cannot overwrite a newer one.
+- `(pages)/matters/[clioId]/page.tsx` + `components/matters/ClioMatterDetail.tsx`
+  (new, Frame B): overview + custom fields, key people, financials, time entries
+  and the workspace section. `components/matters/EditTimeEntryModal.tsx` edits a
+  solicitor's own unbilled entries (duration collected in **minutes**, ETag sent
+  for concurrency; a **412** — the entry moved in Clio — renders its fixed
+  detail plus a "Reload time entries" affordance, as does a 409 on a billed
+  entry, while a 400 shows the message and KEEPS the edit).
+- `components/projects/LinkClioMatterModal.tsx` (new): links an existing
+  workspace to a matter, reached from the workspace row menu (owner-only, and
+  only when Clio is connected). `RowActions` gained an additive
+  `onLinkClioMatter` item.
+- `AppSidebar`: the Matters nav item now also lights up on `/matters/…`.
+
+**Honesty rules encoded in the UI (the review lens for this surface):**
+`quantityRedacted` is the ONLY thing that renders "Hidden by your Clio
+permissions"; `amountsUnavailable` renders an em dash, because a null price can
+equally mean a rate-less entry; a hidden figure is never £0. Billed entries show
+"Billed — locked" with no edit/delete affordance (the server refuses them too).
+The outstanding balance is labelled "(across this client's matters)" because
+Clio has no per-matter figure. Every load is time-boxed with an error+retry
+state — no unbounded spinners (21/07 lesson) — and the Workspaces tab stays
+usable when Clio is down, per Frame C.
+
+**Contract gaps found against the merged backend (worked around, not papered
+over):**
+1. The profile carries no `clioConnections`; connected state is read from
+   `GET /clio/status` (`manage.connected`). A *definite* "not connected" folds
+   the page to Workspaces with the Frame C pointer to Account → Connectors and
+   the Clio tabs **absent, not disabled** (the WS8 pattern); a *failed* status
+   call leaves them reachable, since the list has its own error+retry.
+2. There is no create-activity route, so **Record time** hands off to the
+   assistant's Clio tool (confirmation-first, undoable) via the existing WS7
+   `assistantPrefill` seam, prefilled with the matter. No placeholder tokens in
+   the prefill (22/07 lesson).
+3. `getLinkForProject` is exported by the seam but not routed, so the Workspaces
+   tab cannot pre-mark already-linked workspaces; the link modal surfaces the
+   server's distinct 409 verbatim instead.
+4. A detail response's `link: null` means both "no link" and "links table not
+   migrated" — the "Start workspace" 409 (`Linking a workspace to a Clio matter
+   is not available yet.`) is what tells the user which, and it is shown as-is.
+
+**Review round (1 blocker + 6 should-fixes + 9 nits, all applied):**
+- **The blocker was a real defect.** `timeBoxed` rejected its own deadline with
+  `DOMException(…, "AbortError")`, and every caller opens its catch with
+  `if (isAbort(err)) return;` — so a timeout was *silently swallowed*, leaving a
+  permanent skeleton with no retry, and `clioState` stuck on "loading" (which
+  also hid the link action). A deadline is a failure, not a caller walking away.
+  Fixed with a distinct `ClioTimeoutError`; `isAbort` now excludes it, and a
+  belt in the catch re-labels the case where a signal-honouring callee's own
+  AbortError wins the race while the caller has *not* aborted. Verified by a
+  dependency-free runtime check (7/7: timeout → `ClioTimeoutError`, not an
+  abort, user-safe message; callee-AbortError-on-deadline still a timeout;
+  genuine caller abort still swallowed; happy path intact).
+- **Honesty fix (S3):** unbilled *amount* and *hours* are separately redactable
+  in Clio, but the hours were nested inside the amount branch — a hidden amount
+  swallowed the statement that the hours were hidden too. They are now
+  independent rows. This is precisely the class of omission the surface exists
+  to prevent.
+- **S1:** only a 409/412 offers "Reload time entries"; a 400 is a validation
+  complaint, so its detail is shown and **the user's edit is kept** rather than
+  discarded. Related nit: the PATCH now sends only the fields that changed, and
+  Save is disabled when nothing has.
+- **S2:** the link payload carries no ownership signal, so Unlink renders for
+  non-owners and the 403 is the first they learn of it — the refusal now appears
+  *inside the Workspace card* beside the button pressed, not at the top of the
+  page. (An `isOwner` flag on the link payload is queued for Task 4.)
+- **S4 — real client data in a public repo:** a docstring example used a live
+  client matter. Replaced with a plainly fictitious one and the whole diff
+  grepped for the other real matter numbers/names; no further instances.
+- **S5:** a 401 from the list now reaches `onReconnectNeeded`, so the Frame C
+  reconnect banner actually appears. **S6:** the contacts effect gained the same
+  monotonic sequence guard as its two siblings.
+- **Nits:** money at 2dp throughout; the remembered tab read via
+  `useSyncExternalStore` with a null server snapshot (a `useState` initialiser
+  renders one tab on the server and hydrates another); an own entry whose
+  duration Clio redacts gets no Edit affordance (the form has nothing truthful
+  to prefill); `aria-pressed` + action-oriented labels on the Mine/Everyone
+  toggle; the short date carries the year once the entry is from another one;
+  creating a workspace from a Clio tab switches to Workspaces so the result is
+  visible; and the **412 prose was simply wrong** — the server returns 412
+  (only a malformed etag is a 400), corrected here, in the PR body and in the
+  `mikeApi` comment.
+
+**Verification:** `npx tsc --noEmit` clean; `npm run lint` at exact baseline
+parity (112 problems / 34 errors / 78 warnings before and after — every finding
+pre-exists on `main`, none in a new file); `npm run build` succeeds with
+`/matters/[clioId]` registered as a dynamic route. Frontend files kept at
+4-space indent and never run through `prettier --write` (28/07 lesson).
+In-browser QA against the live pilot tenant is the owner's step — numbered in
+the PR body.
+
+**Gap recorded:** the frontend has **no test framework** (vitest is backend-only,
+757 tests). The blocker's timeout path was therefore verified by a scripted
+runtime check rather than a committed test. Standing up frontend vitest is worth
+a decision — this train is the second to want it.
+
+---
+
 ## 2026-08-07 — Practice Management backend: Clio-backed Matters seam + routes (branch `pm-backend`)
 
 **Scope:** Task 2 of `docs/superpowers/plans/2026-08-07-practice-management.md`

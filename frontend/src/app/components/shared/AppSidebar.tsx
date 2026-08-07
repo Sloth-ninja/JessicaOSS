@@ -157,7 +157,10 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
             href === "/assistant"
                 ? pathname === href
                 : href === "/projects"
-                  ? pathname === href
+                  ? // Clio-backed matter detail pages live at /matters/:clioId
+                    // but belong to this nav item — the Matters page is their
+                    // parent. Sub-routes of /projects keep their own headers.
+                    pathname === href || pathname.startsWith("/matters/")
                   : pathname === href || pathname.startsWith(href + "/");
         return (
             <div key={href} className="py-0.5 px-2.5">
