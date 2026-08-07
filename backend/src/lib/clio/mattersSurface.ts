@@ -214,6 +214,14 @@ export interface MatterWorkspaceLink {
   clioMatterId: string;
   clioDisplayNumber: string | null;
   createdAt: string | null;
+  /**
+   * Whether the CALLER owns the linked workspace — only an owner may unlink it
+   * (the server enforces that with a 403). Carried on the payload so the UI can
+   * withhold the affordance instead of letting a colleague press Unlink and
+   * discover the refusal afterwards. Derived from the same `checkProjectAccess`
+   * result that authorised the read, so it can never disagree with it.
+   */
+  isOwner: boolean;
 }
 
 export type LinkFailure =
@@ -969,13 +977,18 @@ interface LinkRow {
 const LINK_COLUMNS =
   "project_id, clio_matter_id, clio_display_number, created_by, created_at";
 
-function toLink(row: LinkRow, projectName: string | null): MatterWorkspaceLink {
+function toLink(
+  row: LinkRow,
+  projectName: string | null,
+  isOwner: boolean,
+): MatterWorkspaceLink {
   return {
     projectId: row.project_id,
     projectName,
     clioMatterId: row.clio_matter_id,
     clioDisplayNumber: row.clio_display_number,
     createdAt: row.created_at,
+    isOwner,
   };
 }
 
@@ -1053,7 +1066,11 @@ async function findAccessibleLink(
       userOrgId,
     );
     if (!access.ok) continue;
-    return toLink(row, await loadProjectName(db, row.project_id));
+    return toLink(
+      row,
+      await loadProjectName(db, row.project_id),
+      access.isOwner,
+    );
   }
   return null;
 }
@@ -1123,7 +1140,7 @@ export async function getLinkForProject(
     userOrgId,
   );
   if (!access.ok) return null;
-  return toLink(rows[0], await loadProjectName(db, projectId));
+  return toLink(rows[0], await loadProjectName(db, projectId), access.isOwner);
 }
 
 async function insertLink(
@@ -1206,7 +1223,8 @@ export async function linkWorkspace(
     organisationId: userOrgId,
   });
   if (row === "unsupported" || row === "workspace_already_linked") return row;
-  return toLink(row, await loadProjectName(db, input.projectId));
+  // Owner-only by construction: linking is refused above for anyone else.
+  return toLink(row, await loadProjectName(db, input.projectId), true);
 }
 
 /** Remove a link. Owner-only, mirroring linkWorkspace. */
@@ -1333,5 +1351,6 @@ export async function createWorkspaceForMatter(
     }
     return row;
   }
-  return { link: toLink(row, name), projectId, projectName: name };
+  // The workspace was just created for this caller, so they own it.
+  return { link: toLink(row, name, true), projectId, projectName: name };
 }

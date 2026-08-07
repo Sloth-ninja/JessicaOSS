@@ -346,9 +346,10 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
             setWorkspaceBusy(false);
         } catch (err) {
             setWorkspaceBusy(false);
-            // Includes the owner-only 403: the link payload carries no
-            // ownership signal, so a non-owner only learns here. Shown inside
-            // the Workspace card, next to the button they pressed.
+            // The payload now carries `isOwner`, so the owner-only 403 should
+            // be unreachable from the UI — it stays handled as the belt for a
+            // stale payload (ownership changed under an open page). Shown
+            // inside the Workspace card, next to the button they pressed.
             setWorkspaceError(
                 err instanceof MikeApiError && err.message
                     ? err.message
@@ -629,16 +630,26 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
                                                 >
                                                     Open workspace
                                                 </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() =>
-                                                        setConfirmUnlink(true)
-                                                    }
-                                                    disabled={workspaceBusy}
-                                                    className="text-xs font-medium text-gray-500 underline underline-offset-2 transition-colors hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-45"
-                                                >
-                                                    Unlink
-                                                </button>
+                                                {/* Only the workspace's owner
+                                                    may unlink it; the server
+                                                    refuses anyone else with a
+                                                    403. Withhold the button
+                                                    rather than offer an action
+                                                    that can only fail. */}
+                                                {link.isOwner && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            setConfirmUnlink(
+                                                                true,
+                                                            )
+                                                        }
+                                                        disabled={workspaceBusy}
+                                                        className="text-xs font-medium text-gray-500 underline underline-offset-2 transition-colors hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-45"
+                                                    >
+                                                        Unlink
+                                                    </button>
+                                                )}
                                             </div>
                                         </div>
                                     ) : matter.linksUnavailable ? (

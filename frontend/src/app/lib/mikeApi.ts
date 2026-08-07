@@ -2111,6 +2111,10 @@ export interface ClioWorkspaceLink {
     clioMatterId: string;
     clioDisplayNumber: string | null;
     createdAt: string | null;
+    /** Whether the CALLER owns the linked workspace. Only an owner may unlink
+     *  it (the server answers 403 otherwise), so the affordance is withheld
+     *  rather than offered-then-refused. */
+    isOwner: boolean;
 }
 
 export interface ClioMatterDetail extends ClioMatterRow {

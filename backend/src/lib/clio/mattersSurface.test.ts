@@ -966,6 +966,7 @@ describe("getLinkForMatter", () => {
       projectName: "0001-0007 — Acme Ltd",
       clioMatterId: "7",
       clioDisplayNumber: "0001-0007",
+      isOwner: true,
     });
   });
 
@@ -1045,11 +1046,16 @@ describe("getLinkForMatter", () => {
         projects: [{ id: colleagueLink.project_id, name: "Theirs" }],
       },
     });
-    grantAccess();
+    // A colleague's firm-visible workspace: readable, but NOT the caller's to
+    // unlink — the flag is what stops the UI offering that.
+    grantAccess(false);
 
     const link = await getLinkForMatter(asDb(db), "user-1", "u@test", "7");
 
-    expect(link).toMatchObject({ projectId: colleagueLink.project_id });
+    expect(link).toMatchObject({
+      projectId: colleagueLink.project_id,
+      isOwner: false,
+    });
   });
 });
 
@@ -1070,8 +1076,32 @@ describe("getLinkForProject", () => {
       PROJECT_ID,
     );
 
-    expect(link?.clioMatterId).toBe("7");
+    expect(link).toMatchObject({ clioMatterId: "7", isOwner: true });
   });
+
+  it.each([true, false])(
+    "reports the caller's ownership of the workspace (isOwner=%s)",
+    async (isOwner) => {
+      // Taken from the very access result that authorised the read, so the flag
+      // cannot disagree with what the server will enforce on unlink.
+      const db = await connectedDb({
+        rows: {
+          matter_workspace_links: [LINK_ROW],
+          projects: [{ id: PROJECT_ID, name: "Mine" }],
+        },
+      });
+      grantAccess(isOwner);
+
+      const link = await getLinkForProject(
+        asDb(db),
+        "user-1",
+        "u@test",
+        PROJECT_ID,
+      );
+
+      expect(link?.isOwner).toBe(isOwner);
+    },
+  );
 
   it("returns null for a non-uuid id without querying Postgres", async () => {
     const db = await connectedDb({
