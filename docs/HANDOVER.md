@@ -35,6 +35,13 @@ the **Review templates train (#74-#78, code-complete, NOT yet deployed)**. The
 Matters-page incident is resolved (migration `20260728_02` had never actually
 applied; re-run + diagnostic-verified 05/08 — see the DURABLE_LESSONS entry).
 
+> **SHIPPED 06/08/2026:** the checklist below completed — backend Fly v21 +
+> frontend Worker deployed; migration `20260804_01` run and verified by a
+> separate `information_schema` check (owner-pasted outputs); owner QA
+> passed (share-to-firm seen by the second account). See BUILD_LOG
+> 2026-08-06. Current work: Practice Management surface (spec approved
+> 06/08, in build). Kept for the record:
+
 **To ship the templates train (in order):**
 1. Deploy backend (`fly deploy` from `backend/` — owner runs it or grants the
    permission) and frontend (`npm run deploy` from `frontend/`).
