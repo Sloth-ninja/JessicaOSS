@@ -143,7 +143,23 @@ app.use(
   }),
 );
 
-app.use(generalLimiter);
+// Everything EXCEPT /clio-matters, which runs its own per-user bucket inside
+// its router (routes/clioMatters.ts). Leaving both in place would defeat that
+// bucket entirely: this one is keyed by IP, the pilot firm NATs its whole
+// office through a single address, and 300 requests per 15 minutes is the
+// SHARED office total — so the IP bucket, not the per-user one, would be the
+// binding constraint the moment two solicitors browsed matters at once, and
+// exhausting it would degrade every other route for their colleagues too.
+// Exact-segment match, never a bare prefix: `/clio-matters-anything` must not
+// slip through the exemption.
+const GENERAL_LIMITER_EXEMPT_PREFIX = "/clio-matters";
+app.use((req, res, next) => {
+  const path = req.path;
+  const exempt =
+    path === GENERAL_LIMITER_EXEMPT_PREFIX ||
+    path.startsWith(`${GENERAL_LIMITER_EXEMPT_PREFIX}/`);
+  return exempt ? next() : generalLimiter(req, res, next);
+});
 
 app.post("/chat", chatLimiter);
 app.post("/projects/:projectId/chat", chatLimiter);
@@ -196,10 +212,10 @@ app.use("/land-registry", landRegistryRouter);
 app.use("/clio", clioManageRouter);
 app.use("/clio-grow", clioGrowRouter);
 // Practice Management surface (Clio-backed Matters) — live reads only. Its rate
-// limiter lives INSIDE the router, keyed per user rather than per IP: the pilot
-// firm NATs its office through one address, so an IP-keyed bucket here would let
-// a few solicitors browsing matters exhaust the shared research allowance
-// (RATE_LIMIT_CLIO_MATTERS_MAX / _WINDOW_MINUTES).
+// limiter lives INSIDE the router, keyed per user rather than per IP, and this
+// prefix is exempted from the app-level general limiter above so that per-user
+// bucket is genuinely the constraint (RATE_LIMIT_CLIO_MATTERS_MAX /
+// _WINDOW_MINUTES).
 app.use("/clio-matters", clioMattersRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));

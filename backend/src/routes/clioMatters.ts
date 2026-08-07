@@ -46,11 +46,16 @@ export const clioMattersRouter = Router();
 //
 // This bucket is keyed PER USER, not per IP, and therefore lives here rather
 // than alongside the other limiters in index.ts: an app-level limiter runs
-// before any route's auth, so `res.locals.userId` is not populated yet. The
-// distinction matters commercially — the pilot firm NATs its whole office
-// through one IP, so an IP-keyed bucket would let three solicitors browsing
-// matters exhaust the shared research allowance and take /companies and
-// /legislation down for everyone. IP is kept only as the pre-auth fallback.
+// before any route's auth, so `res.locals.userId` is not populated yet.
+//
+// The distinction matters commercially — the pilot firm NATs its whole office
+// through one address, so an IP-keyed bucket counts the whole office as one
+// caller. `/clio-matters` is therefore EXEMPTED from the app-level general
+// limiter in index.ts; without that exemption the shared 300-per-15-minutes IP
+// allowance would still bind first, and a couple of solicitors browsing matters
+// would degrade every other route for their colleagues. IP is kept here only as
+// the pre-auth fallback (a request that somehow reaches the limiter before auth
+// has populated `res.locals.userId`).
 //
 // Clio's own 50 req/min per-user token budget is the real constraint; this only
 // stops a runaway client burning it.
