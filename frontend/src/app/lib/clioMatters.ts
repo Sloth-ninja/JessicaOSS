@@ -134,24 +134,40 @@ export function toDateInputValue(value: string | null | undefined): string {
     return parsed.toISOString().slice(0, 10);
 }
 
-/** Money in the matter's own currency (Clio reports the code; GBP by default). */
+/**
+ * Money in the matter's OWN currency, as Clio reports it.
+ *
+ * When Clio reports no currency code the amount is rendered bare — never
+ * defaulted to sterling. A guessed "£" on a matter billed in euros is a wrong
+ * figure on a legal bill, and this fork's standing honesty rule is that a value
+ * we cannot substantiate is not dressed up as one we can (the same rule the
+ * redaction flags encode: a hidden amount is not £0).
+ */
 export function formatMoney(
     amount: number | null | undefined,
     currencyCode: string | null | undefined,
 ): string {
     if (amount === null || amount === undefined) return "—";
+    // Money always carries its pence: 1,240.00, never 1,240 next to 1,240.50 in
+    // the same column.
+    const bare = () =>
+        amount.toLocaleString("en-GB", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+        });
+    const code = currencyCode?.trim();
+    if (!code) return bare();
     try {
         return new Intl.NumberFormat("en-GB", {
             style: "currency",
-            currency: currencyCode || "GBP",
-            // Money always carries its pence: £1,240.00, never £1,240 next to
-            // £1,240.50 in the same column.
+            currency: code,
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,
         }).format(amount);
     } catch {
-        // An unexpected currency code must not take the page down.
-        return `${amount.toLocaleString("en-GB")}`;
+        // An unrecognised code must not take the page down — and must not
+        // silently become sterling either.
+        return bare();
     }
 }
 
