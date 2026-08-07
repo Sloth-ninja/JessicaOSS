@@ -19,6 +19,9 @@ import {
   listRelatedContacts,
   unlinkWorkspace,
   updateActivity,
+  // Shared with the seam so the route and the query it guards can never
+  // disagree about what a workspace id looks like.
+  UUID_RE,
 } from "../lib/clio/mattersSurface";
 
 /**
@@ -96,11 +99,6 @@ const clioMattersLimiter = rateLimit({
 // This covers EVERY route below (including any added later) — the individual
 // handlers therefore do not repeat `requireAuth`.
 clioMattersRouter.use(requireAuth, clioMattersLimiter);
-
-// Workspace ids are uuids; a malformed one 404s here rather than reaching
-// Postgres, where it would raise 22P02 and surface as a generic 500.
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const WORKSPACE_NOT_FOUND_DETAIL = "Workspace not found.";
 const LINKS_UNAVAILABLE_DETAIL =

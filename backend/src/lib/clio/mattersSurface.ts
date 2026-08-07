@@ -331,15 +331,23 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 /**
+ * Workspace (project) ids are uuids — guarded before they reach Postgres, where
+ * a malformed one raises 22P02 and surfaces as a generic 500 instead of the
+ * "not found" it actually means.
+ *
+ * Exported because the routes need the identical guard: two copies of a
+ * validation regex drift, and the one that drifts is the one that stops
+ * guarding.
+ */
+export const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
  * Clio matter/activity ids are numeric. Validated before they reach a request
  * path so a malformed id fails fast with a fixed message rather than becoming a
  * 404 round-trip (and never becomes path structure — see the parse-not-prefix
  * rule, DURABLE_LESSONS 2026-07-28).
  */
-/** Workspace (project) ids are uuids — guarded before they reach Postgres. */
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 export function isClioId(value: unknown): value is string {
   return typeof value === "string" && /^[0-9]{1,20}$/.test(value);
 }
