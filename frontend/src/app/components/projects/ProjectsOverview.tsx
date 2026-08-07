@@ -155,13 +155,44 @@ export function ProjectsOverview() {
         return () => controller.abort();
     }, [authLoading, isAuthenticated, user?.id]);
 
+    // ── The three clioState gates ────────────────────────────────────────────
+    //
+    // These are deliberately asymmetric, and the asymmetry is the design, not an
+    // oversight (the 2026-07-27 rule: the safe default depends on what the
+    // operation does). `clioState` has four values, and "unknown" — the status
+    // call failed — is the one that separates them:
+    //
+    //   1. clioConnected (=== "connected") gates the WRITE affordance, "Link to
+    //      a Clio matter". Fail CLOSED: only a confirmed connection earns it,
+    //      because offering a link action we cannot honour ends in a refusal
+    //      the user cannot act on.
+    //   2. clioTabsAvailable (!== "disconnected") gates the READ tabs. Fail
+    //      OPEN: only a DEFINITE "not connected" folds the page back to
+    //      Workspaces, so a failed status call still lets a solicitor try their
+    //      matters — the list has its own error+retry state, whereas hiding the
+    //      tabs would strand them with no route back.
+    //   3. The banner (=== "disconnected") is the narrowest of the three: it
+    //      makes a positive claim about the user's account, so it appears only
+    //      when we actually know, never on "unknown".
+    //
+    // Absent rather than disabled throughout, per the WS8 pattern.
     const clioConnected = clioState === "connected";
-    // A definite "not connected" folds the page back to Workspaces — the
-    // Clio tabs are then absent rather than disabled (the WS8 pattern).
     const clioTabsAvailable = clioState !== "disconnected";
+    // Do not commit to a tab until the Clio status is known. With no stored
+    // preference this used to resolve to Workspaces, render that list, and then
+    // jump to My matters the instant the status landed — a visible flash that
+    // also threw away whatever the user had started reading. A stored
+    // preference is an answer already, so it decides immediately.
+    const tabDecided = tabPref !== null || clioState !== "loading";
     const activeTab: MattersTab =
         tabPref === null
-            ? clioConnected
+            ? // The tab BAR is already optimistic while loading
+              // (clioTabsAvailable stays true until we know otherwise), so the
+              // default matches it rather than contradicting it. A definite
+              // "disconnected" still folds back through the branch below, and
+              // the body renders a skeleton until `tabDecided`, so no wrong
+              // list is ever painted.
+              clioConnected || clioState === "loading"
                 ? "mine"
                 : "workspaces"
             : !clioTabsAvailable && tabPref !== "workspaces"
@@ -452,7 +483,24 @@ export function ProjectsOverview() {
                 </p>
             )}
 
-            {isClioTab ? (
+            {!tabDecided ? (
+                /* Status still unknown: render neither list. Painting one and
+                   swapping it a moment later is the flash this avoids. */
+                <TableScrollArea>
+                    <TableBody>
+                        {[1, 2, 3].map((i) => (
+                            <TableRow key={i} interactive={false}>
+                                <TableStickyCell
+                                    hover={false}
+                                    bgClassName="bg-transparent"
+                                >
+                                    <SkeletonLine className="h-3.5 w-56" />
+                                </TableStickyCell>
+                            </TableRow>
+                        ))}
+                    </TableBody>
+                </TableScrollArea>
+            ) : isClioTab ? (
                 <ClioMattersTable
                     tab={activeTab}
                     query={debouncedQuery}
