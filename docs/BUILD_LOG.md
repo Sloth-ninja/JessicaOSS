@@ -992,7 +992,8 @@ hand-matched to each file's existing style rather than reformatting wholesale
 ## 2026-08-04 — Clio matter search: status filter + real pagination (branch `clio-matter-search-fix`)
 
 **Scope:** fix the pilot bug found today (screenshot-verified): a solicitor asked
-chat for "open Kyckr matters"; Clio holds 26, but `clio_find_matter` hardcoded
+chat for "open [client name redacted 07/08] matters"; Clio holds 26, but
+`clio_find_matter` hardcoded
 `limit: 10` with no filters or pagination, so the model looped targeted searches
 for minutes. Search must resolve in one or two tool calls. Backend only
 (`lib/clio/manageTools.ts` + its tests); no new deps; no migration/`.env`/
