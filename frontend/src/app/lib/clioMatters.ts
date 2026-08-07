@@ -24,11 +24,29 @@ export type MattersTab = ClioMattersTab | "workspaces";
 export const CLIO_LOAD_TIMEOUT_MS = 20_000;
 
 /**
- * Run a fetch with a deadline. The signal handed to `run` is aborted on
- * timeout or when the caller's own signal fires (unmount, tab change), AND the
- * returned promise is raced against the deadline — so a callee that ignores its
- * signal still cannot hold the UI open indefinitely. Both outcomes reject with
- * an AbortError, which `isAbort` recognises.
+ * A load that ran out of time. Deliberately NOT an AbortError: callers discard
+ * genuine aborts silently (the component unmounted, nobody is watching), so a
+ * timeout wearing that name would leave a skeleton on screen for ever with no
+ * way back. This is a real failure and must reach an error+retry state.
+ */
+export class ClioTimeoutError extends Error {
+    constructor(message = "Clio did not respond in time.") {
+        super(message);
+        this.name = "ClioTimeoutError";
+    }
+}
+
+/**
+ * Run a fetch with a deadline. The signal handed to `run` is aborted on timeout
+ * or when the caller's own signal fires (unmount, tab change), AND the returned
+ * promise is raced against the deadline — so a callee that ignores its signal
+ * still cannot hold the UI open indefinitely.
+ *
+ * Two distinct outcomes, and the difference is load-bearing:
+ *   • the CALLER aborted  → rejects with AbortError; `isAbort` is true and the
+ *     caller returns without touching state.
+ *   • the DEADLINE passed → rejects with `ClioTimeoutError`; `isAbort` is false
+ *     and the caller falls through to its error+retry branch.
  */
 export async function timeBoxed<T>(
     run: (signal: AbortSignal) => Promise<T>,
@@ -38,23 +56,41 @@ export async function timeBoxed<T>(
     const controller = new AbortController();
     const onOuterAbort = () => controller.abort();
     outerSignal?.addEventListener("abort", onOuterAbort);
+    let timedOut = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
+            timedOut = true;
             controller.abort();
-            reject(new DOMException("Timed out", "AbortError"));
+            reject(new ClioTimeoutError());
         }, timeoutMs);
     });
     try {
         return await Promise.race([run(controller.signal), deadline]);
+    } catch (err) {
+        // Belt: a well-behaved callee rejects with its own AbortError the
+        // instant we abort it, which can win the race against the line above.
+        // If the caller did not ask for this, it was the deadline.
+        if (
+            isAbort(err) &&
+            (timedOut || controller.signal.aborted) &&
+            !outerSignal?.aborted
+        ) {
+            throw new ClioTimeoutError();
+        }
+        throw err;
     } finally {
         clearTimeout(timer);
         outerSignal?.removeEventListener("abort", onOuterAbort);
     }
 }
 
-/** True when a rejection is an abort (unmount, tab change, or our deadline). */
+/**
+ * True when a rejection is a genuine abort — the caller walked away, so there
+ * is nobody to show an error to. A timeout is NOT one of these.
+ */
 export function isAbort(err: unknown): boolean {
+    if (err instanceof ClioTimeoutError) return false;
     return (
         (err instanceof DOMException && err.name === "AbortError") ||
         (err instanceof Error && err.name === "AbortError")
@@ -72,17 +108,22 @@ export function formatUkDate(value: string | null | undefined): string {
         : parsed.toLocaleDateString("en-GB", { timeZone: "UTC" });
 }
 
-/** ISO date → DD/MM, for the dense time-entry list. */
+/**
+ * ISO date → DD/MM for the dense time-entry list, but DD/MM/YYYY once the entry
+ * is from another year — a bare "04/08" on a two-year-old entry reads as recent.
+ */
 export function formatUkDayMonth(value: string | null | undefined): string {
     if (!value) return "—";
     const parsed = new Date(value);
-    return Number.isNaN(parsed.getTime())
-        ? "—"
-        : parsed.toLocaleDateString("en-GB", {
-              timeZone: "UTC",
-              day: "2-digit",
-              month: "2-digit",
-          });
+    if (Number.isNaN(parsed.getTime())) return "—";
+    const sameYear =
+        parsed.getUTCFullYear() === new Date().getUTCFullYear();
+    return parsed.toLocaleDateString("en-GB", {
+        timeZone: "UTC",
+        day: "2-digit",
+        month: "2-digit",
+        ...(sameYear ? {} : { year: "numeric" }),
+    });
 }
 
 /** ISO date → `YYYY-MM-DD` for a date input; empty when unparseable. */
@@ -103,7 +144,9 @@ export function formatMoney(
         return new Intl.NumberFormat("en-GB", {
             style: "currency",
             currency: currencyCode || "GBP",
-            minimumFractionDigits: 0,
+            // Money always carries its pence: £1,240.00, never £1,240 next to
+            // £1,240.50 in the same column.
+            minimumFractionDigits: 2,
             maximumFractionDigits: 2,
         }).format(amount);
     } catch {
@@ -132,7 +175,7 @@ export function formatStatus(status: string | null | undefined): string | null {
     return cleaned.charAt(0).toUpperCase() + cleaned.slice(1).toLowerCase();
 }
 
-/** `04260-Koza — Koza Limited & general advice`, degrading honestly. */
+/** `00123-Example — Example Ltd & general advice`, degrading honestly. */
 export function matterLabel(matter: {
     displayNumber: string | null;
     description: string | null;
@@ -148,7 +191,18 @@ export function matterLabel(matter: {
 const TAB_KEY = "jessica.mattersTab";
 const TABS: MattersTab[] = ["mine", "all", "workspaces"];
 
-/** The last tab this browser used, or null when there is no usable preference. */
+// Local subscribers, so a write in this tab re-renders the page that reads it.
+const tabListeners = new Set<() => void>();
+
+/**
+ * The last tab this browser used, or null when there is no usable preference.
+ *
+ * Read through `useSyncExternalStore(subscribeToMattersTab,
+ * readStoredMattersTab, () => null)` rather than a `useState` initialiser: the
+ * server render has no localStorage, so a lazy initialiser would hydrate a
+ * different tab than it rendered. The `() => null` server snapshot makes the
+ * first paint deterministic and the stored value arrives on hydration.
+ */
 export function readStoredMattersTab(): MattersTab | null {
     if (typeof window === "undefined") return null;
     try {
@@ -160,6 +214,20 @@ export function readStoredMattersTab(): MattersTab | null {
     }
 }
 
+/** Subscribe to tab changes — this tab's own writes and other tabs' `storage`. */
+export function subscribeToMattersTab(onChange: () => void): () => void {
+    tabListeners.add(onChange);
+    if (typeof window !== "undefined") {
+        window.addEventListener("storage", onChange);
+    }
+    return () => {
+        tabListeners.delete(onChange);
+        if (typeof window !== "undefined") {
+            window.removeEventListener("storage", onChange);
+        }
+    };
+}
+
 export function storeMattersTab(tab: MattersTab): void {
     if (typeof window === "undefined") return;
     try {
@@ -167,4 +235,6 @@ export function storeMattersTab(tab: MattersTab): void {
     } catch {
         // Not remembering the tab is a fair degrade; never break the page.
     }
+    // `storage` does not fire in the tab that wrote it — notify locally.
+    tabListeners.forEach((listener) => listener());
 }
