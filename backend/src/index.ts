@@ -19,6 +19,7 @@ import { citationsRouter } from "./routes/citations";
 import { legislationRouter } from "./routes/legislation";
 import { landRegistryRouter } from "./routes/landRegistry";
 import { clioManageRouter, clioGrowRouter } from "./routes/clio";
+import { clioMattersRouter } from "./routes/clioMatters";
 import { runDeletionPurge } from "./lib/deletionGovernance";
 
 const app = express();
@@ -167,6 +168,10 @@ app.delete("/user/tabular-reviews", dataDeleteLimiter);
 app.use("/companies", researchLimiter);
 app.use("/legislation", researchLimiter);
 app.use("/land-registry", researchLimiter);
+// Practice Management: each view is one or two live Clio reads, and Clio's own
+// 50 req/min per-user budget is the real constraint — this bucket only stops a
+// runaway client burning it.
+app.use("/clio-matters", researchLimiter);
 app.post("/citations/check", citationsLimiter);
 
 app.use((req, res, next) =>
@@ -194,6 +199,8 @@ app.use("/land-registry", landRegistryRouter);
 // therefore equal the exact registered redirect URIs).
 app.use("/clio", clioManageRouter);
 app.use("/clio-grow", clioGrowRouter);
+// Practice Management surface (Clio-backed Matters) — live reads only.
+app.use("/clio-matters", clioMattersRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 

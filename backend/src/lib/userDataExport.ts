@@ -189,6 +189,7 @@ export async function buildUserAccountExport(
         tabularReviews,
         companySearchSaves,
         clioConnections,
+        matterWorkspaceLinks,
         sharedProjects,
         sharedTabularReviews,
     ] = await Promise.all([
@@ -244,6 +245,20 @@ export async function buildUserAccountExport(
         // material). Tolerant of an unmigrated DB: a missing table yields an
         // empty section, never a failed export (migration 20260803_01).
         getClioConnectionMetadata(db, userId),
+        // The Clio matter↔workspace links the user created — the id/display
+        // number pair is the ONLY Clio matter artefact JessicaOS stores, so the
+        // right of access must reach it. Tolerant of an unmigrated DB: a
+        // missing table yields an empty section (migration 20260807_01).
+        selectAll(
+            db,
+            "matter_workspace_links",
+            (query) =>
+                query
+                    .eq("created_by", userId)
+                    .order("created_at", { ascending: true }),
+            "*",
+            { tolerateMissing: true },
+        ),
         userEmail
             ? selectAll(db, "projects", (query) =>
                   query
@@ -302,6 +317,7 @@ export async function buildUserAccountExport(
         tabular_review_chats: tabularChats,
         company_search_saves: companySearchSaves,
         clio_connections: clioConnections,
+        matter_workspace_links: matterWorkspaceLinks,
         shared_access: {
             projects: sharedProjects,
             tabular_reviews: sharedTabularReviews,

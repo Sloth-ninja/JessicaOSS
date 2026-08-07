@@ -462,6 +462,66 @@ describe("null-body guard on the sibling read tools", () => {
   });
 });
 
+// Both selectors below were docs-verified in the 06/08 spike and the financials
+// one was reproduced live by the owner as a 400 on EVERY call. Clio rejects a
+// whole request when a selector braces a scalar or an association that does not
+// exist, so these tests pin the exact shapes; live probe validation is still
+// pending (spec open questions 2 and 4).
+describe("field selectors (06/08 spike fixes)", () => {
+  function captureUrls() {
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) => {
+        urls.push(String(input));
+        return json({ data: [] });
+      }),
+    );
+    return urls;
+  }
+
+  it("clio_matter_financials asks billable_matters for its OWN fields, not matter{…}", async () => {
+    const db = await connectedDb();
+    const urls = captureUrls();
+
+    await executeClioManageToolCall(
+      "clio_matter_financials",
+      { matter_id: "7" },
+      ctx(db),
+    );
+
+    const billable = new URL(
+      urls.find((u) => u.includes("/billable_matters.json")) ?? "",
+    );
+    expect(billable.searchParams.get("fields")).toBe(
+      "id,display_number,unbilled_amount,unbilled_hours,amount_in_trust,currency_code,client{id,name}",
+    );
+    // The shipped bug: a brace on an association BillableMatter does not have.
+    expect(billable.searchParams.get("fields")).not.toContain("matter{");
+  });
+
+  it("clio_find_contact treats primary_email_address as the SCALAR it is", async () => {
+    const db = await connectedDb();
+    const urls = captureUrls();
+
+    await executeClioManageToolCall(
+      "clio_find_contact",
+      { query: "Jane" },
+      ctx(db),
+    );
+
+    const contacts = new URL(
+      urls.find((u) => u.includes("/contacts.json")) ?? "",
+    );
+    expect(contacts.searchParams.get("fields")).toBe(
+      "id,name,type,primary_email_address,email_addresses{address,primary}",
+    );
+    expect(contacts.searchParams.get("fields")).not.toContain(
+      "primary_email_address{",
+    );
+  });
+});
+
 describe("executor failure logging (error containment)", () => {
   it("logs the original error via [clio/tools] for an internal (Postgrest-shaped) throw", async () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});

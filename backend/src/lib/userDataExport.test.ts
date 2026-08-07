@@ -186,3 +186,51 @@ describe("buildUserAccountExport — clio_connections (SAR completeness)", () =>
     },
   );
 });
+
+const LINK = (matterId: string): Row => ({
+  id: `link-${matterId}`,
+  created_by: "user-1",
+  clio_matter_id: matterId,
+  clio_matter_number: `M-${matterId}`,
+  workspace_type: "project",
+  workspace_id: `workspace-${matterId}`,
+  created_at: "2026-08-07T00:00:00.000Z",
+});
+
+describe("buildUserAccountExport — matter_workspace_links", () => {
+  it("includes the user's matter_workspace_links rows with all columns", async () => {
+    const { db } = makeDb({
+      rows: {
+        matter_workspace_links: [LINK("matter-1"), LINK("matter-2")],
+      },
+    });
+
+    const exported = await buildUserAccountExport(db, "user-1");
+
+    expect(exported.matter_workspace_links).toHaveLength(2);
+    // All columns present — it is the user's data, exported verbatim.
+    expect(exported.matter_workspace_links[0]).toMatchObject({
+      created_by: "user-1",
+      clio_matter_id: "matter-1",
+      clio_matter_number: "M-matter-1",
+      workspace_type: "project",
+      workspace_id: "workspace-matter-1",
+      created_at: "2026-08-07T00:00:00.000Z",
+    });
+  });
+
+  it.each(["42P01", "42703"])(
+    "tolerates a missing table/column (%s) — section is empty, export succeeds",
+    async (code) => {
+      const { db } = makeDb({
+        errorFor: (table) =>
+          table === "matter_workspace_links"
+            ? { code, message: "unmigrated" }
+            : null,
+      });
+
+      const exported = await buildUserAccountExport(db, "user-1");
+      expect(exported.matter_workspace_links).toEqual([]);
+    },
+  );
+});

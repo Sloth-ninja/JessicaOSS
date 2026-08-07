@@ -185,3 +185,70 @@ describe("deleteUserAccountData — company_search_saves", () => {
     );
   });
 });
+
+const LINK = (userId: string, matterId: string): Row => ({
+  id: `${userId}-${matterId}`,
+  created_by: userId,
+  clio_matter_id: matterId,
+  clio_matter_number: `M-${matterId}`,
+  workspace_type: "project",
+  workspace_id: `workspace-${matterId}`,
+  created_at: "2026-08-07T00:00:00.000Z",
+});
+
+describe("deleteUserAccountData — matter_workspace_links", () => {
+  it("deletes the user's matter_workspace_links rows, keyed on created_by", async () => {
+    const { db, store, ops } = makeDb({
+      rows: {
+        matter_workspace_links: [
+          LINK("user-1", "matter-1"),
+          LINK("user-1", "matter-2"),
+          LINK("user-2", "matter-3"),
+        ],
+      },
+    });
+
+    await deleteUserAccountData(db, "user-1");
+
+    // user-1's links gone; user-2's untouched.
+    expect(store.matter_workspace_links).toHaveLength(1);
+    expect(store.matter_workspace_links[0].created_by).toBe("user-2");
+
+    const linksDelete = ops.find(
+      (o) => o.table === "matter_workspace_links" && o.op === "delete",
+    );
+    expect(linksDelete).toBeDefined();
+    expect(linksDelete?.filters).toContainEqual({
+      op: "eq",
+      col: "created_by",
+      val: "user-1",
+    });
+  });
+
+  it.each(["42P01", "42703"])(
+    "tolerates a missing table/column (%s) — account deletion still succeeds",
+    async (code) => {
+      const { db } = makeDb({
+        errorFor: (table, op) =>
+          table === "matter_workspace_links" && op === "delete"
+            ? { code, message: "unmigrated" }
+            : null,
+      });
+
+      await expect(deleteUserAccountData(db, "user-1")).resolves.toBeUndefined();
+    },
+  );
+
+  it("still throws on a non-tolerated error from matter_workspace_links", async () => {
+    const { db } = makeDb({
+      errorFor: (table, op) =>
+        table === "matter_workspace_links" && op === "delete"
+          ? { code: "42501", message: "permission denied" }
+          : null,
+    });
+
+    await expect(deleteUserAccountData(db, "user-1")).rejects.toThrow(
+      /Failed to delete account data/,
+    );
+  });
+});

@@ -336,3 +336,55 @@ describe("refreshClioConnection — rotation", () => {
     expect(updated.tokens.refreshToken).toBe("refresh-1");
   });
 });
+
+// Added for the Practice Management surface: activity updates need If-Match, so
+// clioRequest gained an additive `headers` option. It must never become a way to
+// weaken the fixed auth/version headers.
+describe("clioRequest — caller-supplied headers", () => {
+  it("sends the extra header alongside the fixed ones", async () => {
+    const db = await seed("manage");
+    const calls: RequestInit[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        calls.push(init);
+        return json({ data: { id: 1 } });
+      }),
+    );
+
+    await clioRequest(asDb(db), "user-1", "manage", "/activities/1.json", {
+      method: "PATCH",
+      headers: { "IF-MATCH": "etag-1" },
+      json: { data: { note: "x" } },
+    });
+
+    const headers = calls[0].headers as Record<string, string>;
+    expect(headers["IF-MATCH"]).toBe("etag-1");
+    expect(headers.Authorization).toBe("Bearer access-1");
+  });
+
+  it("cannot override Authorization, Accept or the X-API-VERSION pin", async () => {
+    const db = await seed("manage");
+    const calls: RequestInit[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        calls.push(init);
+        return json({ data: [] });
+      }),
+    );
+
+    await clioRequest(asDb(db), "user-1", "manage", "/matters.json", {
+      headers: {
+        Authorization: "Bearer attacker",
+        Accept: "text/html",
+        "X-API-VERSION": "1.0.0",
+      },
+    });
+
+    const headers = calls[0].headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer access-1");
+    expect(headers.Accept).toBe("application/json");
+    expect(headers["X-API-VERSION"]).not.toBe("1.0.0");
+  });
+});

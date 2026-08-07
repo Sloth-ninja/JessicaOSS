@@ -426,4 +426,18 @@ export async function deleteUserAccountData(
     if (savesResult.error && !isMissingTableOrColumn(savesResult.error)) {
         await throwIfError(savesResult.error, "Failed to delete account data");
     }
+
+    // Clio matter↔workspace links (migration 20260807_01). Links on the user's
+    // OWN workspaces already go with the `projects` delete above (the fk
+    // cascades), so this covers any remaining row they created — the id/number
+    // pair is the only Clio artefact JessicaOS stores, and right-to-erasure
+    // must reach it (the lifecycle gap that recurred across four trains). Same
+    // unmigrated-database tolerance as the company-search saves above.
+    const linksResult = await db
+        .from("matter_workspace_links")
+        .delete()
+        .eq("created_by", userId);
+    if (linksResult.error && !isMissingTableOrColumn(linksResult.error)) {
+        await throwIfError(linksResult.error, "Failed to delete account data");
+    }
 }

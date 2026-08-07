@@ -7,6 +7,71 @@
 
 ---
 
+## 2026-08-07 — Practice Management backend: Clio-backed Matters seam + routes (branch `pm-backend`)
+
+**Scope:** Task 2 of `docs/superpowers/plans/2026-08-07-practice-management.md`
+— the backend half of the Clio-backed Matters surface
+(`docs/PRACTICE_MANAGEMENT_SPEC.md`). Live Clio reads only; the sole stored
+artefact is the `matter_workspace_links` id/number pair (its migration
+`20260807_01` is Task 1 and is NOT in this PR — every links query degrades on
+42P01/42703/PGRST204, so this merges and runs safely ahead of it).
+
+**Key changes:**
+- `backend/src/lib/clio/mattersSurface.ts` (new seam, ~1k lines with rationale):
+  `listMatters` (mine = responsible ∪ originating by stored `clio_user_id`,
+  de-duped, sorted `open_date` desc client-side; all = one
+  `order=open_date(desc)&limit=200` page), `getMatterDetail` (+ financials),
+  `listRelatedContacts`, `listActivities`, `updateActivity` (If-Match),
+  `deleteActivity`, `getLinkForMatter` / `getLinkForProject` / `linkWorkspace` /
+  `unlinkWorkspace` / `createWorkspaceForMatter`. In-memory list cache keyed
+  `${userId}:${tab}:${query}:${status}`, 60s TTL, 200-entry cap, cleared for the
+  caller on every activity write.
+- `backend/src/routes/clioMatters.ts` (new) mounted at `/clio-matters` behind
+  the shared research rate-limit bucket. All requireAuth + asyncHandler; fixed
+  client `detail`s + `safeErrorLog`; uuid guard on workspace ids and a numeric
+  guard on Clio ids. Minutes→seconds conversion happens HERE, once (the seam
+  only ever sees seconds).
+- `clioRequest` gained an additive `headers` option for If-Match. Caller headers
+  are applied BENEATH the fixed ones, so Authorization / Accept / X-API-VERSION
+  can never be overridden (tested both ways).
+- Shipped-tool selector fixes: `clio_matter_financials` now asks
+  `billable_matters` for its own fields (`id,display_number,unbilled_amount,
+  unbilled_hours,amount_in_trust,currency_code,client{id,name}`) — the shipped
+  `matter{…}` brace addressed an association BillableMatter does not have and
+  400'd every live call (owner-reproduced 06/08); `clio_find_contact` now
+  treats `primary_email_address` as the scalar it is. Both are docs-verified
+  from the 06/08 spike; **live probe validation is still pending** and the tool
+  description no longer promises a phone number the spike did not re-verify.
+- Lifecycle: `userDataCleanup` deletes and `userDataExport` exports
+  `matter_workspace_links` rows by `created_by`, both 42P01/42703-tolerant —
+  closing the erasure/SAR gap proactively rather than in a fix wave (the class
+  that recurred across four trains).
+
+**Probe-gated, per the spec's open questions:** (1) ONE 200-row page only, with
+honest `capped` / `hasMore` / `totalEntries` (the merged "mine" tab claims a
+total only when neither page was capped — summing would double-count); (3)
+billed entries are locked AND refused server-side with a fixed 409; (2)/(4) the
+selector fixes ship on docs evidence pending the probe run. No deep paging.
+
+**Confidentiality:** every read uses the caller's own token via
+`loadClioConnection`/`clioRequest` — no firm token, no cross-user path. Link
+lookups are filtered through `checkProjectAccess`, the shared choke point that
+also excludes tombstoned matters, so another member's private (or soft-deleted)
+workspace on the same matter is never surfaced. Redacted money/hours are
+reported as hidden, never as £0.
+
+**Verification:** `npx tsc --noEmit` clean; full `npx vitest run` **836 passed /
+48 files** (baseline 757 → 79 new: 45 seam, 23 route, 7 lifecycle, 2 selector,
+2 client-header). `prettier --check` clean on all new files and on
+`manageTools.ts` (verified prettier-clean at baseline, so reformatted);
+`index.ts` / `userDataExport.ts` / `userDataCleanup.ts` were already
+non-conformant upstream and keep minimal diffs.
+
+**Deferred:** frontend (Task 3), migration + schema.sql (Task 1), live probe
+validation + composed-range review (Task 4).
+
+---
+
 ## 2026-08-06 — Templates train SHIPPED: deploys, migration verified, owner QA (branch `templates-shipped`)
 
 **Scope:** docs-only record of the templates train going live 06/08. Backend

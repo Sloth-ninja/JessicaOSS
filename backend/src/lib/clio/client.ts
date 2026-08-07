@@ -257,6 +257,12 @@ export interface ClioRequestOptions {
   fields?: string;
   /** JSON body (serialised + Content-Type set). */
   json?: unknown;
+  /**
+   * Extra request headers — the optimistic-concurrency `If-Match` on activity
+   * updates is the only current use. Applied BENEATH the fixed headers, so a
+   * caller can never override Authorization / X-API-VERSION / Accept.
+   */
+  headers?: Record<string, string>;
 }
 
 function buildUrl(
@@ -278,8 +284,11 @@ function headersFor(
   product: ClioProduct,
   accessToken: string,
   hasBody: boolean,
+  extra?: Record<string, string>,
 ): Record<string, string> {
   const headers: Record<string, string> = {
+    // Caller-supplied headers go in FIRST so the fixed ones below always win.
+    ...(extra ?? {}),
     Accept: "application/json",
     Authorization: `Bearer ${accessToken}`,
   };
@@ -302,7 +311,7 @@ async function doFetch(
   const hasBody = opts.json !== undefined;
   return fetch(url, {
     method: opts.method ?? "GET",
-    headers: headersFor(product, accessToken, hasBody),
+    headers: headersFor(product, accessToken, hasBody, opts.headers),
     ...(hasBody ? { body: JSON.stringify(opts.json) } : {}),
   });
 }

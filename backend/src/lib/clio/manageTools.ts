@@ -48,6 +48,11 @@ const MATTER_PAGE_SIZE = 100;
 const MATTER_FIELDS = "id,display_number,description,status,client{id,name}";
 const MATTER_STATUSES = new Set(["open", "pending", "closed"]);
 
+// Unbilled WIP selector. Docs-verified 06/08 — see the fix note at its use site
+// in matterFinancials, and the same constant in lib/clio/mattersSurface.ts.
+const BILLABLE_MATTER_FIELDS =
+  "id,display_number,unbilled_amount,unbilled_hours,amount_in_trust,currency_code,client{id,name}";
+
 /**
  * Normalise + validate the matter `status` filter: 'open' | 'pending' |
  * 'closed', or a comma-separated combination (Clio accepts a comma-separated
@@ -226,7 +231,7 @@ export const CLIO_MANAGE_TOOLS: OpenAIToolSchema[] = [
     function: {
       name: "clio_find_contact",
       description:
-        "Search the user's Clio Manage contacts (people and companies) by name. Returns each contact's id, name, type, and primary email/phone.",
+        "Search the user's Clio Manage contacts (people and companies) by name. Returns each contact's id, name, type, and email addresses.",
       parameters: {
         type: "object",
         properties: {
@@ -485,8 +490,15 @@ async function findContact(
     "manage",
     "/contacts.json",
     {
+      // SELECTOR FIX (docs-verified 06/08 spike; probe validation pending).
+      // `primary_email_address` is a SCALAR on Contact — the shipped
+      // `primary_email_address{address}` brace-on-scalar made Clio reject the
+      // whole request, so this tool 400'd on every live call. The full
+      // `email_addresses` association carries the same data and more. Contact's
+      // phone shape was NOT re-verified in the spike, so it is dropped here
+      // rather than guessed at (the tool description no longer promises it).
       fields:
-        "id,name,type,primary_email_address{address},primary_phone_number{number}",
+        "id,name,type,primary_email_address,email_addresses{address,primary}",
       query: { query, limit: 10 },
     },
   );
@@ -514,8 +526,13 @@ async function matterFinancials(
     "manage",
     "/billable_matters.json",
     {
-      fields:
-        "id,unbilled_amount,unbilled_hours,matter{id,display_number,client{name}}",
+      // SELECTOR FIX (docs-verified 06/08 spike, owner-reproduced 400 on every
+      // live call; probe validation pending). A BillableMatter IS the matter —
+      // it carries display_number and client DIRECTLY — so the shipped
+      // `matter{...}` brace addressed an association that does not exist and
+      // Clio rejected the request. Keep in step with the same selector in
+      // lib/clio/mattersSurface.ts.
+      fields: BILLABLE_MATTER_FIELDS,
       query: { ...(matterId ? { matter_id: matterId } : {}), limit: 20 },
     },
   );
