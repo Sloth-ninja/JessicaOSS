@@ -76,6 +76,48 @@ over):**
    migrated" — the "Start workspace" 409 (`Linking a workspace to a Clio matter
    is not available yet.`) is what tells the user which, and it is shown as-is.
 
+**Review round (1 blocker + 6 should-fixes + 9 nits, all applied):**
+- **The blocker was a real defect.** `timeBoxed` rejected its own deadline with
+  `DOMException(…, "AbortError")`, and every caller opens its catch with
+  `if (isAbort(err)) return;` — so a timeout was *silently swallowed*, leaving a
+  permanent skeleton with no retry, and `clioState` stuck on "loading" (which
+  also hid the link action). A deadline is a failure, not a caller walking away.
+  Fixed with a distinct `ClioTimeoutError`; `isAbort` now excludes it, and a
+  belt in the catch re-labels the case where a signal-honouring callee's own
+  AbortError wins the race while the caller has *not* aborted. Verified by a
+  dependency-free runtime check (7/7: timeout → `ClioTimeoutError`, not an
+  abort, user-safe message; callee-AbortError-on-deadline still a timeout;
+  genuine caller abort still swallowed; happy path intact).
+- **Honesty fix (S3):** unbilled *amount* and *hours* are separately redactable
+  in Clio, but the hours were nested inside the amount branch — a hidden amount
+  swallowed the statement that the hours were hidden too. They are now
+  independent rows. This is precisely the class of omission the surface exists
+  to prevent.
+- **S1:** only a 409/412 offers "Reload time entries"; a 400 is a validation
+  complaint, so its detail is shown and **the user's edit is kept** rather than
+  discarded. Related nit: the PATCH now sends only the fields that changed, and
+  Save is disabled when nothing has.
+- **S2:** the link payload carries no ownership signal, so Unlink renders for
+  non-owners and the 403 is the first they learn of it — the refusal now appears
+  *inside the Workspace card* beside the button pressed, not at the top of the
+  page. (An `isOwner` flag on the link payload is queued for Task 4.)
+- **S4 — real client data in a public repo:** a docstring example used a live
+  client matter. Replaced with a plainly fictitious one and the whole diff
+  grepped for the other real matter numbers/names; no further instances.
+- **S5:** a 401 from the list now reaches `onReconnectNeeded`, so the Frame C
+  reconnect banner actually appears. **S6:** the contacts effect gained the same
+  monotonic sequence guard as its two siblings.
+- **Nits:** money at 2dp throughout; the remembered tab read via
+  `useSyncExternalStore` with a null server snapshot (a `useState` initialiser
+  renders one tab on the server and hydrates another); an own entry whose
+  duration Clio redacts gets no Edit affordance (the form has nothing truthful
+  to prefill); `aria-pressed` + action-oriented labels on the Mine/Everyone
+  toggle; the short date carries the year once the entry is from another one;
+  creating a workspace from a Clio tab switches to Workspaces so the result is
+  visible; and the **412 prose was simply wrong** — the server returns 412
+  (only a malformed etag is a 400), corrected here, in the PR body and in the
+  `mikeApi` comment.
+
 **Verification:** `npx tsc --noEmit` clean; `npm run lint` at exact baseline
 parity (112 problems / 34 errors / 78 warnings before and after — every finding
 pre-exists on `main`, none in a new file); `npm run build` succeeds with
@@ -83,6 +125,11 @@ pre-exists on `main`, none in a new file); `npm run build` succeeds with
 4-space indent and never run through `prettier --write` (28/07 lesson).
 In-browser QA against the live pilot tenant is the owner's step — numbered in
 the PR body.
+
+**Gap recorded:** the frontend has **no test framework** (vitest is backend-only,
+757 tests). The blocker's timeout path was therefore verified by a scripted
+runtime check rather than a committed test. Standing up frontend vitest is worth
+a decision — this train is the second to want it.
 
 ---
 
