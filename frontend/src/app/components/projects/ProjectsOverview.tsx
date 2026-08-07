@@ -296,6 +296,51 @@ export function ProjectsOverview() {
         }
     }
 
+    // The three top-level tabs. Absent — not disabled — when this solicitor has
+    // no Clio connection, so the page is exactly today's Workspaces list.
+    const mattersTabs: { id: MattersTab; label: string }[] = [
+        { id: "mine", label: "My matters" },
+        { id: "all", label: "All matters" },
+        { id: "workspaces", label: "Workspaces" },
+    ];
+
+    const statusFilterControl = (
+        <div className="flex items-center gap-1 text-xs text-gray-500">
+            <span>
+                {MATTER_STATUSES.find((s) => s.value === statusFilter)?.label ??
+                    "Any status"}
+            </span>
+            <HeaderFilterDropdown
+                label="Filter matters by status"
+                value={statusFilter}
+                allLabel="Any status"
+                options={MATTER_STATUSES}
+                onChange={setStatusFilter}
+                widthClassName="w-40"
+            />
+        </div>
+    );
+
+    // On the Workspaces tab these sit beside the tabs rather than replacing
+    // them, so both levels of filtering stay reachable at once.
+    const workspaceFilterButtons = (
+        <div className="flex items-center gap-4">
+            {filters.map((item) => (
+                <button
+                    key={item.id}
+                    onClick={() => setActiveFilter(item.id)}
+                    className={`text-xs transition-colors ${
+                        activeFilter === item.id
+                            ? "font-medium text-gray-700"
+                            : "font-normal text-gray-500 hover:text-gray-700"
+                    }`}
+                >
+                    {item.label}
+                </button>
+            ))}
+        </div>
+    );
+
     const toolbarActions = (
         <>
             {selectedIds.length > 0 && (
