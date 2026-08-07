@@ -39,6 +39,7 @@
 - 2026-08-05 — Missing-column degrades: filters raise Postgres 42703, but UPDATE payloads raise PostgREST PGRST204 — cover both
 - 2026-08-05 — "Migration recorded as run" ≠ applied: verify with a pg_proc/columns diagnostic; the SQL editor runs only highlighted text
 - 2026-08-06 — Every page is edge-cached a year with no revalidation: purge the Cloudflare cache after EVERY frontend deploy
+- 2026-08-07 — A MISSING TABLE on modern Supabase is PGRST205, not 42P01: every "42P01-tolerant" degrade needs the PostgREST code too
 
 ## Lessons
 
@@ -552,3 +553,47 @@ can itself plant the year-long 404 — verify new routes only after the deploy, 
 always with a cache-buster. Debugging signature: deploy logs show the route
 built and uploaded (grep the build output), worker version id is new, `/`
 serves 200, but the new path 404s bare and 200s with `?cb=<anything>`.
+
+---
+
+### 2026-08-07 (Practice Management) — A missing TABLE is PGRST205, not 42P01: the 42P01-tolerant degrade never fires on modern Supabase
+
+**Trigger:** any "tolerate an unmigrated database" degrade — a feature that must
+stay inert until its migration runs (the established pattern in
+`companySearchSaves.ts`, `clio/connections.ts`, `tabularTemplates.ts`,
+`usageStats.ts`, `deletionGovernance.ts`, and now `clio/mattersSurface.ts`).
+
+**Rule:** tolerate **PGRST205** as well as 42P01 for a missing TABLE. PostgREST
+≥12.2 answers a request for an unknown table from its own **schema cache** — a
+404 with `code: "PGRST205"` — and never reaches Postgres, so the classic
+`42P01` (`undefined_table`) is NOT what a Supabase-backed deployment returns. A
+check written as `code === "42P01"` therefore degrades correctly only on a
+direct-Postgres self-host, and **throws in production** on the very code path
+that exists to prevent that.
+
+**Measured, not assumed** (PostgREST 14.16, local container, 07/08/2026 — no
+credentials involved, reproducible in five minutes with `postgres:16` +
+`postgrest/postgrest` on a docker network):
+
+| Situation | HTTP | `code` |
+|---|---|---|
+| Missing table | 404 | `PGRST205` |
+| Missing column in a **filter** | 400 | `42703` |
+| Missing column in an INSERT/UPDATE **payload** | 400 | `PGRST204` |
+
+So the complete set for a not-yet-migrated feature is
+`PGRST205 / 42P01 / 42703 / PGRST204`. This supersedes the 2026-08-05 lesson's
+pair, which covered only the column half of the problem.
+
+**Debugging signature:** the feature's degrade tests all pass (they inject
+42P01), yet on a real deployment lacking the migration the endpoint 500s, or —
+worse, and the reason this is a lifecycle risk — **account deletion or SAR
+export fails outright** because a tolerated delete/select threw. Server logs
+show `Could not find the table 'public.<name>' in the schema cache`.
+
+**Known gap left open:** the pre-existing degrade helpers listed above still
+check 42P01/42703 (+PGRST204) only. They are correct for missing COLUMNS (their
+actual exposure, since their tables have all shipped) but would not tolerate a
+genuinely missing table. Worth a sweep before the next feature ships behind an
+unrun migration; flagged to the owner rather than fixed in-train, to keep the
+Practice Management PR's diff honest.

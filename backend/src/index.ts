@@ -19,6 +19,7 @@ import { citationsRouter } from "./routes/citations";
 import { legislationRouter } from "./routes/legislation";
 import { landRegistryRouter } from "./routes/landRegistry";
 import { clioManageRouter, clioGrowRouter } from "./routes/clio";
+import { clioMattersRouter } from "./routes/clioMatters";
 import { runDeletionPurge } from "./lib/deletionGovernance";
 
 const app = express();
@@ -194,6 +195,12 @@ app.use("/land-registry", landRegistryRouter);
 // therefore equal the exact registered redirect URIs).
 app.use("/clio", clioManageRouter);
 app.use("/clio-grow", clioGrowRouter);
+// Practice Management surface (Clio-backed Matters) — live reads only. Its rate
+// limiter lives INSIDE the router, keyed per user rather than per IP: the pilot
+// firm NATs its office through one address, so an IP-keyed bucket here would let
+// a few solicitors browsing matters exhaust the shared research allowance
+// (RATE_LIMIT_CLIO_MATTERS_MAX / _WINDOW_MINUTES).
+app.use("/clio-matters", clioMattersRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 

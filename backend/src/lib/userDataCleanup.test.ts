@@ -185,3 +185,74 @@ describe("deleteUserAccountData — company_search_saves", () => {
     );
   });
 });
+
+const LINK = (userId: string, matterId: string): Row => ({
+  id: `${userId}-${matterId}`,
+  project_id: `project-${matterId}`,
+  clio_matter_id: matterId,
+  clio_display_number: `M-${matterId}`,
+  organisation_id: null,
+  created_by: userId,
+  created_at: "2026-08-07T00:00:00.000Z",
+});
+
+describe("deleteUserAccountData — matter_workspace_links", () => {
+  it("deletes the user's matter_workspace_links rows, keyed on created_by", async () => {
+    const { db, store, ops } = makeDb({
+      rows: {
+        matter_workspace_links: [
+          LINK("user-1", "matter-1"),
+          LINK("user-1", "matter-2"),
+          LINK("user-2", "matter-3"),
+        ],
+      },
+    });
+
+    await deleteUserAccountData(db, "user-1");
+
+    // user-1's links gone; user-2's untouched.
+    expect(store.matter_workspace_links).toHaveLength(1);
+    expect(store.matter_workspace_links[0].created_by).toBe("user-2");
+
+    const linksDelete = ops.find(
+      (o) => o.table === "matter_workspace_links" && o.op === "delete",
+    );
+    expect(linksDelete).toBeDefined();
+    expect(linksDelete?.filters).toContainEqual({
+      op: "eq",
+      col: "created_by",
+      val: "user-1",
+    });
+  });
+
+  // PGRST205 is the code a real Supabase actually returns for a missing table
+  // (measured against PostgREST 14.16, 07/08 — see isLinksSchemaMissing in
+  // lib/clio/mattersSurface.ts); 42P01 is kept for direct-Postgres self-hosters,
+  // 42703 for a missing column in a filter, PGRST204 for one in a write payload.
+  it.each(["PGRST205", "42P01", "42703", "PGRST204"])(
+    "tolerates a missing/unmigrated links schema (%s) — account deletion still succeeds",
+    async (code) => {
+      const { db } = makeDb({
+        errorFor: (table, op) =>
+          table === "matter_workspace_links" && op === "delete"
+            ? { code, message: "unmigrated" }
+            : null,
+      });
+
+      await expect(deleteUserAccountData(db, "user-1")).resolves.toBeUndefined();
+    },
+  );
+
+  it("still throws on a non-tolerated error from matter_workspace_links", async () => {
+    const { db } = makeDb({
+      errorFor: (table, op) =>
+        table === "matter_workspace_links" && op === "delete"
+          ? { code: "42501", message: "permission denied" }
+          : null,
+    });
+
+    await expect(deleteUserAccountData(db, "user-1")).rejects.toThrow(
+      /Failed to delete account data/,
+    );
+  });
+});

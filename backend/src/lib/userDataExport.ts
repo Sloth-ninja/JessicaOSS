@@ -1,6 +1,7 @@
 import { createServerSupabase } from "./supabase";
 import { isMissingTableOrColumn } from "./companySearchSaves";
 import { getClioConnectionMetadata } from "./clio/connections";
+import { isUnmigratedSchemaError } from "./postgrestCodes";
 
 type Db = ReturnType<typeof createServerSupabase>;
 
@@ -33,9 +34,20 @@ async function selectAll(
     table: string,
     configure: (query: any) => any,
     columns = "*",
-    options: { tolerateMissing?: boolean } = {},
+    options: {
+        tolerateMissing?: boolean;
+        /**
+         * Override for what counts as "not migrated". Defaults to the
+         * company-search predicate (42P01 / 42703). matter_workspace_links
+         * passes isUnmigratedSchemaError because a modern PostgREST answers a
+         * missing TABLE from its schema cache as PGRST205, never 42P01
+         * (DURABLE_LESSONS 2026-08-07).
+         */
+        isMissing?: (error: unknown) => boolean;
+    } = {},
 ): Promise<Record<string, unknown>[]> {
     const rows: Record<string, unknown>[] = [];
+    const isMissing = options.isMissing ?? isMissingTableOrColumn;
 
     for (let from = 0; ; from += PAGE_SIZE) {
         const to = from + PAGE_SIZE - 1;
@@ -48,9 +60,9 @@ async function selectAll(
         const { data, error } = await query;
         // A table added by a later migration (company_search_saves) may not
         // exist on an unmigrated self-hosted DB. Where tolerated, a missing
-        // table/column (42P01 / 42703) degrades to an empty section rather than
-        // failing the whole export; any other error still throws.
-        if (options.tolerateMissing && isMissingTableOrColumn(error)) {
+        // table/column degrades to an empty section rather than failing the
+        // whole export; any other error still throws.
+        if (options.tolerateMissing && isMissing(error)) {
             return rows;
         }
         await throwIfError(error, `Failed to export ${table}`);
@@ -189,6 +201,7 @@ export async function buildUserAccountExport(
         tabularReviews,
         companySearchSaves,
         clioConnections,
+        matterWorkspaceLinks,
         sharedProjects,
         sharedTabularReviews,
     ] = await Promise.all([
@@ -244,6 +257,20 @@ export async function buildUserAccountExport(
         // material). Tolerant of an unmigrated DB: a missing table yields an
         // empty section, never a failed export (migration 20260803_01).
         getClioConnectionMetadata(db, userId),
+        // The Clio matter↔workspace links the user created — the id/display
+        // number pair is the ONLY Clio matter artefact JessicaOS stores, so the
+        // right of access must reach it. Tolerant of an unmigrated DB: a
+        // missing table yields an empty section (migration 20260807_01).
+        selectAll(
+            db,
+            "matter_workspace_links",
+            (query) =>
+                query
+                    .eq("created_by", userId)
+                    .order("created_at", { ascending: true }),
+            "*",
+            { tolerateMissing: true, isMissing: isUnmigratedSchemaError },
+        ),
         userEmail
             ? selectAll(db, "projects", (query) =>
                   query
@@ -302,6 +329,7 @@ export async function buildUserAccountExport(
         tabular_review_chats: tabularChats,
         company_search_saves: companySearchSaves,
         clio_connections: clioConnections,
+        matter_workspace_links: matterWorkspaceLinks,
         shared_access: {
             projects: sharedProjects,
             tabular_reviews: sharedTabularReviews,
