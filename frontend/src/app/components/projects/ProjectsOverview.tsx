@@ -371,18 +371,20 @@ export function ProjectsOverview() {
         <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
             {/* Page header */}
             <PageHeader
-                loading={loading}
+                loading={isClioTab ? false : loading}
                 actions={[
                     {
                         type: "search",
                         value: search,
                         onChange: setSearch,
-                        placeholder: "Search matters…",
+                        placeholder: isClioTab
+                            ? "Search matters…"
+                            : "Search workspaces…",
                     },
                     {
                         type: "new",
                         onClick: () => setModalOpen(true),
-                        title: "New matter",
+                        title: "New workspace",
                     },
                 ]}
             >
@@ -391,14 +393,47 @@ export function ProjectsOverview() {
                 </h1>
             </PageHeader>
 
-            <TableToolbar
-                items={filters}
-                active={activeFilter}
-                onChange={setActiveFilter}
-                actions={toolbarActions}
-            />
+            {clioTabsAvailable ? (
+                <TableToolbar
+                    items={mattersTabs}
+                    active={activeTab}
+                    onChange={selectTab}
+                    actions={
+                        <>
+                            {isClioTab
+                                ? statusFilterControl
+                                : workspaceFilterButtons}
+                            {!isClioTab && toolbarActions}
+                        </>
+                    }
+                />
+            ) : (
+                <TableToolbar
+                    items={filters}
+                    active={activeFilter}
+                    onChange={setActiveFilter}
+                    actions={toolbarActions}
+                />
+            )}
 
-            {/* Table */}
+            {clioState === "disconnected" && (
+                <p className="shrink-0 border-b border-gray-100 bg-gray-50/60 px-4 py-2 text-xs text-gray-500 md:px-10">
+                    <span className="font-medium text-gray-700">
+                        Clio not connected.
+                    </span>{" "}
+                    Showing your JessicaOS workspaces. Connect Clio in Account →
+                    Connectors to see your firm&rsquo;s matters here.
+                </p>
+            )}
+
+            {isClioTab ? (
+                <ClioMattersTable
+                    tab={activeTab}
+                    query={debouncedQuery}
+                    status={statusFilter}
+                />
+            ) : (
+            /* Table */
             <TableScrollArea>
                 {/* Column headers */}
                 <TableHeaderRow>
@@ -531,6 +566,14 @@ export function ProjectsOverview() {
                                                           project.id,
                                                       );
                                                   }}
+                                                  onLinkClioMatter={
+                                                      clioConnected
+                                                          ? () =>
+                                                                setLinkingProject(
+                                                                    project,
+                                                                )
+                                                          : undefined
+                                                  }
                                                   onDelete={async () => {
                                                       await deleteProject(
                                                           project.id,
@@ -638,6 +681,14 @@ export function ProjectsOverview() {
                                                 );
                                                 setCmEditingId(project.id);
                                             }}
+                                            onLinkClioMatter={
+                                                clioConnected
+                                                    ? () =>
+                                                          setLinkingProject(
+                                                              project,
+                                                          )
+                                                    : undefined
+                                            }
                                             onDelete={async () => {
                                                 await deleteProject(project.id);
                                                 setProjects((prev) =>
@@ -656,6 +707,7 @@ export function ProjectsOverview() {
                     </TableBody>
                 )}
             </TableScrollArea>
+            )}
 
             <NewProjectModal
                 open={modalOpen}
@@ -664,6 +716,13 @@ export function ProjectsOverview() {
                     setProjects((prev) => [p, ...prev]);
                     router.push(`/projects/${p.id}`);
                 }}
+            />
+
+            <LinkClioMatterModal
+                open={linkingProject !== null}
+                projectId={linkingProject?.id ?? null}
+                projectName={linkingProject?.name ?? null}
+                onClose={() => setLinkingProject(null)}
             />
 
             <OwnerOnlyModal

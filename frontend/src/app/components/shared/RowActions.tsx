@@ -9,6 +9,7 @@ import {
     FolderPlus,
     Hash,
     History,
+    Link2,
     Pencil,
     Trash2,
     Upload,
@@ -37,6 +38,8 @@ interface Props {
     deleteDisabled?: boolean;
     onRename?: () => void;
     onUpdateCmNumber?: () => void;
+    /** Practice management: anchor this workspace to a Clio matter. */
+    onLinkClioMatter?: () => void;
     newSubfolderLabel?: string;
     renameLabel?: string;
     deleteLabel?: string;
@@ -55,6 +58,7 @@ export function RowActionMenuItems({
     deleteDisabled = false,
     onRename,
     onUpdateCmNumber,
+    onLinkClioMatter,
     newSubfolderLabel = "New subfolder",
     renameLabel = "Rename",
     deleteLabel = "Delete",
@@ -87,6 +91,15 @@ export function RowActionMenuItems({
                 >
                     <Hash className="h-3.5 w-3.5" />
                     Edit CM No.
+                </button>
+            )}
+            {onLinkClioMatter && (
+                <button
+                    onClick={() => { onClose(); onLinkClioMatter(); }}
+                    className={`flex items-center gap-2 w-full px-3 py-2 text-xs text-left text-gray-600 ${GLASS_MENU_ITEM}`}
+                >
+                    <Link2 className="h-3.5 w-3.5 shrink-0" />
+                    Link to a Clio matter
                 </button>
             )}
             {onDownload && (
