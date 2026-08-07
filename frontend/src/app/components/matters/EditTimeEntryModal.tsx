@@ -50,16 +50,28 @@ export function EditTimeEntryModal({
         Number.isFinite(parsedMinutes) &&
         parsedMinutes > 0;
 
+    const originalMinutes = secondsToMinutes(entry.quantitySeconds);
+    const originalDate = toDateInputValue(entry.date);
+    const minutesChanged = Math.round(parsedMinutes) !== originalMinutes;
+    const noteChanged = note !== (entry.note ?? "");
+    const dateChanged = date !== originalDate;
+    const nothingChanged = !minutesChanged && !noteChanged && !dateChanged;
+
     async function handleSave() {
-        if (!minutesValid) return;
+        if (!minutesValid || nothingChanged) return;
         setSaving(true);
         setError(null);
         setConflicted(false);
         try {
+            // Send only what actually changed: an unchanged field in the
+            // payload is still a write Clio must apply, and the server rejects
+            // an empty patch rather than making a pointless round-trip.
             const updated = await updateClioActivity(entry.id, {
-                minutes: Math.round(parsedMinutes),
-                note,
-                ...(date ? { date } : {}),
+                ...(minutesChanged
+                    ? { minutes: Math.round(parsedMinutes) }
+                    : {}),
+                ...(noteChanged ? { note } : {}),
+                ...(dateChanged && date ? { date } : {}),
                 etag: entry.etag,
             });
             setSaving(false);
@@ -67,11 +79,13 @@ export function EditTimeEntryModal({
             onClose();
         } catch (err) {
             setSaving(false);
-            // Fixed, user-safe details from the server (the #72 pattern). A
-            // 400/409 here is the concurrency or billed-entry refusal, both of
-            // which are answered by reloading.
+            // Fixed, user-safe details from the server (the #72 pattern).
+            // Only a CONFLICT is answered by reloading — 409 (billed) or 412
+            // (the entry moved under us). A 400 is a validation complaint about
+            // what was typed, so the message is shown and the edit is KEPT:
+            // offering "Reload" there would throw the user's work away.
             const status = err instanceof MikeApiError ? err.status : 0;
-            setConflicted(status === 400 || status === 409 || status === 412);
+            setConflicted(status === 409 || status === 412);
             setError(
                 err instanceof MikeApiError && err.message
                     ? err.message
@@ -88,7 +102,7 @@ export function EditTimeEntryModal({
             primaryAction={{
                 label: saving ? "Saving…" : "Save to Clio",
                 onClick: () => void handleSave(),
-                disabled: !minutesValid || saving,
+                disabled: !minutesValid || saving || nothingChanged,
             }}
             cancelAction={{ label: "Cancel", onClick: onClose }}
         >

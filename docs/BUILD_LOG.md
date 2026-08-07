@@ -39,8 +39,9 @@ A/B/C. Consumes the `/clio-matters` routes merged in #81; no backend change.
   (new, Frame B): overview + custom fields, key people, financials, time entries
   and the workspace section. `components/matters/EditTimeEntryModal.tsx` edits a
   solicitor's own unbilled entries (duration collected in **minutes**, ETag sent
-  for concurrency; the 412→400 refusal renders its fixed detail plus a "Reload
-  time entries" affordance).
+  for concurrency; a **412** — the entry moved in Clio — renders its fixed
+  detail plus a "Reload time entries" affordance, as does a 409 on a billed
+  entry, while a 400 shows the message and KEEPS the edit).
 - `components/projects/LinkClioMatterModal.tsx` (new): links an existing
   workspace to a matter, reached from the workspace row menu (owner-only, and
   only when Clio is connected). `RowActions` gained an additive

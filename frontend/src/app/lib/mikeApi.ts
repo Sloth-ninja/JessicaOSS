@@ -2220,8 +2220,9 @@ export async function getClioMatterActivities(
 /**
  * Edit one of the caller's own, unbilled entries. `minutes` is what the UI
  * collects; the backend converts to Clio's seconds. `etag` carries the
- * optimistic-concurrency check — a 412 comes back as a 400 telling the user to
- * reload.
+ * optimistic-concurrency check: if the entry moved under us, the server answers
+ * **412** with a fixed "reload and try again" detail (a malformed etag is a 400,
+ * and a billed entry is a 409). Send only the fields that changed.
  */
 export async function updateClioActivity(
     activityId: string,
