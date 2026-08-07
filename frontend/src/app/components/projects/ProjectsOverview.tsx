@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+    useCallback,
+    useEffect,
+    useRef,
+    useState,
+    useSyncExternalStore,
+} from "react";
 import { useRouter } from "next/navigation";
 import { FolderOpen, ChevronDown } from "lucide-react";
 import {
@@ -19,6 +25,7 @@ import {
     isAbort,
     readStoredMattersTab,
     storeMattersTab,
+    subscribeToMattersTab,
     timeBoxed,
     type MattersTab,
 } from "@/app/lib/clioMatters";
@@ -101,11 +108,18 @@ export function ProjectsOverview() {
 
     // ── Clio-backed tabs (Practice Management) ───────────────────────────────
     const [clioState, setClioState] = useState<ClioState>("loading");
-    // null = no remembered choice yet; the effective tab is derived below so
-    // nothing has to be written back from an effect.
-    const [tabPref, setTabPref] = useState<MattersTab | null>(() =>
-        readStoredMattersTab(),
+    // The remembered tab is external state (localStorage), so it is read through
+    // useSyncExternalStore with a null server snapshot — a useState initialiser
+    // would render one tab on the server and hydrate a different one. The
+    // override keeps the page working when storage writes are unavailable
+    // (private mode), and null still means "no preference yet".
+    const storedTab = useSyncExternalStore(
+        subscribeToMattersTab,
+        readStoredMattersTab,
+        () => null,
     );
+    const [tabOverride, setTabOverride] = useState<MattersTab | null>(null);
+    const tabPref = tabOverride ?? storedTab;
     const [statusFilter, setStatusFilter] = useState<string | null>(null);
     const [debouncedQuery, setDebouncedQuery] = useState("");
     const [linkingProject, setLinkingProject] = useState<Project | null>(null);
@@ -148,8 +162,12 @@ export function ProjectsOverview() {
     const isClioTab = activeTab !== "workspaces";
 
     const selectTab = useCallback((tab: MattersTab) => {
-        setTabPref(tab);
+        setTabOverride(tab);
         storeMattersTab(tab);
+    }, []);
+
+    const handleReconnectNeeded = useCallback(() => {
+        setClioState("disconnected");
     }, []);
 
     // Debounce the search box before it becomes a Clio query — typing must not
@@ -431,6 +449,10 @@ export function ProjectsOverview() {
                     tab={activeTab}
                     query={debouncedQuery}
                     status={statusFilter}
+                    // A 401 from Clio means the connection needs re-authorising:
+                    // fold to Workspaces and show the Frame C banner, which
+                    // carries the route back to Account → Connectors.
+                    onReconnectNeeded={handleReconnectNeeded}
                 />
             ) : (
             /* Table */
@@ -714,6 +736,10 @@ export function ProjectsOverview() {
                 onClose={() => setModalOpen(false)}
                 onCreated={(p) => {
                     setProjects((prev) => [p, ...prev]);
+                    // A workspace created from a Clio tab would otherwise land
+                    // in a list the user cannot see — move them to Workspaces
+                    // so the thing they just made is where they come back to.
+                    if (isClioTab) selectTab("workspaces");
                     router.push(`/projects/${p.id}`);
                 }}
             />
