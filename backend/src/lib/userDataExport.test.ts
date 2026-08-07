@@ -189,11 +189,11 @@ describe("buildUserAccountExport — clio_connections (SAR completeness)", () =>
 
 const LINK = (matterId: string): Row => ({
   id: `link-${matterId}`,
-  created_by: "user-1",
+  project_id: `project-${matterId}`,
   clio_matter_id: matterId,
-  clio_matter_number: `M-${matterId}`,
-  workspace_type: "project",
-  workspace_id: `workspace-${matterId}`,
+  clio_display_number: `M-${matterId}`,
+  organisation_id: null,
+  created_by: "user-1",
   created_at: "2026-08-07T00:00:00.000Z",
 });
 
@@ -210,17 +210,21 @@ describe("buildUserAccountExport — matter_workspace_links", () => {
     expect(exported.matter_workspace_links).toHaveLength(2);
     // All columns present — it is the user's data, exported verbatim.
     expect(exported.matter_workspace_links[0]).toMatchObject({
-      created_by: "user-1",
+      project_id: "project-matter-1",
       clio_matter_id: "matter-1",
-      clio_matter_number: "M-matter-1",
-      workspace_type: "project",
-      workspace_id: "workspace-matter-1",
+      clio_display_number: "M-matter-1",
+      organisation_id: null,
+      created_by: "user-1",
       created_at: "2026-08-07T00:00:00.000Z",
     });
   });
 
-  it.each(["42P01", "42703"])(
-    "tolerates a missing table/column (%s) — section is empty, export succeeds",
+  // PGRST205 is the code a real Supabase actually returns for a missing table
+  // (measured against PostgREST 14.16, 07/08 — see isLinksSchemaMissing in
+  // lib/clio/mattersSurface.ts); 42P01 is kept for direct-Postgres self-hosters,
+  // 42703 for a missing column in a filter, PGRST204 for one in a write payload.
+  it.each(["PGRST205", "42P01", "42703", "PGRST204"])(
+    "tolerates a missing/unmigrated links schema (%s) — section is empty, export succeeds",
     async (code) => {
       const { db } = makeDb({
         errorFor: (table) =>

@@ -280,18 +280,32 @@ function buildUrl(
   return url.toString();
 }
 
+// Header names this module owns outright. A caller-supplied header matching any
+// of these (in ANY casing) is DROPPED rather than merged: object spread is
+// case-SENSITIVE, so `{ authorization: ... }` would survive alongside our
+// `Authorization` — and `new Headers()` then joins case-differing duplicates
+// into one comma-separated value ("Bearer attacker, Bearer real"), which some
+// servers parse as the first. Dropping is the only safe merge.
+const FIXED_HEADER_NAMES = new Set([
+  "accept",
+  "authorization",
+  "x-api-version",
+  "content-type",
+]);
+
 function headersFor(
   product: ClioProduct,
   accessToken: string,
   hasBody: boolean,
   extra?: Record<string, string>,
 ): Record<string, string> {
-  const headers: Record<string, string> = {
-    // Caller-supplied headers go in FIRST so the fixed ones below always win.
-    ...(extra ?? {}),
-    Accept: "application/json",
-    Authorization: `Bearer ${accessToken}`,
-  };
+  const headers: Record<string, string> = {};
+  for (const [name, value] of Object.entries(extra ?? {})) {
+    if (FIXED_HEADER_NAMES.has(name.trim().toLowerCase())) continue;
+    headers[name] = value;
+  }
+  headers.Accept = "application/json";
+  headers.Authorization = `Bearer ${accessToken}`;
   if (product === "manage") {
     headers["X-API-VERSION"] = clioManageApiVersion();
   } else {

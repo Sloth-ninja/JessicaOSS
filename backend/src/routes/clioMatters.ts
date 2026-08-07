@@ -1,5 +1,6 @@
 import { Router } from "express";
-import type { Response } from "express";
+import type { Request, Response } from "express";
+import rateLimit from "express-rate-limit";
 import { requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../lib/asyncHandler";
 import { createServerSupabase } from "../lib/supabase";
@@ -24,9 +25,10 @@ import {
  * lib/clio/mattersSurface.ts. Mounted at /clio-matters; see
  * docs/PRACTICE_MANAGEMENT_SPEC.md.
  *
- * Every handler is requireAuth + asyncHandler and reads Clio with the CALLER's
- * own token, so matter visibility is exactly what that solicitor's Clio login
- * allows — there is no firm token and no cross-user read path.
+ * Auth is router-level (`use(requireAuth, …)` below, so it cannot be forgotten
+ * on a future route) and every handler is asyncHandler-wrapped. Reads use the
+ * CALLER's own Clio token, so matter visibility is exactly what that
+ * solicitor's Clio login allows — no firm token, no cross-user read path.
  *
  * Error contract (the #72 pattern): ClioValidationError / ClioApiError messages
  * are fixed and user-safe by construction and pass through as the `detail`;
@@ -39,6 +41,44 @@ import {
 
 export const clioMattersRouter = Router();
 
+// ── Rate limiting ────────────────────────────────────────────────────────────
+//
+// This bucket is keyed PER USER, not per IP, and therefore lives here rather
+// than alongside the other limiters in index.ts: an app-level limiter runs
+// before any route's auth, so `res.locals.userId` is not populated yet. The
+// distinction matters commercially — the pilot firm NATs its whole office
+// through one IP, so an IP-keyed bucket would let three solicitors browsing
+// matters exhaust the shared research allowance and take /companies and
+// /legislation down for everyone. IP is kept only as the pre-auth fallback.
+//
+// Clio's own 50 req/min per-user token budget is the real constraint; this only
+// stops a runaway client burning it.
+
+function envInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const clioMattersLimiter = rateLimit({
+  windowMs: envInt("RATE_LIMIT_CLIO_MATTERS_WINDOW_MINUTES", 15) * 60 * 1000,
+  max: envInt("RATE_LIMIT_CLIO_MATTERS_MAX", 300),
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method === "OPTIONS",
+  keyGenerator: (req: Request, res: Response) =>
+    (res.locals.userId as string | undefined) ?? req.ip ?? "unknown",
+  message: {
+    detail: "Too many Clio requests. Please try again shortly.",
+  },
+});
+
+// Router-level, in this order, so the limiter can see the authenticated user.
+// This covers EVERY route below (including any added later) — the individual
+// handlers therefore do not repeat `requireAuth`.
+clioMattersRouter.use(requireAuth, clioMattersLimiter);
+
 // Workspace ids are uuids; a malformed one 404s here rather than reaching
 // Postgres, where it would raise 22P02 and surface as a generic 500.
 const UUID_RE =
@@ -48,6 +88,10 @@ const WORKSPACE_NOT_FOUND_DETAIL = "Workspace not found.";
 const LINKS_UNAVAILABLE_DETAIL =
   "Linking a workspace to a Clio matter is not available yet.";
 const ALREADY_LINKED_DETAIL = "That matter already has a linked workspace.";
+// The other side of the same relationship — the workspace, not the matter, is
+// the one already spoken for. Distinct copy so the user knows which to change.
+const WORKSPACE_ALREADY_LINKED_DETAIL =
+  "That workspace is already linked to a Clio matter.";
 const NOT_WORKSPACE_OWNER_DETAIL =
   "Only the owner of a workspace can link or unlink it.";
 
@@ -91,7 +135,6 @@ function optionalString(value: unknown): string | undefined {
 // unbilled entries. Body: { minutes?, note?, date?, etag? }.
 clioMattersRouter.patch(
   "/activities/:activityId",
-  requireAuth,
   asyncHandler(async (req, res) => {
     const { userId } = callerOf(res);
     const body = (req.body ?? {}) as Record<string, unknown>;
@@ -118,7 +161,6 @@ clioMattersRouter.patch(
 // unbilled entries.
 clioMattersRouter.delete(
   "/activities/:activityId",
-  requireAuth,
   asyncHandler(async (req, res) => {
     const { userId } = callerOf(res);
     const db = createServerSupabase();
@@ -137,7 +179,6 @@ clioMattersRouter.delete(
 // Body: { projectId, clioMatterId }.
 clioMattersRouter.post(
   "/links",
-  requireAuth,
   asyncHandler(async (req, res) => {
     const { userId, userEmail } = callerOf(res);
     const body = (req.body ?? {}) as Record<string, unknown>;
@@ -156,6 +197,11 @@ clioMattersRouter.post(
       }
       if (outcome === "already_linked") {
         return void res.status(409).json({ detail: ALREADY_LINKED_DETAIL });
+      }
+      if (outcome === "workspace_already_linked") {
+        return void res
+          .status(409)
+          .json({ detail: WORKSPACE_ALREADY_LINKED_DETAIL });
       }
       if (outcome === "forbidden") {
         return void res
@@ -177,7 +223,6 @@ clioMattersRouter.post(
 // DELETE /clio-matters/links/:projectId — unlink a workspace (owner only).
 clioMattersRouter.delete(
   "/links/:projectId",
-  requireAuth,
   asyncHandler(async (req, res) => {
     const { userId, userEmail } = callerOf(res);
     if (!UUID_RE.test(req.params.projectId)) {
@@ -216,7 +261,6 @@ clioMattersRouter.delete(
 // GET /clio-matters?tab=mine|all&query=&status=open,pending
 clioMattersRouter.get(
   "/",
-  requireAuth,
   asyncHandler(async (req, res) => {
     const { userId } = callerOf(res);
     const db = createServerSupabase();
@@ -239,7 +283,6 @@ clioMattersRouter.get(
 // follow-up round-trip for the workspace section).
 clioMattersRouter.get(
   "/:matterId",
-  requireAuth,
   asyncHandler(async (req, res) => {
     const { userId, userEmail } = callerOf(res);
     const db = createServerSupabase();
@@ -261,7 +304,6 @@ clioMattersRouter.get(
 // GET /clio-matters/:matterId/contacts — key people.
 clioMattersRouter.get(
   "/:matterId/contacts",
-  requireAuth,
   asyncHandler(async (req, res) => {
     const { userId } = callerOf(res);
     const db = createServerSupabase();
@@ -282,7 +324,6 @@ clioMattersRouter.get(
 // caller's own unless `everyone` is set.
 clioMattersRouter.get(
   "/:matterId/activities",
-  requireAuth,
   asyncHandler(async (req, res) => {
     const { userId } = callerOf(res);
     const db = createServerSupabase();
@@ -302,7 +343,6 @@ clioMattersRouter.get(
 // JessicaOS workspace.
 clioMattersRouter.post(
   "/:matterId/workspace",
-  requireAuth,
   asyncHandler(async (req, res) => {
     const { userId, userEmail } = callerOf(res);
     const db = createServerSupabase();
@@ -318,6 +358,11 @@ clioMattersRouter.post(
       }
       if (outcome === "already_linked") {
         return void res.status(409).json({ detail: ALREADY_LINKED_DETAIL });
+      }
+      if (outcome === "workspace_already_linked") {
+        return void res
+          .status(409)
+          .json({ detail: WORKSPACE_ALREADY_LINKED_DETAIL });
       }
       if (outcome === "forbidden") {
         return void res

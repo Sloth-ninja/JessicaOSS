@@ -23,6 +23,7 @@ import {
   createWorkspaceForMatter,
   deleteActivity,
   getLinkForMatter,
+  getLinkForProject,
   getMatterDetail,
   isLinksSchemaMissing,
   linkWorkspace,
@@ -82,6 +83,7 @@ function makeDb(opts: DbOptions = {}) {
       filters: Array<{ col: string; val: unknown }>;
       payload: Row | null;
       limit?: number;
+      order?: { col: string; ascending: boolean };
     } = { op: "select", filters: [], payload: null };
 
     const matches = (row: Row) =>
@@ -94,6 +96,15 @@ function makeDb(opts: DbOptions = {}) {
         let out = rowsOf(table)
           .filter(matches)
           .map((row) => ({ ...row }));
+        if (state.order) {
+          const { col, ascending } = state.order;
+          out.sort((a, b) => {
+            const left = String(a[col] ?? "");
+            const right = String(b[col] ?? "");
+            if (left === right) return 0;
+            return (left < right ? -1 : 1) * (ascending ? 1 : -1);
+          });
+        }
         if (state.limit !== undefined) out = out.slice(0, state.limit);
         return { data: out, error: null };
       }
@@ -137,6 +148,10 @@ function makeDb(opts: DbOptions = {}) {
       },
       limit(n: number) {
         state.limit = n;
+        return api;
+      },
+      order(col: string, opts?: { ascending?: boolean }) {
+        state.order = { col, ascending: opts?.ascending !== false };
         return api;
       },
       insert(payload: Row) {
@@ -442,6 +457,46 @@ describe("listMatters — in-memory cache", () => {
     expect(calls).toHaveLength(3);
   });
 
+  it("never serves one user's matters to another, and clears per-user", async () => {
+    // Two connected users on ONE database. Each list is derived from that
+    // user's own Clio token, so a shared cache entry would be a confidentiality
+    // breach, and one user's write must not evict the other's cache.
+    const db = await connectedDb();
+    await saveClioConnection(asDb(db), {
+      userId: "user-2",
+      product: "manage",
+      tokens: {
+        accessToken: "access-2",
+        refreshToken: "refresh-2",
+        expiresAt: new Date(Date.now() + 20 * 24 * 60 * 60 * 1000),
+        scope: null,
+      },
+      clioUserId: "9002",
+      clioUserName: "Second Solicitor",
+    });
+    let listCalls = 0;
+    stubFetch((call) => {
+      if (call.url.pathname.endsWith("/matters.json")) {
+        listCalls += 1;
+        return json({ data: [MATTER_ROW] });
+      }
+      if (call.method === "GET") return json({ data: ACTIVITY_ROW });
+      return json({ data: { ...ACTIVITY_ROW, note: "Revised" } });
+    });
+
+    await listMatters(asDb(db), "user-1", { tab: "all" });
+    await listMatters(asDb(db), "user-2", { tab: "all" });
+    // Same tab, same query — but a separate upstream call each.
+    expect(listCalls).toBe(2);
+
+    // user-1 writes: their cache is dropped, user-2's survives.
+    await updateActivity(asDb(db), "user-1", "55", { note: "Revised" });
+    await listMatters(asDb(db), "user-2", { tab: "all" });
+    expect(listCalls).toBe(2);
+    await listMatters(asDb(db), "user-1", { tab: "all" });
+    expect(listCalls).toBe(3);
+  });
+
   it("is cleared for the caller by an activity write", async () => {
     const db = await connectedDb();
     let listCalls = 0;
@@ -711,7 +766,7 @@ describe("listActivities", () => {
     expect(result.activities[0]).toMatchObject({
       quantitySeconds: null,
       quantityRedacted: true,
-      amountsHidden: true,
+      amountsUnavailable: true,
       billed: true,
       locked: true,
       isOwn: false,
@@ -792,6 +847,27 @@ describe("updateActivity", () => {
     ).rejects.toThrow(ETAG_CONFLICT_DETAIL);
   });
 
+  it("refuses an etag that could not be a header value", async () => {
+    const db = await connectedDb();
+    const calls = stubFetch(() => json({ data: ACTIVITY_ROW }));
+
+    // A CRLF-bearing etag would be header injection on the request we issue;
+    // an unbounded one is abuse. Both are refused before any Clio call.
+    await expect(
+      updateActivity(asDb(db), "user-1", "55", {
+        note: "x",
+        etag: "abc\r\nX-Injected: 1",
+      }),
+    ).rejects.toBeInstanceOf(ClioValidationError);
+    await expect(
+      updateActivity(asDb(db), "user-1", "55", {
+        note: "x",
+        etag: "e".repeat(201),
+      }),
+    ).rejects.toBeInstanceOf(ClioValidationError);
+    expect(calls).toHaveLength(0);
+  });
+
   it("rejects an empty patch and a non-positive duration", async () => {
     const db = await connectedDb();
     stubFetch(() => json({ data: ACTIVITY_ROW }));
@@ -854,11 +930,22 @@ function grantAccess(isOwner = true) {
 }
 
 describe("isLinksSchemaMissing", () => {
-  it("covers the filter codes AND the PostgREST payload code", () => {
-    expect(isLinksSchemaMissing({ code: "42P01" })).toBe(true);
-    expect(isLinksSchemaMissing({ code: "42703" })).toBe(true);
-    expect(isLinksSchemaMissing({ code: "PGRST204" })).toBe(true);
+  // Codes measured against PostgREST 14.16 in a local container (07/08):
+  // missing TABLE -> PGRST205 (404, answered from the schema cache — this is
+  // what a real Supabase returns, NOT 42P01); missing column in a FILTER ->
+  // 42703; missing column in an INSERT/UPDATE PAYLOAD -> PGRST204. 42P01 is
+  // kept for pre-12.2 / direct-Postgres self-hosters.
+  it.each(["PGRST205", "42P01", "42703", "PGRST204"])(
+    "treats %s as an unmigrated links table",
+    (code) => {
+      expect(isLinksSchemaMissing({ code })).toBe(true);
+    },
+  );
+
+  it("does not swallow real failures", () => {
     expect(isLinksSchemaMissing({ code: "23505" })).toBe(false);
+    expect(isLinksSchemaMissing({ code: "42501" })).toBe(false);
+    expect(isLinksSchemaMissing(null)).toBe(false);
   });
 });
 
@@ -896,16 +983,98 @@ describe("getLinkForMatter", () => {
     ).toBeNull();
   });
 
-  it("degrades to null on an unmigrated links table", async () => {
+  // PGRST205 first: it is the code a live Supabase actually returns for a
+  // missing table, so this is the case that fires before the migration lands.
+  it.each(["PGRST205", "42P01"])(
+    "degrades to null on an unmigrated links table (%s)",
+    async (code) => {
+      const db = await connectedDb({
+        errorFor: (table) =>
+          table === "matter_workspace_links"
+            ? { code, message: "unmigrated" }
+            : null,
+      });
+
+      expect(
+        await getLinkForMatter(asDb(db), "user-1", "u@test", "7"),
+      ).toBeNull();
+    },
+  );
+
+  it("prefers the caller's OWN link when a matter carries several", async () => {
+    const colleagueLink = {
+      ...LINK_ROW,
+      id: "link-0",
+      project_id: "11111111-2222-3333-4444-555555555555",
+      created_by: "user-2",
+      // Older, so it would win on created_at alone.
+      created_at: "2026-08-01T00:00:00.000Z",
+    };
     const db = await connectedDb({
-      errorFor: (table) =>
-        table === "matter_workspace_links"
-          ? { code: "42P01", message: "unmigrated" }
-          : null,
+      rows: {
+        matter_workspace_links: [colleagueLink, LINK_ROW],
+        projects: [
+          { id: PROJECT_ID, name: "Mine" },
+          { id: colleagueLink.project_id, name: "Theirs" },
+        ],
+      },
+    });
+    // Both are readable (say, both firm-visible) — ownership is the tie-break.
+    grantAccess();
+
+    const link = await getLinkForMatter(asDb(db), "user-1", "u@test", "7");
+
+    expect(link?.projectId).toBe(PROJECT_ID);
+    expect(link?.projectName).toBe("Mine");
+  });
+
+  it("falls back to a colleague's link when the caller has none", async () => {
+    const colleagueLink = {
+      ...LINK_ROW,
+      project_id: "11111111-2222-3333-4444-555555555555",
+      created_by: "user-2",
+    };
+    const db = await connectedDb({
+      rows: {
+        matter_workspace_links: [colleagueLink],
+        projects: [{ id: colleagueLink.project_id, name: "Theirs" }],
+      },
+    });
+    grantAccess();
+
+    const link = await getLinkForMatter(asDb(db), "user-1", "u@test", "7");
+
+    expect(link?.projectId).toBe(colleagueLink.project_id);
+  });
+});
+
+describe("getLinkForProject", () => {
+  it("returns the link for an accessible workspace", async () => {
+    const db = await connectedDb({
+      rows: {
+        matter_workspace_links: [LINK_ROW],
+        projects: [{ id: PROJECT_ID, name: "Mine" }],
+      },
+    });
+    grantAccess();
+
+    const link = await getLinkForProject(
+      asDb(db),
+      "user-1",
+      "u@test",
+      PROJECT_ID,
+    );
+
+    expect(link?.clioMatterId).toBe("7");
+  });
+
+  it("returns null for a non-uuid id without querying Postgres", async () => {
+    const db = await connectedDb({
+      errorFor: () => ({ code: "22P02", message: "invalid input syntax" }),
     });
 
     expect(
-      await getLinkForMatter(asDb(db), "user-1", "u@test", "7"),
+      await getLinkForProject(asDb(db), "user-1", "u@test", "not-a-uuid"),
     ).toBeNull();
   });
 });
@@ -962,7 +1131,9 @@ describe("linkWorkspace", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("reports already_linked on the unique(project_id) violation", async () => {
+  it("reports the WORKSPACE side on the unique(project_id) violation", async () => {
+    // This workspace is already anchored to a DIFFERENT matter (8), so the
+    // matter-side pre-check passes and the constraint is what stops it.
     const db = await connectedDb({
       rows: { matter_workspace_links: [{ ...LINK_ROW, clio_matter_id: "8" }] },
     });
@@ -974,15 +1145,44 @@ describe("linkWorkspace", () => {
         projectId: PROJECT_ID,
         clioMatterId: "7",
       }),
-    ).toBe("already_linked");
+    ).toBe("workspace_already_linked");
   });
 
-  it("degrades to unsupported on an unmigrated links table", async () => {
+  it("reports the MATTER side when it already has a visible workspace", async () => {
+    // A different workspace is already linked to matter 7; linking a second one
+    // would make getLinkForMatter's answer order-dependent, so it is refused
+    // before anything is written.
     const db = await connectedDb({
-      errorFor: (table, op) =>
-        table === "matter_workspace_links" && op === "insert"
-          ? { code: "42P01", message: "unmigrated" }
-          : null,
+      rows: {
+        matter_workspace_links: [
+          {
+            ...LINK_ROW,
+            project_id: "11111111-2222-3333-4444-555555555555",
+          },
+        ],
+        projects: [{ id: PROJECT_ID, name: "Another workspace" }],
+      },
+    });
+    grantAccess();
+    const calls = stubFetch(() => json({ data: MATTER_ROW }));
+
+    expect(
+      await linkWorkspace(asDb(db), "user-1", "u@test", {
+        projectId: PROJECT_ID,
+        clioMatterId: "7",
+      }),
+    ).toBe("already_linked");
+    // Refused before spending a Clio call on the matter lookup.
+    expect(calls).toHaveLength(0);
+    expect(db.rows("matter_workspace_links")).toHaveLength(1);
+  });
+
+  it("treats re-linking the SAME workspace as the workspace-side conflict", async () => {
+    const db = await connectedDb({
+      rows: {
+        matter_workspace_links: [LINK_ROW],
+        projects: [{ id: PROJECT_ID, name: "Mine" }],
+      },
     });
     grantAccess();
     stubFetch(() => json({ data: MATTER_ROW }));
@@ -992,8 +1192,29 @@ describe("linkWorkspace", () => {
         projectId: PROJECT_ID,
         clioMatterId: "7",
       }),
-    ).toBe("unsupported");
+    ).toBe("workspace_already_linked");
   });
+
+  it.each(["PGRST205", "42P01"])(
+    "degrades to unsupported on an unmigrated links table (%s)",
+    async (code) => {
+      const db = await connectedDb({
+        errorFor: (table) =>
+          table === "matter_workspace_links"
+            ? { code, message: "unmigrated" }
+            : null,
+      });
+      grantAccess();
+      stubFetch(() => json({ data: MATTER_ROW }));
+
+      expect(
+        await linkWorkspace(asDb(db), "user-1", "u@test", {
+          projectId: PROJECT_ID,
+          clioMatterId: "7",
+        }),
+      ).toBe("unsupported");
+    },
+  );
 });
 
 describe("unlinkWorkspace", () => {
@@ -1093,21 +1314,24 @@ describe("createWorkspaceForMatter", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("creates NO workspace when the links table is unmigrated", async () => {
-    const db = await connectedDb({
-      errorFor: (table) =>
-        table === "matter_workspace_links"
-          ? { code: "42P01", message: "unmigrated" }
-          : null,
-    });
-    const calls = stubFetch(() => json({ data: MATTER_ROW }));
+  it.each(["PGRST205", "42P01"])(
+    "creates NO workspace when the links table is unmigrated (%s)",
+    async (code) => {
+      const db = await connectedDb({
+        errorFor: (table) =>
+          table === "matter_workspace_links"
+            ? { code, message: "unmigrated" }
+            : null,
+      });
+      const calls = stubFetch(() => json({ data: MATTER_ROW }));
 
-    expect(
-      await createWorkspaceForMatter(asDb(db), "user-1", "u@test", "7"),
-    ).toBe("unsupported");
-    expect(db.rows("projects")).toHaveLength(0);
-    expect(calls).toHaveLength(0);
-  });
+      expect(
+        await createWorkspaceForMatter(asDb(db), "user-1", "u@test", "7"),
+      ).toBe("unsupported");
+      expect(db.rows("projects")).toHaveLength(0);
+      expect(calls).toHaveLength(0);
+    },
+  );
 
   it("rolls the workspace back if the link insert fails after creation", async () => {
     const db = await connectedDb({

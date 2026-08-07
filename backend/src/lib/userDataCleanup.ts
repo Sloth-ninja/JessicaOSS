@@ -1,6 +1,7 @@
 import { createServerSupabase } from "./supabase";
 import { deleteFile, listFiles } from "./storage";
 import { isMissingTableOrColumn } from "./companySearchSaves";
+import { isUnmigratedSchemaError } from "./postgrestCodes";
 
 type Db = ReturnType<typeof createServerSupabase>;
 
@@ -431,13 +432,19 @@ export async function deleteUserAccountData(
     // OWN workspaces already go with the `projects` delete above (the fk
     // cascades), so this covers any remaining row they created — the id/number
     // pair is the only Clio artefact JessicaOS stores, and right-to-erasure
-    // must reach it (the lifecycle gap that recurred across four trains). Same
-    // unmigrated-database tolerance as the company-search saves above.
+    // must reach it (the lifecycle gap that recurred across four trains).
+    //
+    // Tolerance uses isUnmigratedSchemaError, NOT isMissingTableOrColumn: a
+    // modern Supabase answers a missing TABLE from PostgREST's schema cache with
+    // PGRST205, never 42P01 (measured against PostgREST 14.16 — DURABLE_LESSONS
+    // 2026-08-07). Without that code an unmigrated database would fail account
+    // deletion outright. Scoped to this call site so companySearchSaves' own
+    // behaviour is unchanged.
     const linksResult = await db
         .from("matter_workspace_links")
         .delete()
         .eq("created_by", userId);
-    if (linksResult.error && !isMissingTableOrColumn(linksResult.error)) {
+    if (linksResult.error && !isUnmigratedSchemaError(linksResult.error)) {
         await throwIfError(linksResult.error, "Failed to delete account data");
     }
 }

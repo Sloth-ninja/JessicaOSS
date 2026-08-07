@@ -114,14 +114,12 @@ beforeEach(() => {
   getMatterDetail.mockReset().mockResolvedValue({ id: "7" });
   getLinkForMatter.mockReset().mockResolvedValue(null);
   listRelatedContacts.mockReset().mockResolvedValue([]);
-  listActivities
-    .mockReset()
-    .mockResolvedValue({
-      activities: [],
-      count: 0,
-      capped: false,
-      everyone: false,
-    });
+  listActivities.mockReset().mockResolvedValue({
+    activities: [],
+    count: 0,
+    capped: false,
+    everyone: false,
+  });
   updateActivity.mockReset().mockResolvedValue({ id: "55" });
   deleteActivity.mockReset().mockResolvedValue(undefined);
   linkWorkspace.mockReset().mockResolvedValue(LINK);
@@ -132,6 +130,16 @@ beforeEach(() => {
 });
 
 describe("authz", () => {
+  it("applies auth at the ROUTER, so no route can be added without it", async () => {
+    // The limiter has to run after auth to key on the user, so auth is mounted
+    // router-level rather than repeated per route — this asserts the ordering
+    // holds (an unauthenticated call is refused before any handler runs).
+    state.authed = false;
+    const res = await fetch(`${baseUrl}/clio-matters/7/activities`);
+    expect(res.status).toBe(401);
+    expect(listActivities).not.toHaveBeenCalled();
+  });
+
   it("401s every route when unauthenticated, without touching the seam", async () => {
     state.authed = false;
     for (const [method, path] of [
@@ -378,13 +386,32 @@ describe("POST /clio-matters/links", () => {
     expect(linkWorkspace).not.toHaveBeenCalled();
   });
 
+  it("distinguishes the matter side from the workspace side in its 409 copy", async () => {
+    // Same status, different remedy: the user must know WHICH end of the
+    // relationship is already spoken for.
+    linkWorkspace.mockResolvedValue("already_linked");
+    const matterSide = await postLink({
+      projectId: PROJECT_ID,
+      clioMatterId: "7",
+    });
+    expect(matterSide.status).toBe(409);
+    expect((await matterSide.json()).detail).toBe(
+      "That matter already has a linked workspace.",
+    );
+
+    linkWorkspace.mockResolvedValue("workspace_already_linked");
+    const workspaceSide = await postLink({
+      projectId: PROJECT_ID,
+      clioMatterId: "7",
+    });
+    expect(workspaceSide.status).toBe(409);
+    expect((await workspaceSide.json()).detail).toBe(
+      "That workspace is already linked to a Clio matter.",
+    );
+  });
+
   it("maps each seam outcome onto its own status", async () => {
     linkWorkspace.mockResolvedValue("unsupported");
-    expect(
-      (await postLink({ projectId: PROJECT_ID, clioMatterId: "7" })).status,
-    ).toBe(409);
-
-    linkWorkspace.mockResolvedValue("already_linked");
     expect(
       (await postLink({ projectId: PROJECT_ID, clioMatterId: "7" })).status,
     ).toBe(409);

@@ -10,8 +10,9 @@
 //     `matter_workspace_links`, anchoring a JessicaOS workspace (a `projects`
 //     row) to a Clio matter. That table arrives in migration 20260807_01; until
 //     it is applied every links read/write DEGRADES to "unsupported"
-//     (42P01/42703/PGRST204) rather than throwing, so the rest of the surface
-//     keeps working on an unmigrated database.
+//     (PGRST205/42P01/42703/PGRST204 — see isLinksSchemaMissing) rather than
+//     throwing, so the rest of the surface keeps working on an unmigrated
+//     database.
 //   - A short in-memory list cache (per user+tab+query+status, 60s TTL, capped)
 //     absorbs tab-switching. Nothing survives a restart; it is cleared for the
 //     caller on every activity write.
@@ -34,6 +35,7 @@
 
 import { checkProjectAccess } from "../access";
 import { getUserOrganisationId } from "../organisations";
+import { isUnmigratedSchemaError } from "../postgrestCodes";
 import { safeErrorLog } from "../safeError";
 import { createServerSupabase } from "../supabase";
 import { ClioApiError, ClioAuthError, clioRequest } from "./client";
@@ -185,8 +187,13 @@ export interface MatterActivity {
   billed: boolean;
   price: number | null;
   total: number | null;
-  /** True when price/total were withheld by permissions (null, not zero). */
-  amountsHidden: boolean;
+  /**
+   * True when Clio returned no price AND no total. That can mean a permissions
+   * redaction OR simply a rate-less entry, so the UI must render it as "—" /
+   * "not available", never as the "Hidden by your Clio permissions" claim —
+   * only `quantityRedacted` states redaction outright.
+   */
+  amountsUnavailable: boolean;
   user: ClioRef | null;
   isOwn: boolean;
   /** Billed entries are locked: no edit/delete until the write probe lands. */
@@ -213,7 +220,10 @@ export type LinkFailure =
   | "unsupported"
   | "not_found"
   | "forbidden"
-  | "already_linked";
+  /** The MATTER already has a workspace this caller can see. */
+  | "already_linked"
+  /** The WORKSPACE is already anchored to a matter (unique(project_id)). */
+  | "workspace_already_linked";
 
 export interface CreatedWorkspace {
   link: MatterWorkspaceLink;
@@ -297,15 +307,13 @@ function normaliseMatter(row: Record<string, unknown>): MatterListRow | null {
 }
 
 /**
- * True when a Supabase error means migration 20260807_01 has not run. Filters on
- * a missing table/column raise 42P01/42703, while an INSERT/UPDATE payload
- * naming a missing column is rejected by PostgREST's schema cache as PGRST204
- * before Postgres sees it — both must degrade (DURABLE_LESSONS 2026-08-05).
+ * True when a Supabase error means migration 20260807_01 has not run. Thin
+ * alias over the shared predicate — the code table and the measurements behind
+ * it live in lib/postgrestCodes.ts (PGRST205 is the code that actually fires
+ * for a missing table on Supabase; 42P01 alone would never match).
  */
 export function isLinksSchemaMissing(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const code = (error as { code?: unknown }).code;
-  return code === "42P01" || code === "42703" || code === "PGRST204";
+  return isUnmigratedSchemaError(error);
 }
 
 /** Postgres unique_violation — the `unique(project_id)` link constraint. */
@@ -320,6 +328,10 @@ function isUniqueViolation(error: unknown): boolean {
  * 404 round-trip (and never becomes path structure — see the parse-not-prefix
  * rule, DURABLE_LESSONS 2026-07-28).
  */
+/** Workspace (project) ids are uuids — guarded before they reach Postgres. */
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export function isClioId(value: unknown): value is string {
   return typeof value === "string" && /^[0-9]{1,20}$/.test(value);
 }
@@ -735,7 +747,11 @@ function normaliseActivity(
     billed,
     price,
     total,
-    amountsHidden: price === null && total === null,
+    // Deliberately "unavailable", NOT "hidden": a null price/total can equally
+    // mean a rate-less entry, so the UI must not claim "Hidden by your Clio
+    // permissions" off the back of it. `quantityRedacted` is Clio's ONLY
+    // explicit redaction signal and is passed through untouched.
+    amountsUnavailable: price === null && total === null,
     user,
     isOwn: !!clioUserId && !!user && user.id === clioUserId,
     // Probe-gated: billed entries carry no edit/delete affordance, and the
@@ -829,6 +845,12 @@ export interface ActivityPatch {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_NOTE_LENGTH = 4000;
 
+// An etag becomes an outbound HTTP header VALUE, so it is constrained to
+// printable ASCII and a sane length before it can travel — a client-supplied
+// string must never be able to carry control characters (header injection) or
+// an unbounded body into a request we issue.
+const ETAG_RE = /^[\x21-\x7e]{1,200}$/;
+
 /**
  * Update one of the caller's own time entries with optimistic concurrency.
  *
@@ -877,8 +899,12 @@ export async function updateActivity(
     throw new ClioValidationError("There is nothing to change on that entry.");
   }
 
-  const current = await assertEditableActivity(db, userId, activityId);
   const clientEtag = patch.etag?.trim();
+  if (clientEtag && !ETAG_RE.test(clientEtag)) {
+    throw new ClioValidationError(ETAG_CONFLICT_DETAIL);
+  }
+
+  const current = await assertEditableActivity(db, userId, activityId);
   if (clientEtag && current.etag && clientEtag !== current.etag) {
     throw new ClioApiError(ETAG_CONFLICT_DETAIL, 412);
   }
@@ -936,8 +962,12 @@ interface LinkRow {
   project_id: string;
   clio_matter_id: string;
   clio_display_number: string | null;
+  created_by: string | null;
   created_at: string | null;
 }
+
+const LINK_COLUMNS =
+  "project_id, clio_matter_id, clio_display_number, created_by, created_at";
 
 function toLink(row: LinkRow, projectName: string | null): MatterWorkspaceLink {
   return {
@@ -960,8 +990,11 @@ async function selectLinks(
 ): Promise<LinkRow[] | "unsupported"> {
   const { data, error } = await db
     .from(LINKS_TABLE)
-    .select("project_id, clio_matter_id, clio_display_number, created_at")
+    .select(LINK_COLUMNS)
     .eq(column, value)
+    // Deterministic candidate order: oldest link first, so which workspace a
+    // multi-linked matter resolves to never depends on Postgres's row order.
+    .order("created_at", { ascending: true })
     .limit(MAX_LINK_CANDIDATES);
   if (error) {
     if (isLinksSchemaMissing(error)) return "unsupported";
@@ -1003,7 +1036,15 @@ async function findAccessibleLink(
   if (rows === "unsupported") return "unsupported";
   if (rows.length === 0) return null;
   const userOrgId = await getUserOrganisationId(db, userId);
-  for (const row of rows) {
+  // The caller's OWN link wins over a colleague's when a matter carries more
+  // than one — otherwise "open the workspace" could send them to someone
+  // else's simply because it was created first. `selectLinks` already fixed the
+  // tie-break order, so this is a stable partition, not a re-sort.
+  const candidates = [
+    ...rows.filter((row) => row.created_by === userId),
+    ...rows.filter((row) => row.created_by !== userId),
+  ];
+  for (const row of candidates) {
     const access = await checkProjectAccess(
       row.project_id,
       userId,
@@ -1035,6 +1076,9 @@ export async function getLinkForProject(
   userEmail: string | null | undefined,
   projectId: string,
 ): Promise<MatterWorkspaceLink | null> {
+  // Workspace ids are uuids; a malformed one would reach Postgres as 22P02 and
+  // surface as a 500 rather than the "no link" this should answer.
+  if (!UUID_RE.test(projectId)) return null;
   const rows = await selectLinks(db, "project_id", projectId);
   if (rows === "unsupported" || rows.length === 0) return null;
   const userOrgId = await getUserOrganisationId(db, userId);
@@ -1058,7 +1102,7 @@ async function insertLink(
     clioDisplayNumber: string | null;
     organisationId: string | null;
   },
-): Promise<LinkRow | "unsupported" | "already_linked"> {
+): Promise<LinkRow | "unsupported" | "workspace_already_linked"> {
   const { data, error } = await db
     .from(LINKS_TABLE)
     .insert({
@@ -1068,11 +1112,14 @@ async function insertLink(
       organisation_id: input.organisationId,
       created_by: userId,
     })
-    .select("project_id, clio_matter_id, clio_display_number, created_at")
+    .select(LINK_COLUMNS)
     .single();
   if (error) {
     if (isLinksSchemaMissing(error)) return "unsupported";
-    if (isUniqueViolation(error)) return "already_linked";
+    // The constraint is unique(project_id), so this is always the WORKSPACE
+    // side of the relationship — that workspace is already anchored to some
+    // matter. The matter side is caught by the pre-check in linkWorkspace.
+    if (isUniqueViolation(error)) return "workspace_already_linked";
     throw error;
   }
   return data as LinkRow;
@@ -1100,6 +1147,20 @@ export async function linkWorkspace(
   if (!access.ok) return "not_found";
   if (!access.isOwner) return "forbidden";
 
+  // Same matter-side pre-check createWorkspaceForMatter runs, so both entry
+  // points answer identically when the caller can already see a workspace for
+  // this matter — without it, linking here would quietly create a SECOND link
+  // for the matter and make `getLinkForMatter` order-dependent.
+  const existing = await findAccessibleLink(db, userId, userEmail, matterId);
+  if (existing === "unsupported") return "unsupported";
+  if (existing) {
+    // Re-linking the very workspace that is already linked is a no-op, not an
+    // error — report it as the workspace-side conflict it is.
+    return existing.projectId === input.projectId
+      ? "workspace_already_linked"
+      : "already_linked";
+  }
+
   // Confirms the caller's own Clio token can see the matter (never trust a
   // client-supplied display number) before anything is stored.
   const matter = await getMatterSummary(db, userId, matterId);
@@ -1111,7 +1172,7 @@ export async function linkWorkspace(
     clioDisplayNumber: matter.displayNumber,
     organisationId: userOrgId,
   });
-  if (row === "unsupported" || row === "already_linked") return row;
+  if (row === "unsupported" || row === "workspace_already_linked") return row;
   return toLink(row, await loadProjectName(db, input.projectId));
 }
 
@@ -1135,7 +1196,11 @@ export async function unlinkWorkspace(
   const { error } = await db
     .from(LINKS_TABLE)
     .delete()
-    .eq("project_id", projectId);
+    .eq("project_id", projectId)
+    // Defence in depth: links are only ever created by the workspace owner, so
+    // this predicate is redundant with the ownership check above — but it means
+    // an ownership-check regression can still never delete another user's row.
+    .eq("created_by", userId);
   if (error) {
     if (isLinksSchemaMissing(error)) return "unsupported";
     throw error;
@@ -1223,7 +1288,7 @@ export async function createWorkspaceForMatter(
     clioDisplayNumber: matter.displayNumber,
     organisationId: userOrgId,
   });
-  if (row === "unsupported" || row === "already_linked") {
+  if (row === "unsupported" || row === "workspace_already_linked") {
     // Roll the workspace back — a matter created for a link that never landed
     // is an orphan the user never asked for. Best-effort: a failed cleanup is
     // logged, never masking the outcome the caller must handle.

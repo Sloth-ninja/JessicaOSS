@@ -363,28 +363,43 @@ describe("clioRequest — caller-supplied headers", () => {
     expect(headers.Authorization).toBe("Bearer access-1");
   });
 
-  it("cannot override Authorization, Accept or the X-API-VERSION pin", async () => {
-    const db = await seed("manage");
-    const calls: RequestInit[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (_url: string, init: RequestInit) => {
-        calls.push(init);
-        return json({ data: [] });
-      }),
-    );
+  // The dangerous case is a caller header whose name differs only in CASE from
+  // one of ours. Object spread is case-sensitive, so `authorization` would sit
+  // happily beside our `Authorization` — and fetch's own `new Headers()` then
+  // JOINS case-differing duplicates into one comma-separated value
+  // ("Bearer attacker, Bearer access-1"), which some servers read first-wins.
+  // Colliding names must therefore be DROPPED, not merged. Asserted through a
+  // real Headers instance, exactly as fetch would build it.
+  it.each([
+    ["authorization", "Bearer attacker"],
+    ["AUTHORIZATION", "Bearer attacker"],
+    ["accept", "text/html"],
+    ["x-api-version", "1.0.0"],
+    ["content-type", "text/plain"],
+  ])(
+    "drops a case-differing %s supplied by the caller",
+    async (name, value) => {
+      const db = await seed("manage");
+      const calls: RequestInit[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: string, init: RequestInit) => {
+          calls.push(init);
+          return json({ data: [] });
+        }),
+      );
 
-    await clioRequest(asDb(db), "user-1", "manage", "/matters.json", {
-      headers: {
-        Authorization: "Bearer attacker",
-        Accept: "text/html",
-        "X-API-VERSION": "1.0.0",
-      },
-    });
+      await clioRequest(asDb(db), "user-1", "manage", "/matters.json", {
+        headers: { [name]: value },
+      });
 
-    const headers = calls[0].headers as Record<string, string>;
-    expect(headers.Authorization).toBe("Bearer access-1");
-    expect(headers.Accept).toBe("application/json");
-    expect(headers["X-API-VERSION"]).not.toBe("1.0.0");
-  });
+      const headers = new Headers(calls[0].headers as Record<string, string>);
+      expect(headers.get("authorization")).toBe("Bearer access-1");
+      expect(headers.get("accept")).toBe("application/json");
+      expect(headers.get("x-api-version")).not.toBe("1.0.0");
+      // No survivor smuggled in beside ours.
+      expect(headers.get("authorization")).not.toContain("attacker");
+      expect(headers.get("accept")).not.toContain("text/html");
+    },
+  );
 });

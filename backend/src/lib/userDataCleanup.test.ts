@@ -188,11 +188,11 @@ describe("deleteUserAccountData — company_search_saves", () => {
 
 const LINK = (userId: string, matterId: string): Row => ({
   id: `${userId}-${matterId}`,
-  created_by: userId,
+  project_id: `project-${matterId}`,
   clio_matter_id: matterId,
-  clio_matter_number: `M-${matterId}`,
-  workspace_type: "project",
-  workspace_id: `workspace-${matterId}`,
+  clio_display_number: `M-${matterId}`,
+  organisation_id: null,
+  created_by: userId,
   created_at: "2026-08-07T00:00:00.000Z",
 });
 
@@ -225,8 +225,12 @@ describe("deleteUserAccountData — matter_workspace_links", () => {
     });
   });
 
-  it.each(["42P01", "42703"])(
-    "tolerates a missing table/column (%s) — account deletion still succeeds",
+  // PGRST205 is the code a real Supabase actually returns for a missing table
+  // (measured against PostgREST 14.16, 07/08 — see isLinksSchemaMissing in
+  // lib/clio/mattersSurface.ts); 42P01 is kept for direct-Postgres self-hosters,
+  // 42703 for a missing column in a filter, PGRST204 for one in a write payload.
+  it.each(["PGRST205", "42P01", "42703", "PGRST204"])(
+    "tolerates a missing/unmigrated links schema (%s) — account deletion still succeeds",
     async (code) => {
       const { db } = makeDb({
         errorFor: (table, op) =>

@@ -43,9 +43,9 @@ artefact is the `matter_workspace_links` id/number pair (its migration
   from the 06/08 spike; **live probe validation is still pending** and the tool
   description no longer promises a phone number the spike did not re-verify.
 - Lifecycle: `userDataCleanup` deletes and `userDataExport` exports
-  `matter_workspace_links` rows by `created_by`, both 42P01/42703-tolerant —
-  closing the erasure/SAR gap proactively rather than in a fix wave (the class
-  that recurred across four trains).
+  `matter_workspace_links` rows by `created_by`, both tolerant of an unmigrated
+  database — closing the erasure/SAR gap proactively rather than in a fix wave
+  (the class that recurred across four trains).
 
 **Probe-gated, per the spec's open questions:** (1) ONE 200-row page only, with
 honest `capped` / `hasMore` / `totalEntries` (the merged "mine" tab claims a
@@ -60,12 +60,54 @@ also excludes tombstoned matters, so another member's private (or soft-deleted)
 workspace on the same matter is never surfaced. Redacted money/hours are
 reported as hidden, never as £0.
 
-**Verification:** `npx tsc --noEmit` clean; full `npx vitest run` **836 passed /
-48 files** (baseline 757 → 79 new: 45 seam, 23 route, 7 lifecycle, 2 selector,
-2 client-header). `prettier --check` clean on all new files and on
-`manageTools.ts` (verified prettier-clean at baseline, so reformatted);
+**Review round (5 should-fixes + 6 nits, all applied):**
+- **PGRST205 — a real defect the review caught.** A missing TABLE on Supabase is
+  PostgREST's `PGRST205` (404, answered from its schema cache), **never**
+  Postgres's `42P01`. Verified empirically against PostgREST 14.16 in a local
+  container (no credentials involved): missing table → `PGRST205`; missing
+  column in a filter → `42703`; missing column in a write payload → `PGRST204`.
+  The 42P01-only degrade would therefore have thrown in production — and, worse,
+  failed **account deletion / SAR export** on an unmigrated database. The code
+  table now lives in a new leaf module `lib/postgrestCodes.ts`
+  (`isUnmigratedSchemaError`). Lesson appended to DURABLE_LESSONS, including the
+  **open sweep**: the pre-existing degrade helpers (`companySearchSaves`,
+  `clio/connections`, `tabularTemplates`, `usageStats`, `deletionGovernance`)
+  still check 42P01 only — correct for their actual missing-column exposure, but
+  flagged to the owner rather than widened in this train.
+- **Per-user rate limiting.** `/clio-matters` now has its own bucket keyed on
+  `res.locals.userId` (IP only pre-auth), living inside the router because an
+  app-level limiter runs before auth. The pilot firm NATs its office through one
+  IP, so the previous IP-keyed research bucket would have let a few solicitors
+  browsing matters take `/companies` and `/legislation` down for everyone. New
+  vars `RATE_LIMIT_CLIO_MATTERS_MAX` (300) / `_WINDOW_MINUTES` (15). Auth moved
+  to router level so the ordering holds and no future route can omit it.
+- **Header seam hardening.** A caller header colliding case-insensitively with a
+  fixed one is now DROPPED: object spread is case-sensitive, and `new Headers()`
+  then *joins* case-differing duplicates ("Bearer attacker, Bearer real").
+- **Link determinism.** `linkWorkspace` gained the matter-side pre-check;
+  candidate rows are ordered by `created_at` with the caller's own link
+  preferred; distinct 409 copy for the workspace side vs the matter side.
+- **Nits:** cross-user cache-isolation test; etag input guard
+  (`/^[\x21-\x7e]{1,200}$/` — a client string becomes a request header);
+  `created_by` predicate on the unlink delete; uuid guard on
+  `getLinkForProject`; lifecycle fixtures corrected to the spec schema;
+  `amountsHidden` → **`amountsUnavailable`** (chosen over gating on
+  `quantity_redacted`: a null price can equally mean a rate-less entry, so only
+  `quantityRedacted` may drive "Hidden by your Clio permissions" copy — the
+  frontend task reads this field).
+
+**Verification:** `npx tsc --noEmit` clean; full `npx vitest run` **871 passed /
+49 files** (baseline 757 → 114 new). `prettier --check` clean on every new file
+and on `manageTools.ts` (verified prettier-clean at baseline, so reformatted);
 `index.ts` / `userDataExport.ts` / `userDataCleanup.ts` were already
 non-conformant upstream and keep minimal diffs.
+
+**Regression caught in-round:** the first attempt imported `isLinksSchemaMissing`
+from the feature seam into `userDataCleanup`, which formed an import cycle
+through `lib/access.ts` and broke an unrelated tombstone test in
+`routes/tabular.test.ts` (a 404 became a 400). Confirmed as ours by re-running
+that suite against a stash of the branch. Hence the dependency-free leaf module:
+lifecycle paths must never import a feature seam.
 
 **Deferred:** frontend (Task 3), migration + schema.sql (Task 1), live probe
 validation + composed-range review (Task 4).
