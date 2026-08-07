@@ -8,6 +8,7 @@ import { ClioApiError } from "../lib/clio/client";
 import { minutesToSeconds } from "../lib/clio/manageTools";
 import { ClioValidationError } from "../lib/clio/toolShared";
 import {
+  areLinksAvailable,
   createWorkspaceForMatter,
   deleteActivity,
   getLinkForMatter,
@@ -265,13 +266,17 @@ clioMattersRouter.get(
     const { userId } = callerOf(res);
     const db = createServerSupabase();
     try {
-      res.json(
-        await listMatters(db, userId, {
-          tab: optionalString(req.query.tab),
-          query: optionalString(req.query.query),
-          status: optionalString(req.query.status),
-        }),
-      );
+      const list = await listMatters(db, userId, {
+        tab: optionalString(req.query.tab),
+        query: optionalString(req.query.query),
+        status: optionalString(req.query.status),
+      });
+      // Carried on the list too, not just on the detail: the "Link to a Clio
+      // matter" affordance lives on the Matters page and in the link picker,
+      // neither of which loads a matter detail. Probed here rather than inside
+      // the seam because the list itself is cached for 60s and a capability
+      // must not be.
+      res.json({ ...list, linksUnavailable: !(await areLinksAvailable(db)) });
     } catch (err) {
       handleClioError(err, res);
     }
@@ -294,7 +299,15 @@ clioMattersRouter.get(
         userEmail,
         req.params.matterId,
       );
-      res.json({ ...detail, link });
+      // "No link" and "linking does not exist here yet" are distinct: the
+      // second must stop the page offering to start a workspace at all, so it
+      // travels as its own flag rather than as an indistinguishable null.
+      const linksUnavailable = link === "unsupported";
+      res.json({
+        ...detail,
+        link: linksUnavailable ? null : link,
+        linksUnavailable,
+      });
     } catch (err) {
       handleClioError(err, res);
     }

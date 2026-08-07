@@ -38,6 +38,7 @@ vi.mock("../middleware/auth", () => ({
 vi.mock("../lib/supabase", () => ({ createServerSupabase: () => ({}) }));
 
 const listMatters = vi.fn();
+const areLinksAvailable = vi.fn();
 const getMatterDetail = vi.fn();
 const getLinkForMatter = vi.fn();
 const listRelatedContacts = vi.fn();
@@ -54,6 +55,7 @@ vi.mock("../lib/clio/mattersSurface", async (importOriginal) => {
   return {
     ...actual,
     listMatters: (...args: unknown[]) => listMatters(...args),
+    areLinksAvailable: (...args: unknown[]) => areLinksAvailable(...args),
     getMatterDetail: (...args: unknown[]) => getMatterDetail(...args),
     getLinkForMatter: (...args: unknown[]) => getLinkForMatter(...args),
     listRelatedContacts: (...args: unknown[]) => listRelatedContacts(...args),
@@ -111,6 +113,7 @@ beforeEach(() => {
     hasMore: false,
     tab: "mine",
   });
+  areLinksAvailable.mockReset().mockResolvedValue(true);
   getMatterDetail.mockReset().mockResolvedValue({ id: "7" });
   getLinkForMatter.mockReset().mockResolvedValue(null);
   listRelatedContacts.mockReset().mockResolvedValue([]);
@@ -174,6 +177,18 @@ describe("GET /clio-matters", () => {
     });
   });
 
+  it.each([true, false])(
+    "carries linksUnavailable on the list too (available=%s)",
+    async (available) => {
+      // The "Link to a Clio matter" affordance lives on the Matters page and in
+      // the picker, neither of which loads a matter detail — so the capability
+      // has to ride the list as well.
+      areLinksAvailable.mockResolvedValue(available);
+      const res = await fetch(`${baseUrl}/clio-matters`);
+      expect((await res.json()).linksUnavailable).toBe(!available);
+    },
+  );
+
   it("surfaces a validation failure as a 400 with its own message", async () => {
     listMatters.mockRejectedValue(
       new ClioValidationError("Choose either your matters or all matters."),
@@ -212,6 +227,7 @@ describe("GET /clio-matters/:matterId", () => {
       id: "7",
       displayNumber: "0001-0007",
       link: LINK,
+      linksUnavailable: false,
     });
     expect(getLinkForMatter).toHaveBeenCalledWith(
       expect.anything(),
@@ -219,6 +235,21 @@ describe("GET /clio-matters/:matterId", () => {
       "caller@example.test",
       "7",
     );
+  });
+
+  it("reports linksUnavailable when the seam says linking is unsupported", async () => {
+    // The unmigrated case. `link` still has to be null (there is nothing to
+    // open), but the flag is what tells the page to stop offering to START a
+    // workspace — a button that could only ever be refused.
+    getMatterDetail.mockResolvedValue({ id: "7" });
+    getLinkForMatter.mockResolvedValue("unsupported");
+    const res = await fetch(`${baseUrl}/clio-matters/7`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      id: "7",
+      link: null,
+      linksUnavailable: true,
+    });
   });
 
   it("passes a Clio 404 through as a 404", async () => {

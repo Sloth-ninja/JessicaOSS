@@ -26,6 +26,10 @@ interface Props {
     projectName: string | null;
     onClose: () => void;
     onLinked?: (link: ClioWorkspaceLink) => void;
+    /** Reports whether workspace linking exists on this deployment. The picker
+     *  is the first thing to learn it (it lists matters on open), so it tells
+     *  the page, which then stops offering the action at all. */
+    onLinksUnavailable?: (unavailable: boolean) => void;
 }
 
 const SEARCH_DEBOUNCE_MS = 350;
@@ -36,6 +40,7 @@ export function LinkClioMatterModal({
     projectName,
     onClose,
     onLinked,
+    onLinksUnavailable,
 }: Props) {
     const [search, setSearch] = useState("");
     const [debounced, setDebounced] = useState("");
@@ -44,6 +49,7 @@ export function LinkClioMatterModal({
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [linking, setLinking] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [linksUnavailable, setLinksUnavailable] = useState(false);
     const seqRef = useRef(0);
 
     // Debounce the search box so typing does not spend Clio's request budget.
@@ -76,6 +82,8 @@ export function LinkClioMatterModal({
                 if (seqRef.current !== seq) return;
                 setMatters(loaded.matters);
                 setListError(null);
+                setLinksUnavailable(loaded.linksUnavailable);
+                onLinksUnavailable?.(loaded.linksUnavailable);
             } catch (err) {
                 if (isAbort(err) || seqRef.current !== seq) return;
                 setMatters([]);
@@ -89,7 +97,7 @@ export function LinkClioMatterModal({
         };
         void run();
         return () => controller.abort();
-    }, [debounced, open]);
+    }, [debounced, open, onLinksUnavailable]);
 
     const handleClose = useCallback(() => {
         if (linking) return;
@@ -141,7 +149,8 @@ export function LinkClioMatterModal({
             primaryAction={{
                 label: linking ? "Linking…" : "Link matter",
                 onClick: () => void handleLink(),
-                disabled: !selectedId || linking || !projectId,
+                disabled:
+                    !selectedId || linking || !projectId || linksUnavailable,
             }}
             cancelAction={{ label: "Cancel", onClick: handleClose }}
         >
@@ -180,7 +189,13 @@ export function LinkClioMatterModal({
                 </div>
 
                 <div className="flex-1 overflow-y-auto pb-2">
-                    {matters === null ? (
+                    {linksUnavailable ? (
+                        /* The picker would otherwise let a solicitor choose a
+                           matter and only then be refused. */
+                        <p className="py-8 text-center text-sm text-gray-500">
+                            Workspace linking isn&rsquo;t available yet.
+                        </p>
+                    ) : matters === null ? (
                         <div className="flex flex-col gap-2 py-3">
                             {[0, 1, 2].map((i) => (
                                 <div

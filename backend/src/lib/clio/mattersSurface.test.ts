@@ -985,8 +985,11 @@ describe("getLinkForMatter", () => {
 
   // PGRST205 first: it is the code a live Supabase actually returns for a
   // missing table, so this is the case that fires before the migration lands.
+  // The sentinel — NOT null — is what reaches the route: "there is no link" and
+  // "linking does not exist here yet" have to stay distinguishable, because
+  // only the second one must stop the page offering to start a workspace.
   it.each(["PGRST205", "42P01"])(
-    "degrades to null on an unmigrated links table (%s)",
+    "reports the unsupported sentinel on an unmigrated links table (%s)",
     async (code) => {
       const db = await connectedDb({
         errorFor: (table) =>
@@ -995,9 +998,9 @@ describe("getLinkForMatter", () => {
             : null,
       });
 
-      expect(
-        await getLinkForMatter(asDb(db), "user-1", "u@test", "7"),
-      ).toBeNull();
+      expect(await getLinkForMatter(asDb(db), "user-1", "u@test", "7")).toBe(
+        "unsupported",
+      );
     },
   );
 
@@ -1024,8 +1027,10 @@ describe("getLinkForMatter", () => {
 
     const link = await getLinkForMatter(asDb(db), "user-1", "u@test", "7");
 
-    expect(link?.projectId).toBe(PROJECT_ID);
-    expect(link?.projectName).toBe("Mine");
+    expect(link).toMatchObject({
+      projectId: PROJECT_ID,
+      projectName: "Mine",
+    });
   });
 
   it("falls back to a colleague's link when the caller has none", async () => {
@@ -1044,7 +1049,7 @@ describe("getLinkForMatter", () => {
 
     const link = await getLinkForMatter(asDb(db), "user-1", "u@test", "7");
 
-    expect(link?.projectId).toBe(colleagueLink.project_id);
+    expect(link).toMatchObject({ projectId: colleagueLink.project_id });
   });
 });
 

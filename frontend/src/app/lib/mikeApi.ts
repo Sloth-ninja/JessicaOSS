@@ -2071,6 +2071,10 @@ export interface ClioMattersList {
     capped: boolean;
     hasMore: boolean;
     tab: ClioMattersTab;
+    /** True when workspace linking is not available on this deployment (its
+     *  migration has not run). Surfaces must HIDE the link affordances rather
+     *  than offer a button that can only refuse. */
+    linksUnavailable: boolean;
 }
 
 export interface ClioCustomField {
@@ -2118,6 +2122,10 @@ export interface ClioMatterDetail extends ClioMatterRow {
     financialsUnavailable: boolean;
     /** The caller-visible JessicaOS workspace anchored to this matter. */
     link: ClioWorkspaceLink | null;
+    /** True when workspace linking is not available on this deployment — a
+     *  different fact from `link: null` ("no workspace yet"), and the only one
+     *  that means the page must not offer to start one. */
+    linksUnavailable: boolean;
 }
 
 export interface ClioMatterContact {

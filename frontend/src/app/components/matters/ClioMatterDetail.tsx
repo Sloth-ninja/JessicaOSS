@@ -641,6 +641,19 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
                                                 </button>
                                             </div>
                                         </div>
+                                    ) : matter.linksUnavailable ? (
+                                        /* Not "no workspace yet" — the feature
+                                           itself is not available on this
+                                           deployment, so offering a button that
+                                           could only refuse would be a lie. */
+                                        <div className="flex flex-col items-start gap-3 rounded-lg border border-dashed border-gray-200 px-4 py-3.5">
+                                            <p className="text-[13px] text-gray-500">
+                                                Workspace linking isn&rsquo;t
+                                                available yet. Documents, chats
+                                                and reviews still live in your
+                                                workspaces on the Matters page.
+                                            </p>
+                                        </div>
                                     ) : (
                                         <div className="flex flex-col items-start gap-3 rounded-lg border border-dashed border-gray-200 px-4 py-3.5">
                                             <p className="text-[13px] text-gray-500">

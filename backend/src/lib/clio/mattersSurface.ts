@@ -1058,15 +1058,48 @@ async function findAccessibleLink(
   return null;
 }
 
+/**
+ * The caller-visible link for a matter.
+ *
+ * Returns the "unsupported" sentinel rather than collapsing it to null: "there
+ * is no link" and "linking does not exist on this deployment yet" are different
+ * facts, and only the second one means the surface must stop OFFERING to link.
+ * Flattening them is what let the detail page show a "Start workspace" button
+ * that could only ever answer with a 409.
+ */
 export async function getLinkForMatter(
   db: Db,
   userId: string,
   userEmail: string | null | undefined,
   rawMatterId: string,
-): Promise<MatterWorkspaceLink | null> {
+): Promise<MatterWorkspaceLink | null | "unsupported"> {
   const matterId = requireClioId(rawMatterId, "matter id");
-  const link = await findAccessibleLink(db, userId, userEmail, matterId);
-  return link === "unsupported" ? null : link;
+  return await findAccessibleLink(db, userId, userEmail, matterId);
+}
+
+/**
+ * Whether workspace linking is usable at all on this deployment — false until
+ * migration `20260807_01` creates `matter_workspace_links`.
+ *
+ * The link reads and writes already degrade to "unsupported", but a surface has
+ * to know BEFORE it draws an affordance: a "Start workspace" button that always
+ * refuses is a lie, not a degrade. One zero-row probe; a missing table is
+ * answered from PostgREST's schema cache and never reaches Postgres.
+ *
+ * Fails OPEN on any other error (the 2026-07-27 rule: this is an availability
+ * gate, not a destructive operation). A transient DB blip must not tell a
+ * solicitor the feature does not exist — the write path's own fixed refusal is
+ * the honest backstop.
+ */
+export async function areLinksAvailable(db: Db): Promise<boolean> {
+  const { error } = await db.from(LINKS_TABLE).select("project_id").limit(1);
+  if (error) {
+    if (isLinksSchemaMissing(error)) return false;
+    console.error("[clio/matters] links availability probe failed", {
+      error: safeErrorLog(error),
+    });
+  }
+  return true;
 }
 
 /** The link on a given workspace, or null when absent/unsupported/tombstoned. */

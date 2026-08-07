@@ -123,6 +123,14 @@ export function ProjectsOverview() {
     const [statusFilter, setStatusFilter] = useState<string | null>(null);
     const [debouncedQuery, setDebouncedQuery] = useState("");
     const [linkingProject, setLinkingProject] = useState<Project | null>(null);
+    // Workspace linking is gated on its own migration having run. Until a Clio
+    // list answers (the table or the picker — both carry the flag), assume it
+    // works: hiding the action on no evidence would be its own lie.
+    const [linksUnavailable, setLinksUnavailable] = useState(false);
+    const handleLinksUnavailable = useCallback(
+        (unavailable: boolean) => setLinksUnavailable(unavailable),
+        [],
+    );
 
     useEffect(() => {
         if (authLoading || !isAuthenticated) return;
@@ -449,6 +457,7 @@ export function ProjectsOverview() {
                     tab={activeTab}
                     query={debouncedQuery}
                     status={statusFilter}
+                    onLinksUnavailable={handleLinksUnavailable}
                     // A 401 from Clio means the connection needs re-authorising:
                     // fold to Workspaces and show the Frame C banner, which
                     // carries the route back to Account → Connectors.
@@ -589,7 +598,8 @@ export function ProjectsOverview() {
                                                       );
                                                   }}
                                                   onLinkClioMatter={
-                                                      clioConnected
+                                                      clioConnected &&
+                                                      !linksUnavailable
                                                           ? () =>
                                                                 setLinkingProject(
                                                                     project,
@@ -704,7 +714,8 @@ export function ProjectsOverview() {
                                                 setCmEditingId(project.id);
                                             }}
                                             onLinkClioMatter={
-                                                clioConnected
+                                                clioConnected &&
+                                                !linksUnavailable
                                                     ? () =>
                                                           setLinkingProject(
                                                               project,
@@ -749,6 +760,7 @@ export function ProjectsOverview() {
                 projectId={linkingProject?.id ?? null}
                 projectName={linkingProject?.name ?? null}
                 onClose={() => setLinkingProject(null)}
+                onLinksUnavailable={handleLinksUnavailable}
             />
 
             <OwnerOnlyModal

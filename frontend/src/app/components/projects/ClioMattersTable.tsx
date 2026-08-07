@@ -44,6 +44,9 @@ interface Props {
     status: string | null;
     /** Raised when Clio says the connection needs re-authorising (401). */
     onReconnectNeeded?: () => void;
+    /** Reports whether workspace linking exists on this deployment, so the
+     *  page can stop offering "Link to a Clio matter" when it does not. */
+    onLinksUnavailable?: (unavailable: boolean) => void;
 }
 
 function loadErrorMessage(err: unknown): string {
@@ -83,6 +86,7 @@ export function ClioMattersTable({
     query,
     status,
     onReconnectNeeded,
+    onLinksUnavailable,
 }: Props) {
     const router = useRouter();
     const [result, setResult] = useState<ClioMattersList | null>(null);
@@ -111,6 +115,7 @@ export function ClioMattersTable({
                 if (seqRef.current !== seq) return;
                 setResult(loaded);
                 setLoadError(null);
+                onLinksUnavailable?.(loaded.linksUnavailable);
             } catch (err) {
                 if (isAbort(err) || seqRef.current !== seq) return;
                 if (err instanceof MikeApiError && err.status === 401) {
@@ -122,7 +127,7 @@ export function ClioMattersTable({
         };
         void run();
         return () => controller.abort();
-    }, [tab, query, status, reloadKey, onReconnectNeeded]);
+    }, [tab, query, status, reloadKey, onReconnectNeeded, onLinksUnavailable]);
 
     const retry = useCallback(() => {
         setLoadError(null);
