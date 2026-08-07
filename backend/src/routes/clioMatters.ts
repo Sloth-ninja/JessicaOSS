@@ -1,6 +1,6 @@
 import { Router } from "express";
 import type { Request, Response } from "express";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../lib/asyncHandler";
 import { createServerSupabase } from "../lib/supabase";
@@ -73,8 +73,20 @@ const clioMattersLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => req.method === "OPTIONS",
-  keyGenerator: (req: Request, res: Response) =>
-    (res.locals.userId as string | undefined) ?? req.ip ?? "unknown",
+  // Namespaced so a user id can never collide with an address literal.
+  keyGenerator: (req: Request, res: Response) => {
+    const userId = res.locals.userId as string | undefined;
+    if (userId) return `user:${userId}`;
+    // Unreachable in practice: requireAuth is mounted ahead of this limiter on
+    // the same router and 401s before it when there is no session, so
+    // res.locals.userId is always populated by the time we get here. Kept as a
+    // pre-auth belt, and routed through `ipKeyGenerator` because a raw req.ip
+    // gives every address in an IPv6 /64 its own bucket — one client can hold
+    // trillions, so the limit would be trivially bypassable. Passing req.ip
+    // straight through is what express-rate-limit refuses as
+    // ERR_ERL_KEY_GEN_IPV6 (observed in the route suite before this change).
+    return req.ip ? `ip:${ipKeyGenerator(req.ip)}` : "ip:unknown";
+  },
   message: {
     detail: "Too many Clio requests. Please try again shortly.",
   },
