@@ -57,7 +57,14 @@ function loadErrorMessage(err: unknown): string {
             return err.message;
         }
         if (err.status === 429) {
-            return "Clio is rate-limiting requests. Please try again in a minute.";
+            // A 429 here is EITHER our own per-user bucket or Clio's — and the
+            // server words each differently. Overwriting both with "Clio is
+            // rate-limiting requests" blamed Clio for limits we imposed, so the
+            // server's own detail wins and the fallback stays neutral.
+            return (
+                err.message ||
+                "Too many requests. Please wait a moment and try again."
+            );
         }
     }
     return "Clio didn’t respond. Your workspaces are still available on the Workspaces tab.";

@@ -225,11 +225,17 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
             } catch (err) {
                 if (isAbort(err) || matterSeq.current !== seq) return;
                 setMatter(null);
+                // 429 included deliberately: that status can come from our own
+                // per-user bucket, and "Clio didn't respond" would blame Clio
+                // for a limit JessicaOS imposed. The server's detail is fixed
+                // and user-safe in every one of these cases.
                 setLoadError(
                     err instanceof MikeApiError &&
+                        err.message &&
                         (err.status === 401 ||
                             err.status === 403 ||
-                            err.status === 404)
+                            err.status === 404 ||
+                            err.status === 429)
                         ? err.message
                         : "Clio didn’t respond. This matter could not be loaded.",
                 );
@@ -288,7 +294,10 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
                 setActivities(null);
                 setActivitiesError(
                     err instanceof MikeApiError &&
-                        (err.status === 401 || err.status === 403)
+                        err.message &&
+                        (err.status === 401 ||
+                            err.status === 403 ||
+                            err.status === 429)
                         ? err.message
                         : "Could not load time entries from Clio.",
                 );
@@ -372,6 +381,15 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
             setDeleteStatus("idle");
         } catch (err) {
             setDeleteStatus("idle");
+            // A 404 means the entry is ALREADY gone from Clio (deleted in
+            // another window). Leaving the row on screen invites the solicitor
+            // to try again forever, so drop it — the outcome they asked for has
+            // in fact happened — while still reporting what occurred.
+            if (err instanceof MikeApiError && err.status === 404) {
+                setActivities((prev) =>
+                    prev ? prev.filter((a) => a.id !== deleting.id) : prev,
+                );
+            }
             setDeleting(null);
             setEntryError(
                 err instanceof MikeApiError && err.message

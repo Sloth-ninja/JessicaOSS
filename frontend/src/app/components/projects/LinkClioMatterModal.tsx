@@ -89,7 +89,10 @@ export function LinkClioMatterModal({
                 setMatters([]);
                 setListError(
                     err instanceof MikeApiError &&
-                        (err.status === 401 || err.status === 403)
+                        err.message &&
+                        (err.status === 401 ||
+                            err.status === 403 ||
+                            err.status === 429)
                         ? err.message
                         : "Could not load matters from Clio. Please try again.",
                 );

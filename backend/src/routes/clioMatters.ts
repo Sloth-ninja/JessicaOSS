@@ -12,6 +12,7 @@ import {
   createWorkspaceForMatter,
   deleteActivity,
   getLinkForMatter,
+  getLinkForProject,
   getMatterDetail,
   linkWorkspace,
   listActivities,
@@ -91,7 +92,11 @@ const clioMattersLimiter = rateLimit({
     return req.ip ? `ip:${ipKeyGenerator(req.ip)}` : "ip:unknown";
   },
   message: {
-    detail: "Too many Clio requests. Please try again shortly.",
+    // This is OUR bucket, not Clio's. "Too many Clio requests" sent a solicitor
+    // looking at their Clio account for a limit we imposed — and a genuine Clio
+    // 429 has its own, separate message that passes through handleClioError.
+    // Neutral wording keeps the two distinguishable.
+    detail: "Too many requests. Please wait a moment and try again.",
   },
 });
 
@@ -110,6 +115,11 @@ const WORKSPACE_ALREADY_LINKED_DETAIL =
   "That workspace is already linked to a Clio matter.";
 const NOT_WORKSPACE_OWNER_DETAIL =
   "Only the owner of a workspace can link or unlink it.";
+// One answer for every kind of "no" on a link lookup — absent, not visible to
+// this caller, malformed id, or feature not available on this deployment. A
+// differentiated 404 here would confirm which workspaces exist to someone
+// guessing ids (the "never surface differentiated errors" rule, 19/07).
+const LINK_NOT_FOUND_DETAIL = "No Clio matter is linked to that workspace.";
 
 // Clio statuses that are meaningful to a browser client; anything else (a Clio
 // 5xx, an unmapped code) becomes a 502 — this server is not broken, its
@@ -230,6 +240,38 @@ clioMattersRouter.post(
           .json({ detail: WORKSPACE_NOT_FOUND_DETAIL });
       }
       res.status(201).json(outcome);
+    } catch (err) {
+      handleClioError(err, res);
+    }
+  }),
+);
+
+// GET /clio-matters/links/:projectId — the Clio matter a workspace is anchored
+// to, if any. Reads through the same access choke point as everything else, so
+// a colleague's private (or tombstoned) workspace is simply "no link" here, and
+// the payload carries `isOwner` so a caller knows whether unlinking is theirs
+// to do without having to try it.
+clioMattersRouter.get(
+  "/links/:projectId",
+  asyncHandler(async (req, res) => {
+    const { userId, userEmail } = callerOf(res);
+    // Guarded here as well as in the seam: a malformed id is a fixed 404, never
+    // a 22P02 round-trip to Postgres surfacing as a generic 500.
+    if (!UUID_RE.test(req.params.projectId)) {
+      return void res.status(404).json({ detail: LINK_NOT_FOUND_DETAIL });
+    }
+    const db = createServerSupabase();
+    try {
+      const link = await getLinkForProject(
+        db,
+        userId,
+        userEmail,
+        req.params.projectId,
+      );
+      if (!link) {
+        return void res.status(404).json({ detail: LINK_NOT_FOUND_DETAIL });
+      }
+      res.json(link);
     } catch (err) {
       handleClioError(err, res);
     }

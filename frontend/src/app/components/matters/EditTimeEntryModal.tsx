@@ -80,12 +80,17 @@ export function EditTimeEntryModal({
         } catch (err) {
             setSaving(false);
             // Fixed, user-safe details from the server (the #72 pattern).
-            // Only a CONFLICT is answered by reloading — 409 (billed) or 412
-            // (the entry moved under us). A 400 is a validation complaint about
-            // what was typed, so the message is shown and the edit is KEPT:
-            // offering "Reload" there would throw the user's work away.
+            // Reloading is the remedy whenever the LIST on screen is stale:
+            // 409 (billed), 412 (the entry moved under us), and 404 — the entry
+            // no longer exists in Clio, usually deleted by the fee earner in
+            // another window, so the row being edited is a ghost. A 400 is a
+            // validation complaint about what was typed, so the message is
+            // shown and the edit is KEPT: offering "Reload" there would throw
+            // the user's work away.
             const status = err instanceof MikeApiError ? err.status : 0;
-            setConflicted(status === 409 || status === 412);
+            setConflicted(
+                status === 409 || status === 412 || status === 404,
+            );
             setError(
                 err instanceof MikeApiError && err.message
                     ? err.message

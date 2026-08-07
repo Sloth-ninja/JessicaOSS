@@ -2285,6 +2285,24 @@ export async function linkWorkspaceToClioMatter(
     });
 }
 
+/**
+ * The Clio matter a workspace is anchored to.
+ *
+ * Rejects with a 404 MikeApiError when there is no link this caller can see —
+ * deliberately the same answer for an absent link, a workspace they cannot
+ * access, and a deployment where linking is not available, so the response
+ * cannot be used to probe which workspaces exist.
+ */
+export async function getClioMatterLinkForWorkspace(
+    projectId: string,
+    signal?: AbortSignal,
+): Promise<ClioWorkspaceLink> {
+    return apiRequest<ClioWorkspaceLink>(
+        `/clio-matters/links/${encodeURIComponent(projectId)}`,
+        { signal },
+    );
+}
+
 /** Remove a workspace's link to its Clio matter (workspace owner only). */
 export async function unlinkWorkspaceFromClioMatter(
     projectId: string,
