@@ -1,14 +1,29 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FolderOpen, ChevronDown } from "lucide-react";
-import { listProjects, updateProject, deleteProject } from "@/app/lib/mikeApi";
+import {
+    getClioStatus,
+    listProjects,
+    updateProject,
+    deleteProject,
+} from "@/app/lib/mikeApi";
 import { OwnerOnlyModal } from "@/app/components/shared/OwnerOnlyModal";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Project } from "@/app/components/shared/types";
 import { NewProjectModal } from "./NewProjectModal";
+import { ClioMattersTable } from "./ClioMattersTable";
+import { LinkClioMatterModal } from "./LinkClioMatterModal";
+import {
+    isAbort,
+    readStoredMattersTab,
+    storeMattersTab,
+    timeBoxed,
+    type MattersTab,
+} from "@/app/lib/clioMatters";
 import { TableToolbar } from "@/app/components/shared/TableToolbar";
+import { HeaderFilterDropdown } from "@/app/components/shared/HeaderFilterDropdown";
 import {
     RowActionMenuItems,
     RowActions,
@@ -50,6 +65,22 @@ function getProjectOwnerLabel(project: Project, currentUserId?: string | null) {
 
 type ProjectFilter = "all" | "mine" | "shared-with-me";
 
+/**
+ * Whether this solicitor's own Clio Manage login is connected. "unknown" means
+ * the status call itself failed — the Clio tabs stay reachable in that case,
+ * because the list below has its own error+retry; only a definite "no" folds
+ * the page back to Workspaces.
+ */
+type ClioState = "loading" | "connected" | "disconnected" | "unknown";
+
+const MATTER_STATUSES = [
+    { value: "open", label: "Open" },
+    { value: "pending", label: "Pending" },
+    { value: "closed", label: "Closed" },
+];
+
+const SEARCH_DEBOUNCE_MS = 350;
+
 export function ProjectsOverview() {
     const [projects, setProjects] = useState<Project[]>([]);
     const [loading, setLoading] = useState(true);
@@ -67,6 +98,70 @@ export function ProjectsOverview() {
     const actionsRef = useRef<HTMLDivElement>(null);
     const router = useRouter();
     const { user, isAuthenticated, authLoading } = useAuth();
+
+    // ── Clio-backed tabs (Practice Management) ───────────────────────────────
+    const [clioState, setClioState] = useState<ClioState>("loading");
+    // null = no remembered choice yet; the effective tab is derived below so
+    // nothing has to be written back from an effect.
+    const [tabPref, setTabPref] = useState<MattersTab | null>(() =>
+        readStoredMattersTab(),
+    );
+    const [statusFilter, setStatusFilter] = useState<string | null>(null);
+    const [debouncedQuery, setDebouncedQuery] = useState("");
+    const [linkingProject, setLinkingProject] = useState<Project | null>(null);
+
+    useEffect(() => {
+        if (authLoading || !isAuthenticated) return;
+        const controller = new AbortController();
+        const run = async () => {
+            try {
+                // Time-boxed: an unanswered status call must never leave the
+                // tab bar stuck in "loading" (login-spinner lesson, 21/07).
+                const status = await timeBoxed(
+                    (signal) => getClioStatus(signal),
+                    controller.signal,
+                );
+                setClioState(
+                    status.manage.connected ? "connected" : "disconnected",
+                );
+            } catch (err) {
+                if (isAbort(err)) return;
+                setClioState("unknown");
+            }
+        };
+        void run();
+        return () => controller.abort();
+    }, [authLoading, isAuthenticated, user?.id]);
+
+    const clioConnected = clioState === "connected";
+    // A definite "not connected" folds the page back to Workspaces — the
+    // Clio tabs are then absent rather than disabled (the WS8 pattern).
+    const clioTabsAvailable = clioState !== "disconnected";
+    const activeTab: MattersTab =
+        tabPref === null
+            ? clioConnected
+                ? "mine"
+                : "workspaces"
+            : !clioTabsAvailable && tabPref !== "workspaces"
+              ? "workspaces"
+              : tabPref;
+    const isClioTab = activeTab !== "workspaces";
+
+    const selectTab = useCallback((tab: MattersTab) => {
+        setTabPref(tab);
+        storeMattersTab(tab);
+    }, []);
+
+    // Debounce the search box before it becomes a Clio query — typing must not
+    // spend the 50 req/min per-user budget a keystroke at a time.
+    useEffect(() => {
+        const trimmed = search.trim();
+        const timer = setTimeout(
+            () => setDebouncedQuery(trimmed),
+            trimmed ? SEARCH_DEBOUNCE_MS : 0,
+        );
+        return () => clearTimeout(timer);
+    }, [search]);
 
     useEffect(() => {
         if (authLoading) {

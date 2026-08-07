@@ -752,8 +752,10 @@ const CLIO_PRODUCT_MOUNT: Record<ClioProduct, string> = {
     grow: "/clio-grow",
 };
 
-export async function getClioStatus(): Promise<ClioStatus> {
-    return apiRequest<ClioStatus>("/clio/status");
+export async function getClioStatus(
+    signal?: AbortSignal,
+): Promise<ClioStatus> {
+    return apiRequest<ClioStatus>("/clio/status", { signal });
 }
 
 /** Mint an authorise URL to begin connecting the user's own Clio login. */
@@ -2023,5 +2025,259 @@ export async function getPricePaid(
     return apiRequest<{ entries: PricePaidEntry[] }>(
         `/land-registry/price-paid?postcode=${encodeURIComponent(postcode)}`,
         { signal },
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Practice management — Clio-backed Matters (/clio-matters)
+// ---------------------------------------------------------------------------
+// Every one of these is a LIVE read through the caller's own Clio token, so a
+// solicitor sees exactly what their Clio login allows. Nothing about a matter
+// is stored by JessicaOS — the only persisted artefact is the workspace link
+// (id + display number). See docs/PRACTICE_MANAGEMENT_SPEC.md.
+//
+// Durations cross this boundary asymmetrically, exactly as the backend defines
+// them: activities are READ as `quantitySeconds` (Clio's own unit) and WRITTEN
+// as `minutes` (what the UI shows). Do not "tidy" that into one unit.
+
+export interface ClioRef {
+    id: string;
+    name: string | null;
+}
+
+export interface ClioMatterRow {
+    id: string;
+    etag: string | null;
+    displayNumber: string | null;
+    description: string | null;
+    status: string | null;
+    /** ISO `YYYY-MM-DD` — render DD/MM/YYYY. */
+    openDate: string | null;
+    closeDate: string | null;
+    client: ClioRef | null;
+    responsibleSolicitor: ClioRef | null;
+    originatingSolicitor: ClioRef | null;
+    practiceArea: ClioRef | null;
+}
+
+export type ClioMattersTab = "mine" | "all";
+
+export interface ClioMattersList {
+    matters: ClioMatterRow[];
+    count: number;
+    /** Clio's own total when it reports one, else null. */
+    totalEntries: number | null;
+    /** True when this single 200-row page filled up ("showing 200 of N"). */
+    capped: boolean;
+    hasMore: boolean;
+    tab: ClioMattersTab;
+}
+
+export interface ClioCustomField {
+    id: string;
+    name: string | null;
+    type: string | null;
+    value: unknown;
+}
+
+/**
+ * Money/hours a viewer's Clio permissions may WITHHOLD. A withheld figure
+ * arrives as null — which is NOT zero — and the matching `*Hidden` flag is what
+ * licenses the "Hidden by your Clio permissions" copy. Never render £0 for a
+ * hidden value.
+ */
+export interface ClioMatterFinancials {
+    unbilledAmount: number | null;
+    unbilledAmountHidden: boolean;
+    unbilledHours: number | null;
+    unbilledHoursHidden: boolean;
+    amountInTrust: number | null;
+    amountInTrustHidden: boolean;
+    currencyCode: string | null;
+    clientId: string | null;
+    clientName: string | null;
+    /** Clio aggregates outstanding balance PER CLIENT — never per matter. */
+    clientOutstandingBalance: number | null;
+    clientOutstandingBalanceHidden: boolean;
+}
+
+export interface ClioWorkspaceLink {
+    projectId: string;
+    projectName: string | null;
+    clioMatterId: string;
+    clioDisplayNumber: string | null;
+    createdAt: string | null;
+}
+
+export interface ClioMatterDetail extends ClioMatterRow {
+    customFields: ClioCustomField[];
+    /** True when Clio rejected the custom-fields selector (page still loads). */
+    customFieldsUnavailable: boolean;
+    financials: ClioMatterFinancials | null;
+    /** True when the financials calls failed (e.g. billing permissions). */
+    financialsUnavailable: boolean;
+    /** The caller-visible JessicaOS workspace anchored to this matter. */
+    link: ClioWorkspaceLink | null;
+}
+
+export interface ClioMatterContact {
+    id: string;
+    name: string | null;
+    type: string | null;
+    email: string | null;
+}
+
+export interface ClioActivity {
+    id: string;
+    etag: string | null;
+    date: string | null;
+    /** Duration in SECONDS as Clio stores it; null when redacted. */
+    quantitySeconds: number | null;
+    /** Clio's own redaction flag — the ONLY thing that licenses the
+     *  "Hidden by your Clio permissions" wording on an entry. */
+    quantityRedacted: boolean;
+    note: string | null;
+    billable: boolean;
+    billed: boolean;
+    price: number | null;
+    total: number | null;
+    /** No price AND no total. Could be redaction OR a rate-less entry, so this
+     *  renders as "—", never as a permissions claim. */
+    amountsUnavailable: boolean;
+    user: ClioRef | null;
+    isOwn: boolean;
+    /** Billed entries are locked — no edit/delete affordance. */
+    locked: boolean;
+}
+
+export interface ClioActivitiesResult {
+    activities: ClioActivity[];
+    count: number;
+    capped: boolean;
+    /** False = the caller's own entries only (the default). */
+    everyone: boolean;
+}
+
+export interface ClioCreatedWorkspace {
+    link: ClioWorkspaceLink;
+    projectId: string;
+    projectName: string;
+}
+
+/** One 200-row page of matters — `tab` picks mine (default) or the firm list. */
+export async function listClioMatters(
+    options: {
+        tab?: ClioMattersTab;
+        query?: string;
+        status?: string;
+    } = {},
+    signal?: AbortSignal,
+): Promise<ClioMattersList> {
+    const params = new URLSearchParams();
+    if (options.tab) params.set("tab", options.tab);
+    if (options.query) params.set("query", options.query);
+    if (options.status) params.set("status", options.status);
+    const qs = params.toString();
+    return apiRequest<ClioMattersList>(
+        `/clio-matters${qs ? `?${qs}` : ""}`,
+        { signal },
+    );
+}
+
+export async function getClioMatter(
+    matterId: string,
+    signal?: AbortSignal,
+): Promise<ClioMatterDetail> {
+    return apiRequest<ClioMatterDetail>(
+        `/clio-matters/${encodeURIComponent(matterId)}`,
+        { signal },
+    );
+}
+
+export async function getClioMatterContacts(
+    matterId: string,
+    signal?: AbortSignal,
+): Promise<{ contacts: ClioMatterContact[]; count: number }> {
+    return apiRequest<{ contacts: ClioMatterContact[]; count: number }>(
+        `/clio-matters/${encodeURIComponent(matterId)}/contacts`,
+        { signal },
+    );
+}
+
+export async function getClioMatterActivities(
+    matterId: string,
+    options: { everyone?: boolean } = {},
+    signal?: AbortSignal,
+): Promise<ClioActivitiesResult> {
+    return apiRequest<ClioActivitiesResult>(
+        `/clio-matters/${encodeURIComponent(matterId)}/activities${
+            options.everyone ? "?everyone=true" : ""
+        }`,
+        { signal },
+    );
+}
+
+/**
+ * Edit one of the caller's own, unbilled entries. `minutes` is what the UI
+ * collects; the backend converts to Clio's seconds. `etag` carries the
+ * optimistic-concurrency check — a 412 comes back as a 400 telling the user to
+ * reload.
+ */
+export async function updateClioActivity(
+    activityId: string,
+    patch: {
+        minutes?: number;
+        note?: string;
+        date?: string;
+        etag?: string | null;
+    },
+): Promise<ClioActivity> {
+    const { etag, ...rest } = patch;
+    return apiRequest<ClioActivity>(
+        `/clio-matters/activities/${encodeURIComponent(activityId)}`,
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...rest, ...(etag ? { etag } : {}) }),
+        },
+    );
+}
+
+export async function deleteClioActivity(activityId: string): Promise<void> {
+    return apiRequest<void>(
+        `/clio-matters/activities/${encodeURIComponent(activityId)}`,
+        { method: "DELETE" },
+    );
+}
+
+/** Lazily create the matter's JessicaOS workspace and link it. */
+export async function createWorkspaceForClioMatter(
+    matterId: string,
+): Promise<ClioCreatedWorkspace> {
+    return apiRequest<ClioCreatedWorkspace>(
+        `/clio-matters/${encodeURIComponent(matterId)}/workspace`,
+        { method: "POST" },
+    );
+}
+
+/** Anchor an EXISTING workspace to a Clio matter (workspace owner only). */
+export async function linkWorkspaceToClioMatter(
+    projectId: string,
+    clioMatterId: string,
+): Promise<ClioWorkspaceLink> {
+    return apiRequest<ClioWorkspaceLink>("/clio-matters/links", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId, clioMatterId }),
+    });
+}
+
+/** Remove a workspace's link to its Clio matter (workspace owner only). */
+export async function unlinkWorkspaceFromClioMatter(
+    projectId: string,
+): Promise<void> {
+    return apiRequest<void>(
+        `/clio-matters/links/${encodeURIComponent(projectId)}`,
+        { method: "DELETE" },
     );
 }
