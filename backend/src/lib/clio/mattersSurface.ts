@@ -214,6 +214,14 @@ export interface MatterWorkspaceLink {
   clioMatterId: string;
   clioDisplayNumber: string | null;
   createdAt: string | null;
+  /**
+   * Whether the CALLER owns the linked workspace — only an owner may unlink it
+   * (the server enforces that with a 403). Carried on the payload so the UI can
+   * withhold the affordance instead of letting a colleague press Unlink and
+   * discover the refusal afterwards. Derived from the same `checkProjectAccess`
+   * result that authorised the read, so it can never disagree with it.
+   */
+  isOwner: boolean;
 }
 
 export type LinkFailure =
@@ -323,15 +331,23 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 /**
+ * Workspace (project) ids are uuids — guarded before they reach Postgres, where
+ * a malformed one raises 22P02 and surfaces as a generic 500 instead of the
+ * "not found" it actually means.
+ *
+ * Exported because the routes need the identical guard: two copies of a
+ * validation regex drift, and the one that drifts is the one that stops
+ * guarding.
+ */
+export const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
  * Clio matter/activity ids are numeric. Validated before they reach a request
  * path so a malformed id fails fast with a fixed message rather than becoming a
  * 404 round-trip (and never becomes path structure — see the parse-not-prefix
  * rule, DURABLE_LESSONS 2026-07-28).
  */
-/** Workspace (project) ids are uuids — guarded before they reach Postgres. */
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 export function isClioId(value: unknown): value is string {
   return typeof value === "string" && /^[0-9]{1,20}$/.test(value);
 }
@@ -969,13 +985,18 @@ interface LinkRow {
 const LINK_COLUMNS =
   "project_id, clio_matter_id, clio_display_number, created_by, created_at";
 
-function toLink(row: LinkRow, projectName: string | null): MatterWorkspaceLink {
+function toLink(
+  row: LinkRow,
+  projectName: string | null,
+  isOwner: boolean,
+): MatterWorkspaceLink {
   return {
     projectId: row.project_id,
     projectName,
     clioMatterId: row.clio_matter_id,
     clioDisplayNumber: row.clio_display_number,
     createdAt: row.created_at,
+    isOwner,
   };
 }
 
@@ -1053,20 +1074,57 @@ async function findAccessibleLink(
       userOrgId,
     );
     if (!access.ok) continue;
-    return toLink(row, await loadProjectName(db, row.project_id));
+    return toLink(
+      row,
+      await loadProjectName(db, row.project_id),
+      access.isOwner,
+    );
   }
   return null;
 }
 
+/**
+ * The caller-visible link for a matter.
+ *
+ * Returns the "unsupported" sentinel rather than collapsing it to null: "there
+ * is no link" and "linking does not exist on this deployment yet" are different
+ * facts, and only the second one means the surface must stop OFFERING to link.
+ * Flattening them is what let the detail page show a "Start workspace" button
+ * that could only ever answer with a 409.
+ */
 export async function getLinkForMatter(
   db: Db,
   userId: string,
   userEmail: string | null | undefined,
   rawMatterId: string,
-): Promise<MatterWorkspaceLink | null> {
+): Promise<MatterWorkspaceLink | null | "unsupported"> {
   const matterId = requireClioId(rawMatterId, "matter id");
-  const link = await findAccessibleLink(db, userId, userEmail, matterId);
-  return link === "unsupported" ? null : link;
+  return await findAccessibleLink(db, userId, userEmail, matterId);
+}
+
+/**
+ * Whether workspace linking is usable at all on this deployment — false until
+ * migration `20260807_01` creates `matter_workspace_links`.
+ *
+ * The link reads and writes already degrade to "unsupported", but a surface has
+ * to know BEFORE it draws an affordance: a "Start workspace" button that always
+ * refuses is a lie, not a degrade. One zero-row probe; a missing table is
+ * answered from PostgREST's schema cache and never reaches Postgres.
+ *
+ * Fails OPEN on any other error (the 2026-07-27 rule: this is an availability
+ * gate, not a destructive operation). A transient DB blip must not tell a
+ * solicitor the feature does not exist — the write path's own fixed refusal is
+ * the honest backstop.
+ */
+export async function areLinksAvailable(db: Db): Promise<boolean> {
+  const { error } = await db.from(LINKS_TABLE).select("project_id").limit(1);
+  if (error) {
+    if (isLinksSchemaMissing(error)) return false;
+    console.error("[clio/matters] links availability probe failed", {
+      error: safeErrorLog(error),
+    });
+  }
+  return true;
 }
 
 /** The link on a given workspace, or null when absent/unsupported/tombstoned. */
@@ -1090,7 +1148,7 @@ export async function getLinkForProject(
     userOrgId,
   );
   if (!access.ok) return null;
-  return toLink(rows[0], await loadProjectName(db, projectId));
+  return toLink(rows[0], await loadProjectName(db, projectId), access.isOwner);
 }
 
 async function insertLink(
@@ -1173,7 +1231,8 @@ export async function linkWorkspace(
     organisationId: userOrgId,
   });
   if (row === "unsupported" || row === "workspace_already_linked") return row;
-  return toLink(row, await loadProjectName(db, input.projectId));
+  // Owner-only by construction: linking is refused above for anyone else.
+  return toLink(row, await loadProjectName(db, input.projectId), true);
 }
 
 /** Remove a link. Owner-only, mirroring linkWorkspace. */
@@ -1300,5 +1359,6 @@ export async function createWorkspaceForMatter(
     }
     return row;
   }
-  return { link: toLink(row, name), projectId, projectName: name };
+  // The workspace was just created for this caller, so they own it.
+  return { link: toLink(row, name, true), projectId, projectName: name };
 }

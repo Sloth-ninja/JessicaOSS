@@ -138,7 +138,7 @@ describe("clio_find_matter — happy path + error mapping", () => {
     vi.stubGlobal("fetch", fetchMock);
     const { event } = await executeClioManageToolCall(
       "clio_find_matter",
-      { query: "Kyckr", status: "open" },
+      { query: "Aldergate", status: "open" },
       ctx(db),
     );
     expect(event.status).toBe("ok");
@@ -146,7 +146,7 @@ describe("clio_find_matter — happy path + error mapping", () => {
     expect(url.pathname).toBe("/api/v4/matters.json");
     expect(url.searchParams.get("limit")).toBe("100");
     expect(url.searchParams.get("status")).toBe("open");
-    expect(url.searchParams.get("query")).toBe("Kyckr");
+    expect(url.searchParams.get("query")).toBe("Aldergate");
     expect(url.searchParams.get("fields")).toContain("display_number");
   });
 
@@ -207,7 +207,7 @@ describe("clio_find_matter — happy path + error mapping", () => {
     );
     const { content } = await executeClioManageToolCall(
       "clio_find_matter",
-      { query: "Kyckr", status: "open" },
+      { query: "Aldergate", status: "open" },
       ctx(db),
     );
     const payload = JSON.parse(content);
@@ -218,7 +218,7 @@ describe("clio_find_matter — happy path + error mapping", () => {
     const decoded = JSON.parse(
       Buffer.from(payload.next_page_token, "base64url").toString("utf8"),
     );
-    expect(decoded).toEqual({ c: "abc123", q: "Kyckr", s: "open" });
+    expect(decoded).toEqual({ c: "abc123", q: "Aldergate", s: "open" });
   });
 
   it("reports has_more from the RAW next URL even when no cursor can be extracted", async () => {
@@ -238,7 +238,7 @@ describe("clio_find_matter — happy path + error mapping", () => {
     );
     const { content } = await executeClioManageToolCall(
       "clio_find_matter",
-      { query: "Kyckr" },
+      { query: "Aldergate" },
       ctx(db),
     );
     const payload = JSON.parse(content);
@@ -252,7 +252,7 @@ describe("clio_find_matter — happy path + error mapping", () => {
       json({ data: [{ id: 3 }] }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const token = encodeMatterPageToken("abc123", "Kyckr", "open");
+    const token = encodeMatterPageToken("abc123", "Aldergate", "open");
     const { event, content } = await executeClioManageToolCall(
       "clio_find_matter",
       { page_token: token },
@@ -263,7 +263,7 @@ describe("clio_find_matter — happy path + error mapping", () => {
     expect(url.pathname).toBe("/api/v4/matters.json");
     expect(url.searchParams.get("page_token")).toBe("abc123");
     expect(url.searchParams.get("limit")).toBe("100");
-    expect(url.searchParams.get("query")).toBe("Kyckr");
+    expect(url.searchParams.get("query")).toBe("Aldergate");
     expect(url.searchParams.get("status")).toBe("open");
     expect(url.searchParams.get("fields")).toContain("display_number");
     expect(JSON.parse(content).count).toBe(1);
@@ -273,7 +273,7 @@ describe("clio_find_matter — happy path + error mapping", () => {
     const db = await connectedDb();
     const fetchMock = vi.fn(async (_url: string | URL) => json({ data: [] }));
     vi.stubGlobal("fetch", fetchMock);
-    const token = encodeMatterPageToken("abc123", "Kyckr", "open");
+    const token = encodeMatterPageToken("abc123", "Aldergate", "open");
     const { event } = await executeClioManageToolCall(
       "clio_find_matter",
       { page_token: token, query: "Different Client", status: "closed" },
@@ -282,7 +282,7 @@ describe("clio_find_matter — happy path + error mapping", () => {
     expect(event.status).toBe("ok");
     const url = new URL(String(fetchMock.mock.calls[0][0]));
     // The bound filters win; the conflicting model args never reach Clio.
-    expect(url.searchParams.get("query")).toBe("Kyckr");
+    expect(url.searchParams.get("query")).toBe("Aldergate");
     expect(url.searchParams.get("status")).toBe("open");
   });
 
@@ -661,10 +661,10 @@ describe("matterPageTokenFromNext", () => {
 
 describe("matter page token encode/decode", () => {
   it("round-trips cursor + bound filters", () => {
-    const token = encodeMatterPageToken("cur-1", "Kyckr", "open,pending");
+    const token = encodeMatterPageToken("cur-1", "Aldergate", "open,pending");
     expect(decodeMatterPageToken(token)).toEqual({
       cursor: "cur-1",
-      query: "Kyckr",
+      query: "Aldergate",
       status: "open,pending",
     });
   });

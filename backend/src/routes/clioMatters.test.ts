@@ -38,8 +38,10 @@ vi.mock("../middleware/auth", () => ({
 vi.mock("../lib/supabase", () => ({ createServerSupabase: () => ({}) }));
 
 const listMatters = vi.fn();
+const areLinksAvailable = vi.fn();
 const getMatterDetail = vi.fn();
 const getLinkForMatter = vi.fn();
+const getLinkForProject = vi.fn();
 const listRelatedContacts = vi.fn();
 const listActivities = vi.fn();
 const updateActivity = vi.fn();
@@ -54,8 +56,10 @@ vi.mock("../lib/clio/mattersSurface", async (importOriginal) => {
   return {
     ...actual,
     listMatters: (...args: unknown[]) => listMatters(...args),
+    areLinksAvailable: (...args: unknown[]) => areLinksAvailable(...args),
     getMatterDetail: (...args: unknown[]) => getMatterDetail(...args),
     getLinkForMatter: (...args: unknown[]) => getLinkForMatter(...args),
+    getLinkForProject: (...args: unknown[]) => getLinkForProject(...args),
     listRelatedContacts: (...args: unknown[]) => listRelatedContacts(...args),
     listActivities: (...args: unknown[]) => listActivities(...args),
     updateActivity: (...args: unknown[]) => updateActivity(...args),
@@ -79,6 +83,7 @@ const LINK = {
   clioMatterId: "7",
   clioDisplayNumber: "0001-0007",
   createdAt: "2026-08-07T00:00:00.000Z",
+  isOwner: true,
 };
 
 let server: Server;
@@ -111,8 +116,10 @@ beforeEach(() => {
     hasMore: false,
     tab: "mine",
   });
+  areLinksAvailable.mockReset().mockResolvedValue(true);
   getMatterDetail.mockReset().mockResolvedValue({ id: "7" });
   getLinkForMatter.mockReset().mockResolvedValue(null);
+  getLinkForProject.mockReset().mockResolvedValue(null);
   listRelatedContacts.mockReset().mockResolvedValue([]);
   listActivities.mockReset().mockResolvedValue({
     activities: [],
@@ -174,6 +181,18 @@ describe("GET /clio-matters", () => {
     });
   });
 
+  it.each([true, false])(
+    "carries linksUnavailable on the list too (available=%s)",
+    async (available) => {
+      // The "Link to a Clio matter" affordance lives on the Matters page and in
+      // the picker, neither of which loads a matter detail — so the capability
+      // has to ride the list as well.
+      areLinksAvailable.mockResolvedValue(available);
+      const res = await fetch(`${baseUrl}/clio-matters`);
+      expect((await res.json()).linksUnavailable).toBe(!available);
+    },
+  );
+
   it("surfaces a validation failure as a 400 with its own message", async () => {
     listMatters.mockRejectedValue(
       new ClioValidationError("Choose either your matters or all matters."),
@@ -212,6 +231,7 @@ describe("GET /clio-matters/:matterId", () => {
       id: "7",
       displayNumber: "0001-0007",
       link: LINK,
+      linksUnavailable: false,
     });
     expect(getLinkForMatter).toHaveBeenCalledWith(
       expect.anything(),
@@ -219,6 +239,21 @@ describe("GET /clio-matters/:matterId", () => {
       "caller@example.test",
       "7",
     );
+  });
+
+  it("reports linksUnavailable when the seam says linking is unsupported", async () => {
+    // The unmigrated case. `link` still has to be null (there is nothing to
+    // open), but the flag is what tells the page to stop offering to START a
+    // workspace — a button that could only ever be refused.
+    getMatterDetail.mockResolvedValue({ id: "7" });
+    getLinkForMatter.mockResolvedValue("unsupported");
+    const res = await fetch(`${baseUrl}/clio-matters/7`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      id: "7",
+      link: null,
+      linksUnavailable: true,
+    });
   });
 
   it("passes a Clio 404 through as a 404", async () => {
@@ -362,6 +397,48 @@ describe("DELETE /clio-matters/activities/:activityId", () => {
       method: "DELETE",
     });
     expect(res.status).toBe(403);
+  });
+});
+
+describe("GET /clio-matters/links/:projectId", () => {
+  it("returns the link, including whose it is to unlink", async () => {
+    getLinkForProject.mockResolvedValue(LINK);
+    const res = await fetch(`${baseUrl}/clio-matters/links/${PROJECT_ID}`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(LINK);
+    expect(getLinkForProject).toHaveBeenCalledWith(
+      expect.anything(),
+      "caller",
+      "caller@example.test",
+      PROJECT_ID,
+    );
+  });
+
+  it("registers ahead of /:matterId, so the literal path wins", async () => {
+    // `links` is a valid-looking path segment; if this route were declared
+    // after GET /:matterId it would be swallowed as a matter id.
+    getLinkForProject.mockResolvedValue(LINK);
+    await fetch(`${baseUrl}/clio-matters/links/${PROJECT_ID}`);
+    expect(getMatterDetail).not.toHaveBeenCalled();
+  });
+
+  it("gives ONE uniform 404 for every kind of no", async () => {
+    // Absent, invisible to this caller, unmigrated deployment — the seam
+    // answers null for all three, and a malformed id never reaches it. A
+    // differentiated answer here would confirm which workspaces exist.
+    getLinkForProject.mockResolvedValue(null);
+    const details: unknown[] = [];
+    for (const id of [PROJECT_ID, "not-a-uuid"]) {
+      const res = await fetch(`${baseUrl}/clio-matters/links/${id}`);
+      expect(res.status).toBe(404);
+      details.push((await res.json()).detail);
+    }
+    expect(new Set(details).size).toBe(1);
+  });
+
+  it("does not touch Postgres for a malformed workspace id", async () => {
+    await fetch(`${baseUrl}/clio-matters/links/not-a-uuid`);
+    expect(getLinkForProject).not.toHaveBeenCalled();
   });
 });
 

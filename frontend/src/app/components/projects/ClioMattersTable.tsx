@@ -44,6 +44,9 @@ interface Props {
     status: string | null;
     /** Raised when Clio says the connection needs re-authorising (401). */
     onReconnectNeeded?: () => void;
+    /** Reports whether workspace linking exists on this deployment, so the
+     *  page can stop offering "Link to a Clio matter" when it does not. */
+    onLinksUnavailable?: (unavailable: boolean) => void;
 }
 
 function loadErrorMessage(err: unknown): string {
@@ -54,7 +57,14 @@ function loadErrorMessage(err: unknown): string {
             return err.message;
         }
         if (err.status === 429) {
-            return "Clio is rate-limiting requests. Please try again in a minute.";
+            // A 429 here is EITHER our own per-user bucket or Clio's — and the
+            // server words each differently. Overwriting both with "Clio is
+            // rate-limiting requests" blamed Clio for limits we imposed, so the
+            // server's own detail wins and the fallback stays neutral.
+            return (
+                err.message ||
+                "Too many requests. Please wait a moment and try again."
+            );
         }
     }
     return "Clio didn’t respond. Your workspaces are still available on the Workspaces tab.";
@@ -83,6 +93,7 @@ export function ClioMattersTable({
     query,
     status,
     onReconnectNeeded,
+    onLinksUnavailable,
 }: Props) {
     const router = useRouter();
     const [result, setResult] = useState<ClioMattersList | null>(null);
@@ -111,6 +122,7 @@ export function ClioMattersTable({
                 if (seqRef.current !== seq) return;
                 setResult(loaded);
                 setLoadError(null);
+                onLinksUnavailable?.(loaded.linksUnavailable);
             } catch (err) {
                 if (isAbort(err) || seqRef.current !== seq) return;
                 if (err instanceof MikeApiError && err.status === 401) {
@@ -122,7 +134,7 @@ export function ClioMattersTable({
         };
         void run();
         return () => controller.abort();
-    }, [tab, query, status, reloadKey, onReconnectNeeded]);
+    }, [tab, query, status, reloadKey, onReconnectNeeded, onLinksUnavailable]);
 
     const retry = useCallback(() => {
         setLoadError(null);

@@ -966,6 +966,7 @@ describe("getLinkForMatter", () => {
       projectName: "0001-0007 — Acme Ltd",
       clioMatterId: "7",
       clioDisplayNumber: "0001-0007",
+      isOwner: true,
     });
   });
 
@@ -985,8 +986,11 @@ describe("getLinkForMatter", () => {
 
   // PGRST205 first: it is the code a live Supabase actually returns for a
   // missing table, so this is the case that fires before the migration lands.
+  // The sentinel — NOT null — is what reaches the route: "there is no link" and
+  // "linking does not exist here yet" have to stay distinguishable, because
+  // only the second one must stop the page offering to start a workspace.
   it.each(["PGRST205", "42P01"])(
-    "degrades to null on an unmigrated links table (%s)",
+    "reports the unsupported sentinel on an unmigrated links table (%s)",
     async (code) => {
       const db = await connectedDb({
         errorFor: (table) =>
@@ -995,9 +999,9 @@ describe("getLinkForMatter", () => {
             : null,
       });
 
-      expect(
-        await getLinkForMatter(asDb(db), "user-1", "u@test", "7"),
-      ).toBeNull();
+      expect(await getLinkForMatter(asDb(db), "user-1", "u@test", "7")).toBe(
+        "unsupported",
+      );
     },
   );
 
@@ -1024,8 +1028,10 @@ describe("getLinkForMatter", () => {
 
     const link = await getLinkForMatter(asDb(db), "user-1", "u@test", "7");
 
-    expect(link?.projectId).toBe(PROJECT_ID);
-    expect(link?.projectName).toBe("Mine");
+    expect(link).toMatchObject({
+      projectId: PROJECT_ID,
+      projectName: "Mine",
+    });
   });
 
   it("falls back to a colleague's link when the caller has none", async () => {
@@ -1040,11 +1046,16 @@ describe("getLinkForMatter", () => {
         projects: [{ id: colleagueLink.project_id, name: "Theirs" }],
       },
     });
-    grantAccess();
+    // A colleague's firm-visible workspace: readable, but NOT the caller's to
+    // unlink — the flag is what stops the UI offering that.
+    grantAccess(false);
 
     const link = await getLinkForMatter(asDb(db), "user-1", "u@test", "7");
 
-    expect(link?.projectId).toBe(colleagueLink.project_id);
+    expect(link).toMatchObject({
+      projectId: colleagueLink.project_id,
+      isOwner: false,
+    });
   });
 });
 
@@ -1065,8 +1076,32 @@ describe("getLinkForProject", () => {
       PROJECT_ID,
     );
 
-    expect(link?.clioMatterId).toBe("7");
+    expect(link).toMatchObject({ clioMatterId: "7", isOwner: true });
   });
+
+  it.each([true, false])(
+    "reports the caller's ownership of the workspace (isOwner=%s)",
+    async (isOwner) => {
+      // Taken from the very access result that authorised the read, so the flag
+      // cannot disagree with what the server will enforce on unlink.
+      const db = await connectedDb({
+        rows: {
+          matter_workspace_links: [LINK_ROW],
+          projects: [{ id: PROJECT_ID, name: "Mine" }],
+        },
+      });
+      grantAccess(isOwner);
+
+      const link = await getLinkForProject(
+        asDb(db),
+        "user-1",
+        "u@test",
+        PROJECT_ID,
+      );
+
+      expect(link?.isOwner).toBe(isOwner);
+    },
+  );
 
   it("returns null for a non-uuid id without querying Postgres", async () => {
     const db = await connectedDb({

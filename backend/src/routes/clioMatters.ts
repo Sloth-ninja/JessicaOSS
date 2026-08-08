@@ -1,6 +1,6 @@
 import { Router } from "express";
 import type { Request, Response } from "express";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../lib/asyncHandler";
 import { createServerSupabase } from "../lib/supabase";
@@ -8,9 +8,11 @@ import { ClioApiError } from "../lib/clio/client";
 import { minutesToSeconds } from "../lib/clio/manageTools";
 import { ClioValidationError } from "../lib/clio/toolShared";
 import {
+  areLinksAvailable,
   createWorkspaceForMatter,
   deleteActivity,
   getLinkForMatter,
+  getLinkForProject,
   getMatterDetail,
   linkWorkspace,
   listActivities,
@@ -18,6 +20,9 @@ import {
   listRelatedContacts,
   unlinkWorkspace,
   updateActivity,
+  // Shared with the seam so the route and the query it guards can never
+  // disagree about what a workspace id looks like.
+  UUID_RE,
 } from "../lib/clio/mattersSurface";
 
 /**
@@ -45,11 +50,16 @@ export const clioMattersRouter = Router();
 //
 // This bucket is keyed PER USER, not per IP, and therefore lives here rather
 // than alongside the other limiters in index.ts: an app-level limiter runs
-// before any route's auth, so `res.locals.userId` is not populated yet. The
-// distinction matters commercially — the pilot firm NATs its whole office
-// through one IP, so an IP-keyed bucket would let three solicitors browsing
-// matters exhaust the shared research allowance and take /companies and
-// /legislation down for everyone. IP is kept only as the pre-auth fallback.
+// before any route's auth, so `res.locals.userId` is not populated yet.
+//
+// The distinction matters commercially — the pilot firm NATs its whole office
+// through one address, so an IP-keyed bucket counts the whole office as one
+// caller. `/clio-matters` is therefore EXEMPTED from the app-level general
+// limiter in index.ts; without that exemption the shared 300-per-15-minutes IP
+// allowance would still bind first, and a couple of solicitors browsing matters
+// would degrade every other route for their colleagues. IP is kept here only as
+// the pre-auth fallback (a request that somehow reaches the limiter before auth
+// has populated `res.locals.userId`).
 //
 // Clio's own 50 req/min per-user token budget is the real constraint; this only
 // stops a runaway client burning it.
@@ -67,10 +77,26 @@ const clioMattersLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => req.method === "OPTIONS",
-  keyGenerator: (req: Request, res: Response) =>
-    (res.locals.userId as string | undefined) ?? req.ip ?? "unknown",
+  // Namespaced so a user id can never collide with an address literal.
+  keyGenerator: (req: Request, res: Response) => {
+    const userId = res.locals.userId as string | undefined;
+    if (userId) return `user:${userId}`;
+    // Unreachable in practice: requireAuth is mounted ahead of this limiter on
+    // the same router and 401s before it when there is no session, so
+    // res.locals.userId is always populated by the time we get here. Kept as a
+    // pre-auth belt, and routed through `ipKeyGenerator` because a raw req.ip
+    // gives every address in an IPv6 /64 its own bucket — one client can hold
+    // trillions, so the limit would be trivially bypassable. Passing req.ip
+    // straight through is what express-rate-limit refuses as
+    // ERR_ERL_KEY_GEN_IPV6 (observed in the route suite before this change).
+    return req.ip ? `ip:${ipKeyGenerator(req.ip)}` : "ip:unknown";
+  },
   message: {
-    detail: "Too many Clio requests. Please try again shortly.",
+    // This is OUR bucket, not Clio's. "Too many Clio requests" sent a solicitor
+    // looking at their Clio account for a limit we imposed — and a genuine Clio
+    // 429 has its own, separate message that passes through handleClioError.
+    // Neutral wording keeps the two distinguishable.
+    detail: "Too many requests. Please wait a moment and try again.",
   },
 });
 
@@ -78,11 +104,6 @@ const clioMattersLimiter = rateLimit({
 // This covers EVERY route below (including any added later) — the individual
 // handlers therefore do not repeat `requireAuth`.
 clioMattersRouter.use(requireAuth, clioMattersLimiter);
-
-// Workspace ids are uuids; a malformed one 404s here rather than reaching
-// Postgres, where it would raise 22P02 and surface as a generic 500.
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const WORKSPACE_NOT_FOUND_DETAIL = "Workspace not found.";
 const LINKS_UNAVAILABLE_DETAIL =
@@ -94,6 +115,11 @@ const WORKSPACE_ALREADY_LINKED_DETAIL =
   "That workspace is already linked to a Clio matter.";
 const NOT_WORKSPACE_OWNER_DETAIL =
   "Only the owner of a workspace can link or unlink it.";
+// One answer for every kind of "no" on a link lookup — absent, not visible to
+// this caller, malformed id, or feature not available on this deployment. A
+// differentiated 404 here would confirm which workspaces exist to someone
+// guessing ids (the "never surface differentiated errors" rule, 19/07).
+const LINK_NOT_FOUND_DETAIL = "No Clio matter is linked to that workspace.";
 
 // Clio statuses that are meaningful to a browser client; anything else (a Clio
 // 5xx, an unmapped code) becomes a 502 — this server is not broken, its
@@ -220,6 +246,38 @@ clioMattersRouter.post(
   }),
 );
 
+// GET /clio-matters/links/:projectId — the Clio matter a workspace is anchored
+// to, if any. Reads through the same access choke point as everything else, so
+// a colleague's private (or tombstoned) workspace is simply "no link" here, and
+// the payload carries `isOwner` so a caller knows whether unlinking is theirs
+// to do without having to try it.
+clioMattersRouter.get(
+  "/links/:projectId",
+  asyncHandler(async (req, res) => {
+    const { userId, userEmail } = callerOf(res);
+    // Guarded here as well as in the seam: a malformed id is a fixed 404, never
+    // a 22P02 round-trip to Postgres surfacing as a generic 500.
+    if (!UUID_RE.test(req.params.projectId)) {
+      return void res.status(404).json({ detail: LINK_NOT_FOUND_DETAIL });
+    }
+    const db = createServerSupabase();
+    try {
+      const link = await getLinkForProject(
+        db,
+        userId,
+        userEmail,
+        req.params.projectId,
+      );
+      if (!link) {
+        return void res.status(404).json({ detail: LINK_NOT_FOUND_DETAIL });
+      }
+      res.json(link);
+    } catch (err) {
+      handleClioError(err, res);
+    }
+  }),
+);
+
 // DELETE /clio-matters/links/:projectId — unlink a workspace (owner only).
 clioMattersRouter.delete(
   "/links/:projectId",
@@ -265,13 +323,17 @@ clioMattersRouter.get(
     const { userId } = callerOf(res);
     const db = createServerSupabase();
     try {
-      res.json(
-        await listMatters(db, userId, {
-          tab: optionalString(req.query.tab),
-          query: optionalString(req.query.query),
-          status: optionalString(req.query.status),
-        }),
-      );
+      const list = await listMatters(db, userId, {
+        tab: optionalString(req.query.tab),
+        query: optionalString(req.query.query),
+        status: optionalString(req.query.status),
+      });
+      // Carried on the list too, not just on the detail: the "Link to a Clio
+      // matter" affordance lives on the Matters page and in the link picker,
+      // neither of which loads a matter detail. Probed here rather than inside
+      // the seam because the list itself is cached for 60s and a capability
+      // must not be.
+      res.json({ ...list, linksUnavailable: !(await areLinksAvailable(db)) });
     } catch (err) {
       handleClioError(err, res);
     }
@@ -294,7 +356,15 @@ clioMattersRouter.get(
         userEmail,
         req.params.matterId,
       );
-      res.json({ ...detail, link });
+      // "No link" and "linking does not exist here yet" are distinct: the
+      // second must stop the page offering to start a workspace at all, so it
+      // travels as its own flag rather than as an indistinguishable null.
+      const linksUnavailable = link === "unsupported";
+      res.json({
+        ...detail,
+        link: linksUnavailable ? null : link,
+        linksUnavailable,
+      });
     } catch (err) {
       handleClioError(err, res);
     }

@@ -2071,6 +2071,10 @@ export interface ClioMattersList {
     capped: boolean;
     hasMore: boolean;
     tab: ClioMattersTab;
+    /** True when workspace linking is not available on this deployment (its
+     *  migration has not run). Surfaces must HIDE the link affordances rather
+     *  than offer a button that can only refuse. */
+    linksUnavailable: boolean;
 }
 
 export interface ClioCustomField {
@@ -2107,6 +2111,10 @@ export interface ClioWorkspaceLink {
     clioMatterId: string;
     clioDisplayNumber: string | null;
     createdAt: string | null;
+    /** Whether the CALLER owns the linked workspace. Only an owner may unlink
+     *  it (the server answers 403 otherwise), so the affordance is withheld
+     *  rather than offered-then-refused. */
+    isOwner: boolean;
 }
 
 export interface ClioMatterDetail extends ClioMatterRow {
@@ -2118,6 +2126,10 @@ export interface ClioMatterDetail extends ClioMatterRow {
     financialsUnavailable: boolean;
     /** The caller-visible JessicaOS workspace anchored to this matter. */
     link: ClioWorkspaceLink | null;
+    /** True when workspace linking is not available on this deployment — a
+     *  different fact from `link: null` ("no workspace yet"), and the only one
+     *  that means the page must not offer to start one. */
+    linksUnavailable: boolean;
 }
 
 export interface ClioMatterContact {
@@ -2271,6 +2283,24 @@ export async function linkWorkspaceToClioMatter(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectId, clioMatterId }),
     });
+}
+
+/**
+ * The Clio matter a workspace is anchored to.
+ *
+ * Rejects with a 404 MikeApiError when there is no link this caller can see —
+ * deliberately the same answer for an absent link, a workspace they cannot
+ * access, and a deployment where linking is not available, so the response
+ * cannot be used to probe which workspaces exist.
+ */
+export async function getClioMatterLinkForWorkspace(
+    projectId: string,
+    signal?: AbortSignal,
+): Promise<ClioWorkspaceLink> {
+    return apiRequest<ClioWorkspaceLink>(
+        `/clio-matters/links/${encodeURIComponent(projectId)}`,
+        { signal },
+    );
 }
 
 /** Remove a workspace's link to its Clio matter (workspace owner only). */

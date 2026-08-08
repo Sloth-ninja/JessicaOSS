@@ -225,11 +225,17 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
             } catch (err) {
                 if (isAbort(err) || matterSeq.current !== seq) return;
                 setMatter(null);
+                // 429 included deliberately: that status can come from our own
+                // per-user bucket, and "Clio didn't respond" would blame Clio
+                // for a limit JessicaOS imposed. The server's detail is fixed
+                // and user-safe in every one of these cases.
                 setLoadError(
                     err instanceof MikeApiError &&
+                        err.message &&
                         (err.status === 401 ||
                             err.status === 403 ||
-                            err.status === 404)
+                            err.status === 404 ||
+                            err.status === 429)
                         ? err.message
                         : "Clio didn’t respond. This matter could not be loaded.",
                 );
@@ -288,7 +294,10 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
                 setActivities(null);
                 setActivitiesError(
                     err instanceof MikeApiError &&
-                        (err.status === 401 || err.status === 403)
+                        err.message &&
+                        (err.status === 401 ||
+                            err.status === 403 ||
+                            err.status === 429)
                         ? err.message
                         : "Could not load time entries from Clio.",
                 );
@@ -346,9 +355,10 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
             setWorkspaceBusy(false);
         } catch (err) {
             setWorkspaceBusy(false);
-            // Includes the owner-only 403: the link payload carries no
-            // ownership signal, so a non-owner only learns here. Shown inside
-            // the Workspace card, next to the button they pressed.
+            // The payload now carries `isOwner`, so the owner-only 403 should
+            // be unreachable from the UI — it stays handled as the belt for a
+            // stale payload (ownership changed under an open page). Shown
+            // inside the Workspace card, next to the button they pressed.
             setWorkspaceError(
                 err instanceof MikeApiError && err.message
                     ? err.message
@@ -371,6 +381,15 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
             setDeleteStatus("idle");
         } catch (err) {
             setDeleteStatus("idle");
+            // A 404 means the entry is ALREADY gone from Clio (deleted in
+            // another window). Leaving the row on screen invites the solicitor
+            // to try again forever, so drop it — the outcome they asked for has
+            // in fact happened — while still reporting what occurred.
+            if (err instanceof MikeApiError && err.status === 404) {
+                setActivities((prev) =>
+                    prev ? prev.filter((a) => a.id !== deleting.id) : prev,
+                );
+            }
             setDeleting(null);
             setEntryError(
                 err instanceof MikeApiError && err.message
@@ -629,17 +648,40 @@ export function ClioMatterDetail({ matterId }: { matterId: string }) {
                                                 >
                                                     Open workspace
                                                 </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() =>
-                                                        setConfirmUnlink(true)
-                                                    }
-                                                    disabled={workspaceBusy}
-                                                    className="text-xs font-medium text-gray-500 underline underline-offset-2 transition-colors hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-45"
-                                                >
-                                                    Unlink
-                                                </button>
+                                                {/* Only the workspace's owner
+                                                    may unlink it; the server
+                                                    refuses anyone else with a
+                                                    403. Withhold the button
+                                                    rather than offer an action
+                                                    that can only fail. */}
+                                                {link.isOwner && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            setConfirmUnlink(
+                                                                true,
+                                                            )
+                                                        }
+                                                        disabled={workspaceBusy}
+                                                        className="text-xs font-medium text-gray-500 underline underline-offset-2 transition-colors hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-45"
+                                                    >
+                                                        Unlink
+                                                    </button>
+                                                )}
                                             </div>
+                                        </div>
+                                    ) : matter.linksUnavailable ? (
+                                        /* Not "no workspace yet" — the feature
+                                           itself is not available on this
+                                           deployment, so offering a button that
+                                           could only refuse would be a lie. */
+                                        <div className="flex flex-col items-start gap-3 rounded-lg border border-dashed border-gray-200 px-4 py-3.5">
+                                            <p className="text-[13px] text-gray-500">
+                                                Workspace linking isn&rsquo;t
+                                                available yet. Documents, chats
+                                                and reviews still live in your
+                                                workspaces on the Matters page.
+                                            </p>
                                         </div>
                                     ) : (
                                         <div className="flex flex-col items-start gap-3 rounded-lg border border-dashed border-gray-200 px-4 py-3.5">
