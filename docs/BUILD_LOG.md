@@ -45,7 +45,7 @@ the Workspaces-tab badge, the profile connected flag, and the M6/M14 copy nits.
   `isOwner`, taken from the very `checkProjectAccess` result that authorised the
   read, so it cannot disagree with what the server enforces. The frontend
   withholds the button; the 403 branch stays as the belt for a stale payload.
-- **(i)/M13 — a real client name in a public repo.** "Kyckr" is a client of the
+- **(i)/M13 — a real client name in a public repo.** The name is a client of the
   pilot firm and appeared 11 times in `manageTools.test.ts` and once in this
   log's 04/08 entry, recording which client a solicitor searched for. Fixtures
   now use the fictitious "Aldergate"; the log line is redacted **in place** as
@@ -118,7 +118,7 @@ rather than "fixed".
   so the entire workspace-linking feature is inert in every environment. The
   honest UI added here is the correct interim behaviour, not a substitute for
   the migration.
-- "Kyckr" remains in git history.
+- The redacted client name remains in git history.
 - The four reviewer-deferred items listed under Scope.
 
 ---
