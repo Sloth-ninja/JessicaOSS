@@ -7,6 +7,122 @@
 
 ---
 
+## 2026-08-08 — Practice Management train: composed-range fix wave (branch `pm-train-fixes`)
+
+**Scope:** the composed-range multi-lens review of the Practice Management train
+(#81 backend + #82 frontend, range `c59291b`) raised thirteen items for action.
+All thirteen are addressed here in one PR. Four review items were explicitly
+DEFERRED by the reviewer and are NOT in this diff: unlink no-op observability,
+the Workspaces-tab badge, the profile connected flag, and the M6/M14 copy nits.
+
+**Key changes** (reviewer item → what changed):
+
+- **I1 — links that could not work were still offered.** `getLinkForMatter`
+  collapsed its `"unsupported"` sentinel to `null`, making "this matter has no
+  workspace yet" indistinguishable from "workspace linking does not exist on
+  this deployment". The detail page therefore drew *Start workspace* and the
+  Matters page *Link to a Clio matter*, both of which could only ever answer
+  409. This is the CURRENT state everywhere, not a hypothetical: **migration
+  `20260807_01` for `matter_workspace_links` is not in the repository at all**,
+  so every link read and write degrades to unsupported today. The sentinel now
+  survives; the detail route converts it to an explicit `linksUnavailable`; a
+  new `areLinksAvailable(db)` probe (fail-OPEN on a transient error, per the
+  27/07 rule) puts the same flag on the LIST payload, because both remaining
+  affordances live on surfaces that never load a matter detail. Both are hidden
+  behind it with honest copy, and the picker refuses up front rather than after
+  a matter is chosen.
+- **I2 — the per-user rate limiter was decorative.** `/clio-matters` still ran
+  behind the app-level IP-keyed `generalLimiter` (300 per 15 min, shared). The
+  pilot firm NATs its whole office through one address, so the IP bucket, not
+  the per-user one, was the binding constraint, and exhausting it degraded every
+  other route for colleagues. Now exempted at the mount point (exact-segment
+  match, not a bare prefix). The rationale comments in `routes/clioMatters.ts`,
+  `index.ts`, `.env.example` and the CLAUDE.md registry row claimed matters
+  browsing could exhaust the "shared research allowance" and take `/companies`
+  and `/legislation` down — `/clio-matters` was never on `researchLimiter`, so
+  the stated mechanism was wrong; all four corrected.
+- **I3 — Unlink was offered then refused.** `MatterWorkspaceLink` gains
+  `isOwner`, taken from the very `checkProjectAccess` result that authorised the
+  read, so it cannot disagree with what the server enforces. The frontend
+  withholds the button; the 403 branch stays as the belt for a stale payload.
+- **(i)/M13 — a real client name in a public repo.** "Kyckr" is a client of the
+  pilot firm and appeared 11 times in `manageTools.test.ts` and once in this
+  log's 04/08 entry, recording which client a solicitor searched for. Fixtures
+  now use the fictitious "Aldergate"; the log line is redacted **in place** as
+  `[client name redacted 07/08]` so the entry stays honest about what it said.
+  **Stated plainly: this scrubs the working tree only — the name remains in git
+  history and would need a history rewrite to remove.** Flagged to the owner.
+- **(a)/M11 — `ERR_ERL_KEY_GEN_IPV6`**, confirmed firing in the route suite, not
+  theoretical: the custom `keyGenerator` returned `req.ip` raw, giving every
+  host in an IPv6 /64 its own bucket. Now routed through `ipKeyGenerator`. The
+  fallback is kept rather than deleted (it is unreachable only because
+  `requireAuth` is mounted ahead of the limiter — a property of the current
+  mount order, not a guarantee), with that argument recorded in place.
+- **(c)/M12 —** the numeric-Clio-id docblock sat above `UUID_RE`, describing the
+  wrong constant; moved onto `isClioId`. `UUID_RE` existed twice guarding the
+  same values, so the seam now exports it and the route imports it.
+- **(f)/M4 —** `GET /clio-matters/links/:projectId` wired over the previously
+  dead `getLinkForProject` export, registered in the literal-path block ahead of
+  the `/:matterId` routes (declared after them, `links` would be swallowed as a
+  matter id — asserted by a test), uuid-guarded in route and seam, `isOwner`
+  included, and ONE uniform 404 for every kind of "no" so the endpoint cannot be
+  used to probe which workspaces exist. Mirrored in `mikeApi`. The
+  Workspaces-tab badge that would consume it stays deferred.
+- **(j)/M10 —** the three `clioState` gates (fail-closed write affordance,
+  fail-open read tabs, narrowest-of-all banner) kept exactly as they were and
+  documented in ONE block naming `"unknown"` as the value that separates them.
+- **M1 —** a 429 from OUR bucket was worded "Too many Clio requests" and then
+  overwritten client-side with "Clio is rate-limiting requests", blaming Clio for
+  a limit JessicaOS imposed. Server detail is now neutral; the surfaces show the
+  server's own message on 429 with a neutral fallback.
+- **M5 —** `formatMoney` defaulted a missing currency code to GBP, rendering an
+  unsupported "£" on a figure from a matter that may be billed in euros. An
+  absent or unrecognised code now renders the number bare.
+- **M7 —** a 404 on save/delete means the entry is already gone from Clio, so
+  the list on screen is stale: 404 joins 409/412 in offering "Reload time
+  entries", and a 404 delete drops the row instead of leaving a ghost.
+- **M8 —** with no stored preference the page painted Workspaces while the Clio
+  status loaded, then jumped to My matters. The tab decision now waits for a
+  definite status and the body renders a skeleton until then.
+- **M3 —** `docs/PRACTICE_MANAGEMENT_SPEC.md` Surfaces §4 now states the
+  per-viewer semantics: the workspace a solicitor sees against a matter is one
+  they can access, so a colleague's appears only when firm-visible — two people
+  on one matter seeing different workspaces is correct, not a sync bug.
+
+**Also found, outside the brief:** the spec itself was **never committed**.
+CLAUDE.md, this log and three source files all cite
+`docs/PRACTICE_MANAGEMENT_SPEC.md`, and every sibling spec is tracked, but it
+existed only as an untracked file in the owner's checkout — the train's design
+document was one `git clean` from gone and invisible to reviewers. Committed
+here as-is apart from the M3 sentence.
+
+**Verification:** backend `tsc --noEmit` clean; `prettier --check` clean on every
+changed backend file (`index.ts` retains its ONE pre-existing baseline
+deviation in `makeLimiter` — the file was not prettier-clean at HEAD, so per the
+minimal-diff rule only the hunks added here are normalised; a normalisation of
+those untouched lines was made and then reverted). Backend suite **880 tests**
+(baseline 871 + 9 added: 3 route tests for the capability flag, 4 for the new
+links route, 2 seam tests for `isOwner`). Frontend `tsc --noEmit` clean; `npm run
+lint` at exact baseline parity (112 problems / 34 errors / 78 warnings, verified
+by stash-check against HEAD); `npm run build` clean.
+
+**Contention note:** this machine ran concurrent agent test loads throughout.
+Full-suite runs stretched from ~30s to ~950s and produced timeout failures
+(including a 901-second "failure" on a test that passes standalone in 300ms,
+plus vitest `onTaskUpdate` worker RPC timeouts) — the 2026-08-05 lesson's
+signature exactly. Such failures were re-run in isolation and confirmed green
+rather than "fixed".
+
+**Deferred / flagged to the owner:**
+- `matter_workspace_links` migration `20260807_01` does not exist in the repo,
+  so the entire workspace-linking feature is inert in every environment. The
+  honest UI added here is the correct interim behaviour, not a substitute for
+  the migration.
+- "Kyckr" remains in git history.
+- The four reviewer-deferred items listed under Scope.
+
+---
+
 ## 2026-08-07 — Practice Management frontend: Clio-backed Matters tabs + matter detail (branch `pm-frontend`)
 
 **Scope:** Task 3 of `docs/superpowers/plans/2026-08-07-practice-management.md`
