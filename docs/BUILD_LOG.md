@@ -7,6 +7,87 @@
 
 ---
 
+## 2026-08-12 — Practice Management Task 1: `matter_workspace_links` migration (branch `pm-migration`)
+
+**Scope:** Task 1 of `docs/superpowers/plans/2026-08-07-practice-management.md`
+— the one artefact the merged Practice Management train (#81 backend, #82
+frontend, #83 fix wave) was still missing: the migration that creates
+`matter_workspace_links`, the ONLY stored Clio artefact — the id/number pair
+anchoring a JessicaOS workspace (a `projects` row) to a live Clio matter.
+Everything else (financials, contacts, activities, documents) stays a live
+read against Clio with the caller's own token; no matter data is persisted.
+Owner-authorised via an allowlist entry in
+`.claude/hooks/authorized-migrations.json` (12/08/2026). Also commits the
+Practice Management plan doc, which had been sitting untracked in the
+owner's checkout.
+
+**Key changes:**
+
+- `backend/migrations/20260807_01_matter_workspace_links.sql` — creates
+  `public.matter_workspace_links` exactly per the plan-doc spec:
+  `id`, `project_id` (`references public.projects(id) on delete cascade`,
+  `not null`, `unique`), `clio_matter_id` (`not null`), `clio_display_number`,
+  `organisation_id` (`references public.organisations(id) on delete set
+  null`), `created_by`, `created_at`. Plus `idx_matter_links_matter` on
+  `clio_matter_id`, RLS enabled, `revoke all ... from anon, authenticated`
+  (browser roles never touch backend tables), and a proving `select
+  count(*)` so the Supabase SQL editor shows a countable result rather than
+  an ambiguous "Success. No rows". Idempotent throughout (`create table/index
+  if not exists`).
+- `backend/schema.sql` — the same table definition mirrored in place, in the
+  "Projects and documents" section (after `document_edits`, since it FKs to
+  `projects`), following the `user_clio_connections` precedent: inline
+  `create table` + index + `enable row level security`, with its `revoke
+  all` line added to the "Direct client grant hardening" list at the end of
+  the file alongside the other backend-owned tables.
+- `docs/superpowers/plans/2026-08-07-practice-management.md` committed
+  (was untracked).
+
+**Decisions:**
+
+- `project_id`'s `on delete cascade` is called out as LOAD-BEARING in both
+  the migration and the schema.sql comment: the WS8 deletion-governance
+  purge path hard-deletes a `projects` row once its retention window
+  expires, and the link row must go with it. Weakening this to `set
+  null`/`restrict` would either orphan the link or block the purge — do not
+  do that on a future edit.
+- RLS + `revoke all` on the new table, matching every backend-owned table's
+  posture: the browser only ever calls the backend API with a service-role
+  key on the far side, never the DB directly.
+- No code changes: the merged train's seam
+  (`backend/src/lib/clio/mattersSurface.ts`, plus `userDataCleanup.ts` /
+  `userDataExport.ts`) was already written to be PGRST205/42P01-tolerant of
+  this table's absence, so this migration is additive-only and the running
+  system's behaviour does not change until it is actually applied in
+  production. Once applied, the existing "unsupported" degrade paths in
+  those modules stop firing and real link rows start flowing — that
+  direction-of-travel is what the re-run tests below prove, not a new
+  behaviour introduced here.
+
+**Verification:** backend `npx tsc --noEmit` clean (run from
+`backend/`, no drift from this change). Four targeted suites re-run one at a
+time from `backend/` (never repo root), each confirming the pre-migration
+degrade direction (missing table tolerated ⇒ links inert, deletion/export
+never blocked) still holds with this migration file present but not yet
+applied anywhere — the tests inject the PostgREST error codes directly, so
+they stay green whether or not the migration has run against a real
+database:
+  - `npx vitest run src/lib/clio/mattersSurface.test.ts` — 62/62 passed.
+  - `npx vitest run src/routes/clioMatters.test.ts` — 32/32 passed.
+  - `npx vitest run src/lib/userDataCleanup.test.ts` — 10/10 passed.
+  - `npx vitest run src/lib/userDataExport.test.ts` — 11/11 passed.
+  - Grep of `backend/src` for `matter_workspace_links` in test files found no
+    other covering suite.
+
+**Deferred / owner action still needed:** running this migration against
+production Supabase (the owner ran every prior migration in this train
+manually) — until then, `matter_workspace_links` stays absent in production
+and the workspace-linking feature stays inert there, exactly as documented
+in the 2026-08-08 entry below. No PR/merge performed by this task — branch
+`pm-migration` is left for review.
+
+---
+
 ## 2026-08-08 — Practice Management train: composed-range fix wave (branch `pm-train-fixes`)
 
 **Scope:** the composed-range multi-lens review of the Practice Management train
