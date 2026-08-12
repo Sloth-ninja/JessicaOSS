@@ -428,6 +428,27 @@ create index if not exists document_edits_message_id_idx
 create index if not exists document_edits_version_id_idx
   on public.document_edits(version_id);
 
+-- Practice Management (Clio-backed Matters, migration 20260807_01): the ONLY
+-- stored Clio artefact — the id/number pair anchoring a JessicaOS workspace
+-- to a live Clio matter. Everything else is read live from Clio; no matter
+-- data is persisted here. project_id cascade is load-bearing for the WS8
+-- deletion-governance purge path — see the migration file for detail.
+create table if not exists public.matter_workspace_links (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references public.projects(id) on delete cascade,
+  clio_matter_id text not null,
+  clio_display_number text,
+  organisation_id uuid references public.organisations(id) on delete set null,
+  created_by uuid,
+  created_at timestamptz not null default now(),
+  unique(project_id)
+);
+
+create index if not exists idx_matter_links_matter
+  on public.matter_workspace_links(clio_matter_id);
+
+alter table public.matter_workspace_links enable row level security;
+
 -- ---------------------------------------------------------------------------
 -- Workflows
 -- ---------------------------------------------------------------------------
@@ -982,3 +1003,4 @@ revoke all on public.user_mcp_oauth_states from anon, authenticated;
 revoke all on public.user_mcp_connector_tools from anon, authenticated;
 revoke all on public.user_mcp_tool_audit_logs from anon, authenticated;
 revoke all on public.user_clio_connections from anon, authenticated;
+revoke all on public.matter_workspace_links from anon, authenticated;
