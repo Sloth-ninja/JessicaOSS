@@ -25,7 +25,10 @@ import { ApiKeyMissingModal } from "../shared/ApiKeyMissingModal";
 import { ModelToggle } from "./ModelToggle";
 import { useSelectedModel } from "@/app/hooks/useSelectedModel";
 import { useUserProfile } from "@/contexts/UserProfileContext";
-import { firmOfferedProviders } from "@/app/(pages)/account/firmPolicy";
+import {
+    firmOfferedProviders,
+    personalModelPrefsBlocked,
+} from "@/app/(pages)/account/firmPolicy";
 import {
     getModelProvider,
     isModelAvailable,
@@ -81,6 +84,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
     // Firm-offered providers (WS8 PR F): restrict the model picker when the
     // member's firm limits providers; null ⇒ no restriction.
     const offeredProviders = firmOfferedProviders(profile?.firm);
+    // Firm policy (WS8 PR F): when the firm manages model preferences there is
+    // nothing for the member to choose — the server clamps the model anyway.
+    // Absence, not a disabled control: same rule the Model Preferences page
+    // applies to its pickers.
+    const modelPrefsManaged = personalModelPrefsBlocked(profile?.firm);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const controlsRef = useRef<HTMLDivElement>(null);
     const [compactControls, setCompactControls] = useState(false);
@@ -314,13 +322,27 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
                         </div>
 
                         <div className="flex items-center gap-1">
-                            <ModelToggle
-                                value={model}
-                                onChange={setModel}
-                                apiKeys={apiKeys}
-                                localModels={localModels}
-                                offeredProviders={offeredProviders}
-                            />
+                            {modelPrefsManaged ? (
+                                <span
+                                    className="flex h-8 max-w-[200px] items-center rounded-lg px-2 text-xs text-gray-400"
+                                    title={`Model access is provided by ${
+                                        profile?.firm?.name ?? "your firm"
+                                    }.`}
+                                >
+                                    <span className="truncate">
+                                        Provided by{" "}
+                                        {profile?.firm?.name ?? "your firm"}
+                                    </span>
+                                </span>
+                            ) : (
+                                <ModelToggle
+                                    value={model}
+                                    onChange={setModel}
+                                    apiKeys={apiKeys}
+                                    localModels={localModels}
+                                    offeredProviders={offeredProviders}
+                                />
+                            )}
                             <button
                                 type="button"
                                 className={cn(

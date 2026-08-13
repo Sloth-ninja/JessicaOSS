@@ -7,6 +7,144 @@
 
 ---
 
+## 2026-08-13 — Pilot-feedback UI fix wave (branch `pilot-feedback-ui`)
+
+**Scope:** PR A of the 13/08 pilot-feedback fix train — three frontend-only
+defects reported by the pilot firm today. No backend, migration, or env
+change; nothing here alters a server contract. Items 2 and 3 are honesty
+fixes (the UI was offering controls that changed nothing), item 1 is a
+layout defect.
+
+**Key changes:**
+
+- **Item 1 — the sidebar was painting over itself, two separate causes.**
+  `frontend/src/app/components/shared/AppSidebar.tsx`:
+  - The bottom profile block's Account-Settings dropdown was a hand-rolled
+    `absolute bottom-full z-50` box rendered in flow above its trigger, so
+    it covered the last visible Assistant History rows. Replaced with the
+    shared Radix wrapper (`@/components/ui/dropdown-menu`) already used one
+    file away in `SidebarChatItem` — `side="top" align="start"`, existing
+    glass styling passed through to `DropdownMenuContent`. Expanded state
+    matches the trigger width via `--radix-dropdown-menu-trigger-width` (the
+    house pattern from `account/models/page.tsx` and `TREditColumnMenu`);
+    collapsed stays `w-56`. Net deletion: the `isDropdownOpen` state and the
+    manual `document` click-outside listener are gone, and the trigger's open
+    highlight now comes from `data-[state=open]`.
+  - A fresh owner screenshot then showed the overlap reproducing with **no
+    popup open**, which the original diagnosis had missed. Root cause is the
+    flex chain: the middle region is `flex-1 min-h-0`, so on a short viewport
+    it shrinks to nothing once the fixed nav sections above it consume the
+    height (the reporting user is a firm admin, so Firm *and* Firm admin are
+    both present); its children then keep their intrinsic height — only the
+    row list carries `overflow-y-auto`, the Recent Matters block and the
+    History header do not — and with no clipping ancestor they paint through
+    onto the `mt-auto` profile block. Fixed by wrapping the nav sections and
+    the middle region in a single `flex-1 min-h-0 overflow-y-auto` column, so
+    the profile block is a SIBLING of a scroll container; plus `shrink-0` on
+    the profile block and a `min-h-48` floor on the **History section**.
+  - The floor was first placed on the middle-region wrapper (`min-h-56`) and
+    moved during review (I1). A floor there is shared with the Recent Matters
+    block, which cannot shrink: with a full 5-matter list Recent Matters
+    (~220px) consumes the entire 224px floor and the History section resolves
+    to zero height — an empty list with the header flush at the bottom, in
+    precisely the configuration the pilot firm will QA. On the History
+    section the floor protects the list itself; the row container is a scroll
+    container, so its automatic minimum size is 0 and the section still
+    resolves to a bounded height.
+- **Item 2 — model picker shown to members whose firm manages models.**
+  `frontend/src/app/components/assistant/ChatInput.tsx` and
+  `frontend/src/app/components/tabular/TRChatPanel.tsx` computed
+  `firmOfferedProviders` but never consulted `personalModelPrefsBlocked`, so
+  a member under `memberModelPrefs: false` still saw an interactive picker
+  even though the server already clamps the chat model to the firm default
+  (WS8 PR F). Both now render a quiet inline "Provided by &lt;firm&gt;" label
+  in place of `<ModelToggle>`. `TRChatPanel` threads `modelPrefsManaged` /
+  `firmName` down to its inner `TRChatInput`. The `offeredProviders`
+  filtering is untouched for the policy-ON case.
+- **Item 3 — Organisation field edited a field nobody sees.**
+  `frontend/src/app/(pages)/account/page.tsx`: the Organisation block wrote
+  the legacy free-text `user_profiles.organisation` column while the real
+  firm name sat unused in the same payload as `profile.firm.name`. Firm
+  members now get `profile.firm.name` read-only with a quiet "Managed by your
+  firm." line; orgless self-hosters keep today's editable field unchanged.
+  The seeding effect skips the firm path.
+
+**Verification:** from `frontend/` — `npx tsc --noEmit` clean;
+`npm run build` succeeds (27 routes generated), run with the same public
+placeholder env vars CI uses (`.github/workflows/ci.yml`), since a fresh
+worktree has no `.env.local` and `next build` prerenders through the
+Supabase provider tree. `npm run lint` reports 112 problems (34 errors, 78
+warnings) — **identical to the count on `main` at `d3bf3eb` with these
+changes stashed**, i.e. all pre-existing and none introduced here; the repo
+is not lint-clean at HEAD, so "no new findings" is the honest gate. No
+frontend test framework exists (upstream ships none); none added.
+
+Item 1's layout fix was verified by headless-Chrome renders of a raw-CSS
+harness translating the AppSidebar class chain, before vs after. **Harness
+configuration matters and is stated here because the first round got it
+wrong.** Round 1 modelled the EASY case — an empty "No matters yet" Recent
+Matters, and the logo/toggle row nested *inside* the scroll column, which
+the real code does not do. Its conclusions (overlap before, clear after, no
+tall-viewport regression) held up, but its floor measurement did not, which
+is what review finding I1 caught.
+
+Round 2 harness — the HARD case, and the configuration the numbers below
+come from: firm-admin nav (Firm *and* Firm admin groups mounted), a full
+5-matter Recent Matters list (~220px, unshrinkable), logo row outside the
+scroll column as in the real code, four history rows. Overlap is measured by
+sampling `document.elementFromPoint` across the profile block rather than by
+comparing rects — `getBoundingClientRect` ignores clipping and reports a
+false positive for content merely scrolled out of view inside the new
+overflow container.
+
+| viewport | main | min-h-56 on wrapper (round 1) | min-h-48 on History (shipped) |
+|---|---|---|---|
+| 796px | history 0px; header escapes the card | history 0px | history 192px, rows 174px |
+| 676px | history 0px; header escapes the card | history 0px | history 192px, rows 174px |
+| 1006px | history 60px, rows 42px | history 60px, rows 42px | history 192px, rows 174px |
+
+Matches the reviewer's independent measurement (192/168 — the 6px delta is
+header line-height modelling). In no shipped-variant render does content from
+above paint into the profile block, and nothing escapes the sidebar card.
+
+**Accepted trade-off:** at ~1030px with 5 recent matters the outer column
+becomes scrollable where today it is not. Scroll is acceptable; an empty
+history list is not — and at that height the fix yields 174px of rows against
+main's 42px.
+
+**Decisions:**
+
+- Radix over patching the hand-rolled box: portal-mounted and
+  collision-aware, so it cannot paint over sidebar content by construction,
+  and it brings native dismiss on outside-click/Escape. The swap is a net
+  deletion of bespoke state and a listener, and it reuses the wrapper this
+  sidebar's sibling component already uses.
+- The short-viewport fix is structural rather than arithmetic. Clipping just
+  the middle region (`overflow-hidden`) would have fixed the 820px case but
+  **not** the 700px one, where the nav sections alone exceed the container —
+  the harness render is what caught that. Wrapping everything above the
+  profile in one scroll container makes "nothing paints over the profile
+  block" a property of the structure at any viewport height.
+- Item 2 follows the established WS8 absence-not-disabled rule: a control
+  that cannot do anything is removed, not greyed out, and the replacement
+  label echoes the register of `account/models/page.tsx`'s managed state.
+  This is UI honesty only — the server-side clamp was already live, so no
+  behaviour a member could exploit changes.
+- Item 3 keeps the legacy free-text column reachable for orgless
+  self-hosters rather than dropping the field outright: for them it is still
+  the only source of an organisation name. Only the firm path goes
+  read-only.
+
+**Deferred / notes for the train:** the collapsed-sidebar state was checked
+by reasoning, not rendered — the middle region is not mounted when
+collapsed (`{isOpen && …}`), so it exercises strictly fewer children of the
+same wrapper. In-browser QA of all three items against a real firm account
+is still owner-pending, as is confirmation that the pilot firm's admin sees
+the picker replaced (the reporting account is under `memberModelPrefs:
+false`).
+
+---
+
 ## 2026-08-13 — Pilot-feedback fix train, PR B: connector-registry honesty + organisation-write belt (branch `pilot-feedback-connectors`)
 
 **Scope:** two small, independent backend fixes from the 13/08/2026
