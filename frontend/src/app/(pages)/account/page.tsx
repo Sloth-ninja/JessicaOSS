@@ -50,7 +50,9 @@ export default function AccountPage() {
         if (profile?.displayName) {
             setDisplayName(profile.displayName);
         }
-        if (profile?.organisation) {
+        // Only the orgless path has an editable organisation field to seed;
+        // firm members see their firm name read-only.
+        if (!profile?.firm && profile?.organisation) {
             setOrganisation(profile.organisation);
         }
     }, [profile]);
@@ -217,43 +219,63 @@ export default function AccountPage() {
                                 </div>
                             </div>
                         </div>
-                        <div className="pt-4">
-                            <label className="text-sm text-gray-600 block mb-2">
-                                Organisation
-                            </label>
-                            <div className="space-y-2">
-                                <Input
-                                    type="text"
-                                    value={organisation}
-                                    onChange={(e) =>
-                                        setOrganisation(e.target.value)
-                                    }
-                                    placeholder="Enter your organisation"
-                                    className={accountGlassInputClassName}
-                                />
-                                <div className="flex justify-end">
-                                    <button
-                                        type="button"
-                                        onClick={handleSaveOrganisation}
-                                        disabled={
-                                            isSavingOrg ||
-                                            organisation.trim() ===
-                                                (profile?.organisation ?? "") ||
-                                            orgSaved
+                        {profile?.firm ? (
+                            // Firm members: the organisation is their firm, not
+                            // the legacy free-text profile field — show the real
+                            // firm name read-only rather than an editable box
+                            // that changes nothing they can see (pilot feedback
+                            // 13/08).
+                            <div className="pt-4">
+                                <p className="text-sm text-gray-600 mb-2">
+                                    Organisation
+                                </p>
+                                <p className="text-sm text-gray-900">
+                                    {profile.firm.name}
+                                </p>
+                                <p className="mt-1 text-xs text-gray-500">
+                                    Managed by your firm.
+                                </p>
+                            </div>
+                        ) : (
+                            <div className="pt-4">
+                                <label className="text-sm text-gray-600 block mb-2">
+                                    Organisation
+                                </label>
+                                <div className="space-y-2">
+                                    <Input
+                                        type="text"
+                                        value={organisation}
+                                        onChange={(e) =>
+                                            setOrganisation(e.target.value)
                                         }
-                                        className="text-xs font-medium text-gray-700 transition-colors hover:text-gray-950 disabled:cursor-not-allowed disabled:text-gray-400"
-                                    >
-                                        {isSavingOrg ? (
-                                            "Saving..."
-                                        ) : orgSaved ? (
-                                            "Saved"
-                                        ) : (
-                                            "Save"
-                                        )}
-                                    </button>
+                                        placeholder="Enter your organisation"
+                                        className={accountGlassInputClassName}
+                                    />
+                                    <div className="flex justify-end">
+                                        <button
+                                            type="button"
+                                            onClick={handleSaveOrganisation}
+                                            disabled={
+                                                isSavingOrg ||
+                                                organisation.trim() ===
+                                                    (profile?.organisation ??
+                                                        "") ||
+                                                orgSaved
+                                            }
+                                            className="text-xs font-medium text-gray-700 transition-colors hover:text-gray-950 disabled:cursor-not-allowed disabled:text-gray-400"
+                                        >
+                                            {isSavingOrg ? (
+                                                "Saving..."
+                                            ) : orgSaved ? (
+                                                "Saved"
+                                            ) : (
+                                                "Save"
+                                            )}
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
+                        )}
                     </div>
                 </AccountSection>
             </section>
