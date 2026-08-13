@@ -73,13 +73,16 @@ vi.mock("../lib/supabase", () => ({
     }),
 }));
 
+// A spy (not a bare closure) so call-count assertions can pin exactly when
+// the belt logic short-circuits vs. falls through to loadProfile's own
+// resolve (Minor 2 fix: the earlier closure-based mock made the "does not
+// resolve membership" test pass for any implementation, since nothing
+// recorded whether it was actually called).
+const resolveUserOrganisation = vi.fn();
+
 vi.mock("../lib/organisations", () => ({
-    resolveUserOrganisation: () => {
-        if (state.membershipThrows) {
-            return Promise.reject(new Error("db down"));
-        }
-        return Promise.resolve(state.membership);
-    },
+    resolveUserOrganisation: (...args: unknown[]) =>
+        resolveUserOrganisation(...args),
     getOrganisationEnabledConnectorIds: vi.fn(),
     getUserOrganisationId: vi.fn(),
     listOrganisationMembers: vi.fn(),
@@ -185,6 +188,13 @@ beforeEach(() => {
     state.membership = null;
     state.membershipThrows = false;
     state.updateCalls = [];
+    resolveUserOrganisation.mockReset();
+    resolveUserOrganisation.mockImplementation(() => {
+        if (state.membershipThrows) {
+            return Promise.reject(new Error("db down"));
+        }
+        return Promise.resolve(state.membership);
+    });
 });
 
 const patchProfile = (body: Record<string, unknown>) =>
@@ -235,10 +245,7 @@ describe("PATCH /user/profile — legacy organisation field, firm-member belt", 
         });
     });
 
-    it("does not resolve membership at all when the payload has no organisation key", async () => {
-        // Cheap-path guard: a displayName-only PATCH shouldn't need the extra
-        // membership lookup. (membershipThrows would surface as a non-200 if the
-        // handler awaited it unconditionally and mishandled the rejection.)
+    it("resolves membership exactly once (loadProfile's own resolve) for a displayName-only PATCH — the belt's extra lookup is skipped", async () => {
         state.membership = ARIA_MEMBER;
 
         const res = await patchProfile({ displayName: "Only This" });
@@ -248,5 +255,24 @@ describe("PATCH /user/profile — legacy organisation field, firm-member belt", 
         expect(state.updateCalls[0]).toMatchObject({
             display_name: "Only This",
         });
+        // Cheap-path guard: exactly one resolve (loadProfile's), not two — the
+        // belt logic must not fire when the payload never touches organisation.
+        expect(resolveUserOrganisation).toHaveBeenCalledTimes(1);
+    });
+
+    it("resolves membership exactly twice (belt + loadProfile) when the payload touches organisation", async () => {
+        state.membership = ARIA_MEMBER;
+
+        const res = await patchProfile({
+            organisation: "Sneaky Renamed Firm",
+            displayName: "Two",
+        });
+
+        expect(res.status).toBe(200);
+        expect(state.updateCalls[0]).not.toHaveProperty("organisation");
+        // One resolve from the belt (drops organisation), one from
+        // loadProfile (builds the response's `firm` field) — both call sites
+        // are independent resolves, not a shared cache.
+        expect(resolveUserOrganisation).toHaveBeenCalledTimes(2);
     });
 });
