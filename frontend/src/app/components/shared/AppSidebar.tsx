@@ -305,12 +305,13 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                 )}
 
                 {isOpen && (
-                    // min-h-56 is a floor, not a fixed height: on a tall
-                    // viewport flex-1 gives this far more, but when space runs
-                    // out it stops collapsing and the column above scrolls
-                    // instead — so History degrades to a shorter list rather
-                    // than a half-rendered header.
-                    <div className="mt-4 flex min-h-56 flex-1 flex-col gap-4">
+                    // No min-height here on purpose. A floor on this wrapper is
+                    // shared with the Recent Matters block above, which cannot
+                    // shrink — with a full 5-matter list it eats the whole floor
+                    // and History resolves to zero height. Instead this region
+                    // sizes to its content inside the scrollable column above,
+                    // and the floor lives on the History section itself.
+                    <div className="mt-4 flex flex-1 flex-col gap-4">
                         {/* Recent Projects */}
                         <div>
                             <button
@@ -396,8 +397,14 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                             )}
                         </div>
 
-                        {/* Assistant History */}
-                        <div className="flex min-h-0 flex-1 flex-col">
+                        {/* Assistant History. min-h-48 is a floor, not a fixed
+                            height: flex-1 gives it more on a tall viewport, but
+                            when space runs out it stops shrinking and the column
+                            above scrolls instead — so the list degrades to a
+                            shorter scrollable list rather than to nothing. The
+                            row container below is itself a scroll container, so
+                            it still resolves to a bounded height. */}
+                        <div className="flex min-h-48 flex-1 flex-col">
                             <button
                                 onClick={() => setHistoryCollapsed((v) => !v)}
                                 className={`mb-2 flex w-full items-center justify-between px-5 text-xs font-semibold text-gray-500 transition-colors hover:text-gray-700 ${
