@@ -642,6 +642,27 @@ userRouter.patch(
     if (!parsed.ok) return void res.status(400).json({ detail: parsed.detail });
 
     const db = createServerSupabase();
+
+    // The legacy free-text `organisation` field is being retired for firm
+    // members (a sibling frontend PR hides the input for them) — this is the
+    // server-side belt. A firm member's write to it is silently dropped, not
+    // rejected: the field is cosmetic, so this follows the absence-not-
+    // disabled precedent (WS8 PR B) rather than a 4xx. Fail OPEN on a
+    // membership-lookup error — a non-destructive cosmetic write means
+    // availability wins here (WS8 PR B precedent), not the deletion
+    // fail-SAFE direction.
+    if ("organisation" in parsed.update) {
+        try {
+            const membership = await resolveUserOrganisation(db, userId);
+            if (membership) delete parsed.update.organisation;
+        } catch (err) {
+            console.error(
+                "[user/profile] organisation membership check failed (fail-open)",
+                { userId, error: safeErrorLog(err) },
+            );
+        }
+    }
+
     const ensureError = await ensureProfileRow(db, userId);
     if (ensureError)
         return void failRequest(res, "[user] profile ensure failed", ensureError);
