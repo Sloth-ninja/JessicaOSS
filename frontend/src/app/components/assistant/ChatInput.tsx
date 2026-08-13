@@ -324,13 +324,15 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
                         <div className="flex items-center gap-1">
                             {modelPrefsManaged ? (
                                 <span
-                                    className="flex h-8 max-w-[200px] items-center truncate rounded-lg px-2 text-xs text-gray-400"
+                                    className="flex h-8 max-w-[200px] items-center rounded-lg px-2 text-xs text-gray-400"
                                     title={`Model access is provided by ${
                                         profile?.firm?.name ?? "your firm"
                                     }.`}
                                 >
-                                    Provided by{" "}
-                                    {profile?.firm?.name ?? "your firm"}
+                                    <span className="truncate">
+                                        Provided by{" "}
+                                        {profile?.firm?.name ?? "your firm"}
+                                    </span>
                                 </span>
                             ) : (
                                 <ModelToggle

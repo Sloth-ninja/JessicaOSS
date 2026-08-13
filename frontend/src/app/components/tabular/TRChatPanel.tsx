@@ -617,12 +617,14 @@ function TRChatInput({
                 <div className="flex items-center justify-between pl-1 pr-2">
                     {modelPrefsManaged ? (
                         <span
-                            className="flex h-8 max-w-[200px] items-center truncate rounded-lg px-2 text-xs text-gray-400"
+                            className="flex h-8 max-w-[200px] items-center rounded-lg px-2 text-xs text-gray-400"
                             title={`Model access is provided by ${
                                 firmName ?? "your firm"
                             }.`}
                         >
-                            Provided by {firmName ?? "your firm"}
+                            <span className="truncate">
+                                Provided by {firmName ?? "your firm"}
+                            </span>
                         </span>
                     ) : (
                         <ModelToggle
