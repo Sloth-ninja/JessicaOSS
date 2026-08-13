@@ -40,8 +40,17 @@ layout defect.
     History header do not — and with no clipping ancestor they paint through
     onto the `mt-auto` profile block. Fixed by wrapping the nav sections and
     the middle region in a single `flex-1 min-h-0 overflow-y-auto` column, so
-    the profile block is a SIBLING of a scroll container; plus a `min-h-56`
-    floor on the middle region and `shrink-0` on the profile block.
+    the profile block is a SIBLING of a scroll container; plus `shrink-0` on
+    the profile block and a `min-h-48` floor on the **History section**.
+  - The floor was first placed on the middle-region wrapper (`min-h-56`) and
+    moved during review (I1). A floor there is shared with the Recent Matters
+    block, which cannot shrink: with a full 5-matter list Recent Matters
+    (~220px) consumes the entire 224px floor and the History section resolves
+    to zero height — an empty list with the header flush at the bottom, in
+    precisely the configuration the pilot firm will QA. On the History
+    section the floor protects the list itself; the row container is a scroll
+    container, so its automatic minimum size is 0 and the section still
+    resolves to a bounded height.
 - **Item 2 — model picker shown to members whose firm manages models.**
   `frontend/src/app/components/assistant/ChatInput.tsx` and
   `frontend/src/app/components/tabular/TRChatPanel.tsx` computed
@@ -71,17 +80,37 @@ is not lint-clean at HEAD, so "no new findings" is the honest gate. No
 frontend test framework exists (upstream ships none); none added.
 
 Item 1's layout fix was verified by headless-Chrome renders of a raw-CSS
-harness translating the AppSidebar class chain, before vs after, with the
-full firm-admin nav present:
-  - **820px viewport** (the owner's reproducing configuration) — before:
-    "Assistant History" overlaps the profile row, matching the screenshot;
-    after: clear of it.
-  - **700px viewport** — before: the nav itself collides with the profile
-    block and History escapes the sidebar card entirely (the root is
-    `overflow-visible`); after: clean, the column scrolls.
-  - **tall viewport** — before/after pixel-identical: no scrollbar, and the
-    pinned Recent Matters + independently-scrolling history list behave
-    exactly as they did.
+harness translating the AppSidebar class chain, before vs after. **Harness
+configuration matters and is stated here because the first round got it
+wrong.** Round 1 modelled the EASY case — an empty "No matters yet" Recent
+Matters, and the logo/toggle row nested *inside* the scroll column, which
+the real code does not do. Its conclusions (overlap before, clear after, no
+tall-viewport regression) held up, but its floor measurement did not, which
+is what review finding I1 caught.
+
+Round 2 harness — the HARD case, and the configuration the numbers below
+come from: firm-admin nav (Firm *and* Firm admin groups mounted), a full
+5-matter Recent Matters list (~220px, unshrinkable), logo row outside the
+scroll column as in the real code, four history rows. Overlap is measured by
+sampling `document.elementFromPoint` across the profile block rather than by
+comparing rects — `getBoundingClientRect` ignores clipping and reports a
+false positive for content merely scrolled out of view inside the new
+overflow container.
+
+| viewport | main | min-h-56 on wrapper (round 1) | min-h-48 on History (shipped) |
+|---|---|---|---|
+| 796px | history 0px; header escapes the card | history 0px | history 192px, rows 174px |
+| 676px | history 0px; header escapes the card | history 0px | history 192px, rows 174px |
+| 1006px | history 60px, rows 42px | history 60px, rows 42px | history 192px, rows 174px |
+
+Matches the reviewer's independent measurement (192/168 — the 6px delta is
+header line-height modelling). In no shipped-variant render does content from
+above paint into the profile block, and nothing escapes the sidebar card.
+
+**Accepted trade-off:** at ~1030px with 5 recent matters the outer column
+becomes scrollable where today it is not. Scroll is acceptable; an empty
+history list is not — and at that height the fix yields 174px of rows against
+main's 42px.
 
 **Decisions:**
 
