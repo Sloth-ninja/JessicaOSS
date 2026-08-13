@@ -558,6 +558,23 @@ describe("GET /admin/connector-gallery", () => {
     const res = await fetch(`${baseUrl}/admin/connector-gallery`);
     expect(res.status).toBe(403);
   });
+
+  it("filters stale ids out of enabledConnectorIds (read-side symmetry with the write-side tolerance)", async () => {
+    // A firm that curated canva/apollo before their 13/08/2026 removal keeps
+    // those ids in storage. GET must not echo them back: doing so would
+    // inflate the admin card's tick count (its "all visible" footer compares
+    // visible.size === registry.length) and could let an all-stale curation
+    // canonicalise to [] ("all visible") on the next save, inverting intent.
+    state.enabledConnectorIds = [
+      "google-drive",
+      "not-a-real-connector",
+      "gmail",
+    ];
+    const res = await fetch(`${baseUrl}/admin/connector-gallery`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { enabledConnectorIds: string[] };
+    expect(body.enabledConnectorIds).toEqual(["google-drive", "gmail"]);
+  });
 });
 
 describe("PATCH /admin/connector-gallery", () => {
