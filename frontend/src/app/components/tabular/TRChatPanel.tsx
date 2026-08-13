@@ -28,7 +28,10 @@ import { ModelToggle } from "../assistant/ModelToggle";
 import { ApiKeyMissingModal } from "../shared/ApiKeyMissingModal";
 import { PreResponseWrapper } from "../shared/PreResponseWrapper";
 import { useUserProfile } from "@/contexts/UserProfileContext";
-import { firmOfferedProviders } from "@/app/(pages)/account/firmPolicy";
+import {
+    firmOfferedProviders,
+    personalModelPrefsBlocked,
+} from "@/app/(pages)/account/firmPolicy";
 import {
     getModelProvider,
     isModelAvailable,
@@ -517,6 +520,8 @@ function TRChatInput({
     apiKeys,
     localModels,
     offeredProviders,
+    modelPrefsManaged,
+    firmName,
     onHeightChange,
 }: {
     isLoading: boolean;
@@ -527,6 +532,9 @@ function TRChatInput({
     apiKeys?: ApiKeyState;
     localModels?: string[];
     offeredProviders?: string[] | null;
+    /** Firm manages model preferences ⇒ show a label, not a picker. */
+    modelPrefsManaged?: boolean;
+    firmName?: string | null;
     onHeightChange: (height: number) => void;
 }) {
     const [value, setValue] = useState("");
@@ -607,13 +615,24 @@ function TRChatInput({
                     className="w-full resize-none text-sm bg-transparent outline-none placeholder:text-gray-400 leading-6 max-h-48 overflow-hidden border-0 p-0 pl-3 pr-2 pt-0.5"
                 />
                 <div className="flex items-center justify-between pl-1 pr-2">
-                    <ModelToggle
-                        value={model}
-                        onChange={onModelChange}
-                        apiKeys={apiKeys}
-                        localModels={localModels}
-                        offeredProviders={offeredProviders}
-                    />
+                    {modelPrefsManaged ? (
+                        <span
+                            className="flex h-8 max-w-[200px] items-center truncate rounded-lg px-2 text-xs text-gray-400"
+                            title={`Model access is provided by ${
+                                firmName ?? "your firm"
+                            }.`}
+                        >
+                            Provided by {firmName ?? "your firm"}
+                        </span>
+                    ) : (
+                        <ModelToggle
+                            value={model}
+                            onChange={onModelChange}
+                            apiKeys={apiKeys}
+                            localModels={localModels}
+                            offeredProviders={offeredProviders}
+                        />
+                    )}
                     <button
                         type="button"
                         onClick={handleAction}
@@ -732,6 +751,10 @@ export function TRChatPanel({
     // Firm-offered providers (WS8 PR F): restrict the picker when the member's
     // firm limits providers; null ⇒ no restriction.
     const offeredProviders = firmOfferedProviders(profile?.firm);
+    // Firm policy (WS8 PR F): when the firm manages model preferences there is
+    // nothing for the member to choose — the server clamps the model anyway.
+    // Absence, not a disabled control (matches the Model Preferences page).
+    const modelPrefsManaged = personalModelPrefsBlocked(profile?.firm);
     const currentModel = profile?.tabularModel ?? "gemini-3-flash-preview";
     const [apiKeyModalProvider, setApiKeyModalProvider] =
         useState<ModelProvider | null>(null);
@@ -1586,6 +1609,8 @@ export function TRChatPanel({
                 apiKeys={apiKeys}
                 localModels={localModels}
                 offeredProviders={offeredProviders}
+                modelPrefsManaged={modelPrefsManaged}
+                firmName={profile?.firm?.name}
                 onHeightChange={setInputHeight}
             />
 
