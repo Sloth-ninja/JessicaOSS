@@ -19,6 +19,12 @@ import {
     BarChart3,
     Building,
 } from "lucide-react";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUserProfile } from "@/contexts/UserProfileContext";
 import { useChatHistoryContext } from "@/app/contexts/ChatHistoryContext";
@@ -76,7 +82,6 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
         return projectChatMatch?.[1] ?? null;
     }, [pathname]);
     const [shouldAnimate, setShouldAnimate] = useState(false);
-    const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const [projectsCollapsed, setProjectsCollapsed] = useState(false);
     const [historyCollapsed, setHistoryCollapsed] = useState(false);
     const [projectNames, setProjectNames] = useState<Record<string, string>>(
@@ -112,15 +117,6 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
     useEffect(() => {
         if (!isOpen) setShouldAnimate(true);
     }, [isOpen]);
-
-    useEffect(() => {
-        const handleClickOutside = () => setIsDropdownOpen(false);
-        if (isDropdownOpen) {
-            document.addEventListener("click", handleClickOutside);
-            return () =>
-                document.removeEventListener("click", handleClickOutside);
-        }
-    }, [isDropdownOpen]);
 
     useEffect(() => {
         setCurrentChatId(routeChatId);
@@ -486,65 +482,73 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
             {/* User Profile */}
             <div className="mt-auto p-1">
                 {user && (
-                    <div className="relative">
-                        <button
-                            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                            className={cn(
-                                "flex items-center transition-colors w-full px-2.5 py-3 border-t",
-                                "rounded-xl border-white/60",
-                                !isOpen ? "hidden md:flex" : "",
-                                pathname === "/account" || isDropdownOpen
-                                    ? "bg-gray-200/60"
-                                    : "hover:bg-gray-100",
-                            )}
-                            title={!isOpen ? user.email : undefined}
-                        >
-                            <div className="h-6.5 w-6.5 flex-shrink-0 rounded-full bg-gray-700 flex items-center justify-center text-white text-sm font-medium font-serif">
-                                {getUserInitials(user.email)}
-                            </div>
-                            {isOpen && (
-                                <div
-                                    className={`text-left flex-1 min-w-0 pl-3 flex items-center justify-between gap-2 ${
-                                        shouldAnimate ? "sidebar-fade-in-2" : ""
-                                    }`}
-                                >
-                                    <div className="flex flex-col gap-0.5 min-w-0">
-                                        <div className="text-sm font-medium text-gray-900 leading-none">
-                                            {getDisplayName()}
-                                        </div>
-                                        <div className="text-[12px] text-gray-500 leading-none">
-                                            {getUserTier()}
-                                        </div>
-                                    </div>
-                                    <ChevronsUpDown className="h-4 w-4 flex-shrink-0 text-gray-400" />
-                                </div>
-                            )}
-                        </button>
-
-                        {isDropdownOpen && (
-                            <div
+                    // Radix dropdown: portal-mounted and collision-aware, so it
+                    // can no longer paint over the Assistant History rows the way
+                    // the old in-flow absolute box did (pilot feedback 13/08).
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <button
                                 className={cn(
-                                    "absolute bottom-full left-0 z-50 mb-1 p-1 whitespace-nowrap",
-                                    isOpen ? "right-0" : "w-56",
-                                    "bg-white/80 rounded-xl shadow-[0_6px_17px_rgba(15,23,42,0.1)] border border-white/70 backdrop-blur-xl",
+                                    "flex items-center transition-colors w-full px-2.5 py-3 border-t",
+                                    "rounded-xl border-white/60",
+                                    !isOpen ? "hidden md:flex" : "",
+                                    pathname === "/account"
+                                        ? "bg-gray-200/60"
+                                        : "hover:bg-gray-100 data-[state=open]:bg-gray-200/60",
                                 )}
+                                title={!isOpen ? user.email : undefined}
                             >
-                                <button
-                                    onClick={() => {
-                                        router.push("/account");
-                                        setIsDropdownOpen(false);
-                                    }}
-                                    className={cn(
-                                        "w-full px-4 py-2 text-left text-sm text-gray-700 flex items-center gap-2 rounded-md",
-                                        "hover:bg-white/70",
-                                    )}
-                                >
-                                    <User className="h-4 w-4" />
-                                    Account Settings
-                                </button>
-                            </div>
-                        )}
-                    </div>
+                                <div className="h-6.5 w-6.5 flex-shrink-0 rounded-full bg-gray-700 flex items-center justify-center text-white text-sm font-medium font-serif">
+                                    {getUserInitials(user.email)}
+                                </div>
+                                {isOpen && (
+                                    <div
+                                        className={`text-left flex-1 min-w-0 pl-3 flex items-center justify-between gap-2 ${
+                                            shouldAnimate
+                                                ? "sidebar-fade-in-2"
+                                                : ""
+                                        }`}
+                                    >
+                                        <div className="flex flex-col gap-0.5 min-w-0">
+                                            <div className="text-sm font-medium text-gray-900 leading-none">
+                                                {getDisplayName()}
+                                            </div>
+                                            <div className="text-[12px] text-gray-500 leading-none">
+                                                {getUserTier()}
+                                            </div>
+                                        </div>
+                                        <ChevronsUpDown className="h-4 w-4 flex-shrink-0 text-gray-400" />
+                                    </div>
+                                )}
+                            </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent
+                            side="top"
+                            align="start"
+                            className={cn(
+                                "z-101 whitespace-nowrap p-1",
+                                !isOpen && "w-56",
+                                "bg-white/80 rounded-xl shadow-[0_6px_17px_rgba(15,23,42,0.1)] border-white/70 backdrop-blur-xl",
+                            )}
+                            // Expanded sidebar: match the trigger's full width,
+                            // as the old right-0 box did. Collapsed: fixed w-56.
+                            style={
+                                isOpen
+                                    ? {
+                                          width: "var(--radix-dropdown-menu-trigger-width)",
+                                      }
+                                    : undefined
+                            }
+                        >
+                            <DropdownMenuItem
+                                onSelect={() => router.push("/account")}
+                                className="text-gray-700 focus:bg-white/70"
+                            >
+                                <User className="h-4 w-4" />
+                                Account Settings
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
                 )}
             </div>
         </div>
