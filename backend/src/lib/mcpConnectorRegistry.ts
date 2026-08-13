@@ -96,35 +96,13 @@ export const CONNECTOR_REGISTRY: readonly ConnectorRegistryEntry[] = [
         authType: "oauth",
         oauthEnvPrefix: "GOOGLE_MCP_OAUTH",
     },
-    {
-        // VERIFIED: official Canva remote MCP server, OAuth 2 with Dynamic
-        // Client Registration (DCR) — no operator config needed.
-        // Source: https://www.canva.dev/docs/mcp/ (endpoint https://mcp.canva.com/mcp)
-        id: "canva",
-        name: "Canva",
-        description:
-            "Create and export branded documents and presentations in Canva.",
-        category: "Design",
-        popular: false,
-        availability: "oauth",
-        serverUrl: "https://mcp.canva.com/mcp",
-        authType: "oauth",
-    },
-    {
-        // VERIFIED: official Apollo.io remote MCP server over Streamable HTTP
-        // with OAuth (browser sign-in, any plan). OAuth authorization-server
-        // metadata is published at mcp.apollo.io/.well-known/oauth-authorization-server.
-        // Source: https://docs.apollo.io/docs/apollo-mcp (endpoint https://mcp.apollo.io/mcp)
-        id: "apollo",
-        name: "Apollo.io",
-        description:
-            "Enrich company and contact records for business development.",
-        category: "Business development",
-        popular: false,
-        availability: "oauth",
-        serverUrl: "https://mcp.apollo.io/mcp",
-        authType: "oauth",
-    },
+    // Canva and Apollo.io were removed 13/08/2026 (owner decision: "aren't
+    // built so shouldn't be there") — neither was part of the UK-legal
+    // shortlist rationale, and the "verified" comments on the old entries
+    // claimed a check that never happened, giving pilot users a Connect
+    // button that dead-ended. See mcpConnectorRegistry.test.ts for the
+    // pinning test and admin.ts's parseConnectorCuration for the read-side
+    // tolerance a firm's stale stored curation now needs.
 
     // ── Custom (no verified one-click endpoint — informational only) ─────────
     {
