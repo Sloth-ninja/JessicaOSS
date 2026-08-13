@@ -7,6 +7,105 @@
 
 ---
 
+## 2026-08-13 — Pilot-feedback fix train, PR B: connector-registry honesty + organisation-write belt (branch `pilot-feedback-connectors`)
+
+**Scope:** two small, independent backend fixes from the 13/08/2026
+pilot-feedback fix train. Item 4: remove Canva and Apollo from the MCP
+connector registry (owner decision: "aren't built so shouldn't be there").
+Item 3-belt: server-side belt so a firm member's `PATCH /user/profile` can no
+longer write the legacy free-text `organisation` field (the frontend hides
+the input for firm members in a sibling PR; this is the backend guarantee).
+An independent review (APPROVE with findings) caught two follow-on gaps in
+the connector-registry removal and a weak test assertion; both are folded
+into this same entry rather than a separate one.
+
+**Key changes:**
+
+- `backend/src/lib/mcpConnectorRegistry.ts` — deleted the `canva` and
+  `apollo` entries outright. Both were marked `availability: "oauth"`
+  (one-click tier) with "VERIFIED" code comments that nothing had actually
+  verified, so the connector gallery rendered a live Connect button that
+  dead-ended for pilot users. Neither was ever part of the UK-legal
+  shortlist rationale.
+- **API behaviour change** — `PATCH /admin/connector-gallery`
+  (`backend/src/routes/admin.ts`, `parseConnectorCuration`): now silently
+  DROPS unknown string ids from the saved curation instead of 400ing the
+  whole write. Previously any unrecognised id in the body rejected the
+  entire PATCH. Rationale: the admin curation UI
+  (`frontend/.../admin/firm-settings/page.tsx`, `ConnectorsCurationCard`)
+  round-trips its *full current tick-list* on every single toggle, seeded
+  from whatever `enabledConnectorIds` a firm has stored. A firm that had
+  curated Canva or Apollo before their removal would have that id
+  permanently stuck in storage with no UI control left to untick it (the
+  registry no longer renders that row) — under the old validation, every
+  future connector-gallery save for that firm would 400 forever. Malformed
+  entries (non-string values) still 400 — that remains a client bug, not
+  stale data.
+- **API behaviour change (review fix round)** — `GET
+  /admin/connector-gallery`: now filters the stored `enabledConnectorIds`
+  against the live registry (`connectorRegistryIds()`) before returning
+  them, matching the write-side tolerance above. Reviewer finding: returning
+  a stale id unfiltered inflated the admin card's tick count (its "all
+  visible" footer compares `visible.size === registry.length`, which a
+  phantom stale id makes false while a real entry stays effectively hidden
+  from the count) and could let a curation stored as *only* stale ids
+  compute a payload the server then canonicalises to `[]` ("all
+  visible") on the next save — inverting the admin's actual intent.
+- `backend/src/routes/user.ts` (`PATCH /profile`) — when the parsed update
+  touches `organisation` AND the caller has a non-null organisation
+  membership, the `organisation` key is silently dropped from the DB write
+  before it lands; other fields in the same PATCH still apply. The
+  membership lookup only runs when the payload actually contains
+  `organisation` (no extra query on unrelated PATCHes).
+- Tests: `mcpConnectorRegistry.test.ts` (pinning canva/apollo absence — kept
+  as reviewer-approved documentation of the owner decision),
+  `mcpConnectorGallery.test.ts` (swapped an unrelated `normaliseServerUrl`
+  example URL off `mcp.canva.com` to a vendor-neutral one), `admin.test.ts`
+  (rewrote the connector-curation 400 test to cover only genuinely malformed
+  non-string entries; added a test for the silent-drop PATCH behaviour and a
+  new test for the GET-side stale-id filter), new
+  `user.profilePatch.test.ts` (firm member's organisation write dropped
+  while other fields land; orgless caller's write still lands; a
+  membership-lookup error still lands the write, fail-open; exact
+  `resolveUserOrganisation` call-count assertions — once for a
+  displayName-only PATCH via `loadProfile`, twice when the payload touches
+  `organisation`, via the belt plus `loadProfile`).
+
+**Decisions:**
+
+- Silent-drop over 400 for unknown/stale connector-curation ids, on both the
+  PATCH write path and the GET read path: consistent with
+  `filterRegistryByOrgCuration`'s existing read-side tolerance
+  (`mcpConnectorGallery.ts`, "unknown ids are simply ignored"), and the only
+  way to avoid a permanent dead-end for any firm caught holding a
+  since-retired id. Malformed (non-string) entries are a different class of
+  problem and still reject with 400.
+- Fail-open on the organisation-write belt's membership lookup: a
+  non-destructive, purely cosmetic write means availability wins here — the
+  WS8 PR B precedent (firm-policy-gated writes degrade to "unblocked" on a
+  transient lookup failure), explicitly NOT the deletion-governance
+  fail-SAFE direction (which degrades toward tombstoning on the same class
+  of error for destructive operations).
+- The connect-flow 404 for a removed registry id (`getConnectorRegistryEntry`
+  in the one-click connect route) was deliberately left unchanged — a user
+  genuinely cannot connect to something that no longer exists, which is
+  different from a stale *curation* id blocking unrelated firm-admin writes.
+
+**Verification:** `npx tsc --noEmit` clean throughout (run from `backend/`,
+both the initial pass and after the review fix round). Targeted suites run
+from `backend/` (never repo root): `mcpConnectorRegistry.test.ts`,
+`mcpConnectorGallery.test.ts`, `user.test.ts`, `user.serialize.test.ts`,
+`user.connectorGallery.test.ts`, `user.profilePatch.test.ts`,
+`admin.test.ts`, `user.firmMembers.test.ts` — all green (100/100 before the
+review fix round; `admin.test.ts` 57→58 and `user.profilePatch.test.ts`
+4→5 tests after it, all still green). An independent reviewer additionally
+ran the full backend suite: 886/886 passed. Console `[user/profile]
+organisation ... failed (fail-open)` log lines seen in the profilePatch
+suite's output are expected — they are the fail-open path being exercised
+and asserted on directly, not failures.
+
+---
+
 ## 2026-08-12 — Practice Management Task 1: `matter_workspace_links` migration (branch `pm-migration`)
 
 **Scope:** Task 1 of `docs/superpowers/plans/2026-08-07-practice-management.md`

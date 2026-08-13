@@ -263,6 +263,16 @@ const CONNECTOR_REGISTRY_VIEW = CONNECTOR_REGISTRY.map((entry) => ({
 // GET /admin/connector-gallery — the full registry plus the firm's current
 // curation (`enabledConnectorIds`). An empty list means "all visible" (the
 // documented default).
+//
+// Read-side symmetry with parseConnectorCuration's write-side tolerance: the
+// stored list is filtered against the live registry before it goes out. A
+// retired registry id (e.g. canva/apollo, removed 13/08/2026) left stored in
+// a firm's curation would otherwise inflate this response — the admin card's
+// "all visible" footer compares `visible.size === registry.length`, so a
+// phantom stale id makes that read false while a real entry stays hidden;
+// worse, a curation stored as ONLY stale ids would let an untick compute a
+// non-empty-looking payload that the server still canonicalises to []
+// ("all visible"), inverting the admin's intent.
 adminRouter.get(
     "/connector-gallery",
     asyncHandler(async (_req, res) => {
@@ -272,17 +282,27 @@ adminRouter.get(
             res.locals.userId as string,
         );
         if (!orgId) return void res.status(403).json({ detail: ADMIN_REQUIRED });
-        const enabledConnectorIds = await getOrganisationEnabledConnectorIds(
-            db,
-            orgId,
-        );
+        const stored = await getOrganisationEnabledConnectorIds(db, orgId);
+        const valid = connectorRegistryIds();
+        const enabledConnectorIds = stored.filter((id) => valid.has(id));
         res.json({ registry: CONNECTOR_REGISTRY_VIEW, enabledConnectorIds });
     }),
 );
 
 // Parse a PATCH /admin/connector-gallery body: {enabledConnectorIds: string[]}.
-// Every id must be a known registry id; an empty array is valid and means
-// "all visible". Duplicates are collapsed.
+// An empty array is valid and means "all visible". Duplicates are collapsed.
+//
+// Unknown ids are silently DROPPED, not rejected: the admin UI round-trips
+// its full current tick-list on every toggle (firm-settings/page.tsx
+// ConnectorsCurationCard), seeded from whatever `enabledConnectorIds` the
+// firm has stored. If a registry entry is ever retired (e.g. canva/apollo
+// removed 13/08/2026), a firm that had curated it keeps that stale id in
+// storage — rejecting the whole write on the next unrelated toggle would
+// permanently block them from saving (no UI control exists to un-tick a row
+// the registry no longer renders). Mirrors filterRegistryByOrgCuration's
+// read-side tolerance (mcpConnectorGallery.ts): unknown ids are simply
+// ignored. Malformed entries (non-strings) still 400 — that is a client bug,
+// not a stale-data situation.
 function parseConnectorCuration(body: unknown):
     | { ok: true; ids: string[] }
     | { ok: false; detail: string } {
@@ -296,10 +316,13 @@ function parseConnectorCuration(body: unknown):
     const valid = connectorRegistryIds();
     const ids = new Set<string>();
     for (const value of raw) {
-        if (typeof value !== "string" || !valid.has(value)) {
-            return { ok: false, detail: "Unknown connector id" };
+        if (typeof value !== "string") {
+            return {
+                ok: false,
+                detail: "enabledConnectorIds must contain only strings",
+            };
         }
-        ids.add(value);
+        if (valid.has(value)) ids.add(value);
     }
     return { ok: true, ids: [...ids] };
 }

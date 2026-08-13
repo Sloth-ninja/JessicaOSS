@@ -68,8 +68,8 @@ beforeEach(() => listUserMcpConnectors.mockReset());
 
 describe("normaliseServerUrl", () => {
     it("canonicalises and tolerates junk", () => {
-        expect(normaliseServerUrl("https://mcp.canva.com/mcp")).toBe(
-            "https://mcp.canva.com/mcp",
+        expect(normaliseServerUrl("https://mcp.example.com/mcp")).toBe(
+            "https://mcp.example.com/mcp",
         );
         expect(normaliseServerUrl("not a url")).toBeNull();
         expect(normaliseServerUrl(undefined)).toBeNull();

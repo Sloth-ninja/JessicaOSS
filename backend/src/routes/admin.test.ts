@@ -558,6 +558,23 @@ describe("GET /admin/connector-gallery", () => {
     const res = await fetch(`${baseUrl}/admin/connector-gallery`);
     expect(res.status).toBe(403);
   });
+
+  it("filters stale ids out of enabledConnectorIds (read-side symmetry with the write-side tolerance)", async () => {
+    // A firm that curated canva/apollo before their 13/08/2026 removal keeps
+    // those ids in storage. GET must not echo them back: doing so would
+    // inflate the admin card's tick count (its "all visible" footer compares
+    // visible.size === registry.length) and could let an all-stale curation
+    // canonicalise to [] ("all visible") on the next save, inverting intent.
+    state.enabledConnectorIds = [
+      "google-drive",
+      "not-a-real-connector",
+      "gmail",
+    ];
+    const res = await fetch(`${baseUrl}/admin/connector-gallery`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { enabledConnectorIds: string[] };
+    expect(body.enabledConnectorIds).toEqual(["google-drive", "gmail"]);
+  });
 });
 
 describe("PATCH /admin/connector-gallery", () => {
@@ -574,12 +591,32 @@ describe("PATCH /admin/connector-gallery", () => {
     expect(setOrganisationEnabledConnectorIds).not.toHaveBeenCalled();
   });
 
-  it("rejects an unknown connector id with 400", async () => {
+  it("rejects a non-string entry with 400 (malformed input, not stale data)", async () => {
     const res = await patchCuration({
-      enabledConnectorIds: ["google-drive", "not-a-real-connector"],
+      enabledConnectorIds: ["google-drive", 42],
     });
     expect(res.status).toBe(400);
     expect(setOrganisationEnabledConnectorIds).not.toHaveBeenCalled();
+  });
+
+  it("silently drops an unknown connector id rather than rejecting the whole write (stale enabled id in org curation is ignored harmlessly)", async () => {
+    // A previously-valid id (e.g. canva/apollo, removed from the registry
+    // 13/08/2026) that a firm still has stored must not make every future
+    // curation save 400 — the admin UI round-trips its full tick-list on
+    // every toggle and has no control to un-tick a row the registry no
+    // longer renders (pilot-feedback fix train PR B, item 4).
+    const res = await patchCuration({
+      enabledConnectorIds: ["google-drive", "not-a-real-connector"],
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      enabledConnectorIds: ["google-drive"],
+    });
+    expect(setOrganisationEnabledConnectorIds).toHaveBeenCalledWith(
+      expect.anything(),
+      "org-1",
+      ["google-drive"],
+    );
   });
 
   it("accepts an empty array (all visible) and persists it", async () => {

@@ -49,4 +49,11 @@ describe("connector registry invariants", () => {
         expect(connectorRegistryIds().has("google-drive")).toBe(true);
         expect(connectorRegistryIds().has("nope")).toBe(false);
     });
+
+    it("no longer lists canva or apollo (owner decision 13/08/2026: not built)", () => {
+        expect(getConnectorRegistryEntry("canva")).toBeUndefined();
+        expect(getConnectorRegistryEntry("apollo")).toBeUndefined();
+        expect(connectorRegistryIds().has("canva")).toBe(false);
+        expect(connectorRegistryIds().has("apollo")).toBe(false);
+    });
 });
