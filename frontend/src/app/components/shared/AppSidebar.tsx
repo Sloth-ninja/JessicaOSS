@@ -235,89 +235,190 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                 </button>
             </div>
 
-            {/* Nav items */}
-            {NAV_ITEMS.map(renderNavItem)}
+            {/* Scrollable upper column. The profile block below is a
+                SIBLING of this scroll container, so nothing above it can
+                paint over it on a short viewport — previously the middle
+                region shrank (min-h-0) while its non-shrinkable children
+                (Recent Matters, the Assistant History header) rendered at
+                intrinsic height with no clipping ancestor and spilled onto
+                the profile row (pilot feedback 13/08). */}
+            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+                {/* Nav items */}
+                {NAV_ITEMS.map(renderNavItem)}
 
-            {/* Research */}
-            {isOpen && (
-                <div
-                    className={`mt-2.5 mb-1 px-5 text-xs font-semibold text-gray-500 ${
-                        shouldAnimate ? "sidebar-fade-in" : ""
-                    }`}
-                >
-                    Research
-                </div>
-            )}
-            {RESEARCH_NAV_ITEMS.map(renderNavItem)}
+                {/* Research */}
+                {isOpen && (
+                    <div
+                        className={`mt-2.5 mb-1 px-5 text-xs font-semibold text-gray-500 ${
+                            shouldAnimate ? "sidebar-fade-in" : ""
+                        }`}
+                    >
+                        Research
+                    </div>
+                )}
+                {RESEARCH_NAV_ITEMS.map(renderNavItem)}
 
-            {/* Firm — visible to every member of a firm (WS9). Gates on firm
-                presence, NOT admin (contrast the Firm admin group below). */}
-            {profile?.firm && (
-                <>
-                    {isOpen && (
-                        <div
-                            className={`mt-2.5 mb-1 px-5 text-xs font-semibold text-gray-500 ${
-                                shouldAnimate ? "sidebar-fade-in" : ""
-                            }`}
-                        >
-                            Firm
-                        </div>
-                    )}
-                    {renderNavItem({
-                        href: "/firm-library",
-                        label: "Firm library",
-                        icon: Building,
-                    })}
-                </>
-            )}
-
-            {/* Firm admin — only for organisation admins (profile.isAdmin). */}
-            {profile?.isAdmin && (
-                <>
-                    {isOpen && (
-                        <div
-                            className={`mt-2.5 mb-1 px-5 text-xs font-semibold text-gray-500 ${
-                                shouldAnimate ? "sidebar-fade-in" : ""
-                            }`}
-                        >
-                            Firm admin
-                        </div>
-                    )}
-                    {renderNavItem({
-                        href: "/admin/dashboard",
-                        label: "Dashboard",
-                        icon: BarChart3,
-                    })}
-                    {renderNavItem({
-                        href: "/admin/firm-settings",
-                        label: "Firm settings",
-                        icon: Settings,
-                    })}
-                </>
-            )}
-
-            {isOpen && (
-                <div className="mt-4 flex-1 min-h-0 flex flex-col gap-4">
-                    {/* Recent Projects */}
-                    <div>
-                        <button
-                            onClick={() => setProjectsCollapsed((v) => !v)}
-                            className={`mb-2 flex w-full items-center justify-between px-5 text-xs font-semibold text-gray-500 transition-colors hover:text-gray-700 ${
-                                shouldAnimate ? "sidebar-fade-in" : ""
-                            }`}
-                        >
-                            <span>Recent Matters</span>
-                            <ChevronDown
-                                className={`h-3.5 w-3.5 transition-transform ${
-                                    projectsCollapsed ? "-rotate-90" : ""
+                {/* Firm — visible to every member of a firm (WS9). Gates on firm
+                    presence, NOT admin (contrast the Firm admin group below). */}
+                {profile?.firm && (
+                    <>
+                        {isOpen && (
+                            <div
+                                className={`mt-2.5 mb-1 px-5 text-xs font-semibold text-gray-500 ${
+                                    shouldAnimate ? "sidebar-fade-in" : ""
                                 }`}
-                            />
-                        </button>
-                        {!projectsCollapsed && (
-                            <>
-                                {!recentProjects ? (
+                            >
+                                Firm
+                            </div>
+                        )}
+                        {renderNavItem({
+                            href: "/firm-library",
+                            label: "Firm library",
+                            icon: Building,
+                        })}
+                    </>
+                )}
+
+                {/* Firm admin — only for organisation admins (profile.isAdmin). */}
+                {profile?.isAdmin && (
+                    <>
+                        {isOpen && (
+                            <div
+                                className={`mt-2.5 mb-1 px-5 text-xs font-semibold text-gray-500 ${
+                                    shouldAnimate ? "sidebar-fade-in" : ""
+                                }`}
+                            >
+                                Firm admin
+                            </div>
+                        )}
+                        {renderNavItem({
+                            href: "/admin/dashboard",
+                            label: "Dashboard",
+                            icon: BarChart3,
+                        })}
+                        {renderNavItem({
+                            href: "/admin/firm-settings",
+                            label: "Firm settings",
+                            icon: Settings,
+                        })}
+                    </>
+                )}
+
+                {isOpen && (
+                    // min-h-56 is a floor, not a fixed height: on a tall
+                    // viewport flex-1 gives this far more, but when space runs
+                    // out it stops collapsing and the column above scrolls
+                    // instead — so History degrades to a shorter list rather
+                    // than a half-rendered header.
+                    <div className="mt-4 flex min-h-56 flex-1 flex-col gap-4">
+                        {/* Recent Projects */}
+                        <div>
+                            <button
+                                onClick={() => setProjectsCollapsed((v) => !v)}
+                                className={`mb-2 flex w-full items-center justify-between px-5 text-xs font-semibold text-gray-500 transition-colors hover:text-gray-700 ${
+                                    shouldAnimate ? "sidebar-fade-in" : ""
+                                }`}
+                            >
+                                <span>Recent Matters</span>
+                                <ChevronDown
+                                    className={`h-3.5 w-3.5 transition-transform ${
+                                        projectsCollapsed ? "-rotate-90" : ""
+                                    }`}
+                                />
+                            </button>
+                            {!projectsCollapsed && (
+                                <>
+                                    {!recentProjects ? (
+                                        <div className="space-y-1 px-2.5">
+                                            {[50, 65, 45].map((w, i) => (
+                                                <div
+                                                    key={i}
+                                                    className="h-9 flex items-center px-3 rounded-md"
+                                                >
+                                                    <div
+                                                        className="h-3 bg-gray-200 rounded animate-pulse"
+                                                        style={{ width: `${w}%` }}
+                                                    />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : recentProjects.length === 0 ? (
+                                        <div
+                                            className={`px-5 py-2 text-xs text-gray-500 ${
+                                                shouldAnimate
+                                                    ? "sidebar-fade-in-2"
+                                                    : ""
+                                            }`}
+                                        >
+                                            No matters yet
+                                        </div>
+                                    ) : (
+                                        <div
+                                            className={`space-y-1 px-2.5 ${
+                                                shouldAnimate
+                                                    ? "sidebar-fade-in-2"
+                                                    : ""
+                                            }`}
+                                        >
+                                            {recentProjects.map((project) => {
+                                                const isActive =
+                                                    pathname ===
+                                                        `/projects/${project.id}` ||
+                                                    pathname.startsWith(
+                                                        `/projects/${project.id}/`,
+                                                    );
+                                                return (
+                                                    <button
+                                                        key={project.id}
+                                                        onClick={() =>
+                                                            router.push(
+                                                                `/projects/${project.id}`,
+                                                            )
+                                                        }
+                                                        title={project.name}
+                                                        className={cn(
+                                                            "flex h-9 w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs transition-colors",
+                                                            isActive
+                                                                ? "bg-gray-200/60 text-gray-900"
+                                                                : "text-gray-700 hover:bg-gray-100",
+                                                        )}
+                                                    >
+                                                        <FolderOpen className="h-3.5 w-3.5 shrink-0 text-gray-600" />
+                                                        <span className="min-w-0 flex-1 truncate">
+                                                            {project.name}
+                                                        </span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                        </div>
+
+                        {/* Assistant History */}
+                        <div className="flex min-h-0 flex-1 flex-col">
+                            <button
+                                onClick={() => setHistoryCollapsed((v) => !v)}
+                                className={`mb-2 flex w-full items-center justify-between px-5 text-xs font-semibold text-gray-500 transition-colors hover:text-gray-700 ${
+                                    shouldAnimate ? "sidebar-fade-in" : ""
+                                }`}
+                            >
+                                <span>Assistant History</span>
+                                <ChevronDown
+                                    className={`h-3.5 w-3.5 transition-transform ${
+                                        historyCollapsed ? "-rotate-90" : ""
+                                    }`}
+                                />
+                            </button>
+                            <div
+                                className={`overflow-y-auto flex-1 ${
+                                    historyCollapsed ? "hidden" : ""
+                                }`}
+                            >
+                                {!chats ? (
                                     <div className="space-y-1 px-2.5">
-                                        {[50, 65, 45].map((w, i) => (
+                                        {[40, 60, 50, 70, 45].map((w, i) => (
                                             <div
                                                 key={i}
                                                 className="h-9 flex items-center px-3 rounded-md"
@@ -329,158 +430,71 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                                             </div>
                                         ))}
                                     </div>
-                                ) : recentProjects.length === 0 ? (
+                                ) : chats.length === 0 ? (
                                     <div
-                                        className={`px-5 py-2 text-xs text-gray-500 ${
-                                            shouldAnimate
-                                                ? "sidebar-fade-in-2"
-                                                : ""
+                                        className={`text-xs text-gray-500 py-2 px-5 ${
+                                            shouldAnimate ? "sidebar-fade-in-2" : ""
                                         }`}
                                     >
-                                        No matters yet
+                                        No chats yet
                                     </div>
                                 ) : (
-                                    <div
-                                        className={`space-y-1 px-2.5 ${
-                                            shouldAnimate
-                                                ? "sidebar-fade-in-2"
-                                                : ""
-                                        }`}
-                                    >
-                                        {recentProjects.map((project) => {
-                                            const isActive =
-                                                pathname ===
-                                                    `/projects/${project.id}` ||
-                                                pathname.startsWith(
-                                                    `/projects/${project.id}/`,
-                                                );
-                                            return (
-                                                <button
-                                                    key={project.id}
-                                                    onClick={() =>
-                                                        router.push(
-                                                            `/projects/${project.id}`,
-                                                        )
+                                    <>
+                                        <div
+                                            className={`space-y-1 px-2.5 ${
+                                                shouldAnimate
+                                                    ? "sidebar-fade-in-2"
+                                                    : ""
+                                            }`}
+                                        >
+                                            {chats.map((chat) => (
+                                                <SidebarChatItem
+                                                    key={chat.id}
+                                                    chat={chat}
+                                                    isActive={
+                                                        routeChatId === chat.id
                                                     }
-                                                    title={project.name}
+                                                    projectName={
+                                                        chat.project_id
+                                                            ? projectNames[
+                                                                  chat.project_id
+                                                              ]
+                                                            : undefined
+                                                    }
+                                                    onSelect={() => {
+                                                        setCurrentChatId(chat.id);
+                                                        router.push(
+                                                            chat.project_id
+                                                                ? `/projects/${chat.project_id}/assistant/chat/${chat.id}`
+                                                                : `/assistant/chat/${chat.id}`,
+                                                        );
+                                                    }}
+                                                />
+                                            ))}
+                                        </div>
+                                        {hasMoreChats && (
+                                            <div className="px-2.5 pt-1">
+                                                <button
+                                                    onClick={loadMoreChats}
                                                     className={cn(
-                                                        "flex h-9 w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs transition-colors",
-                                                        isActive
-                                                            ? "bg-gray-200/60 text-gray-900"
-                                                            : "text-gray-700 hover:bg-gray-100",
+                                                        "flex h-8 w-full items-center justify-start rounded-md px-3 text-left text-xs font-medium text-gray-500 transition-colors hover:text-gray-700",
+                                                        "hover:bg-gray-100",
                                                     )}
                                                 >
-                                                    <FolderOpen className="h-3.5 w-3.5 shrink-0 text-gray-600" />
-                                                    <span className="min-w-0 flex-1 truncate">
-                                                        {project.name}
-                                                    </span>
+                                                    Load more
                                                 </button>
-                                            );
-                                        })}
-                                    </div>
+                                            </div>
+                                        )}
+                                    </>
                                 )}
-                            </>
-                        )}
-                    </div>
-
-                    {/* Assistant History */}
-                    <div className="flex min-h-0 flex-1 flex-col">
-                        <button
-                            onClick={() => setHistoryCollapsed((v) => !v)}
-                            className={`mb-2 flex w-full items-center justify-between px-5 text-xs font-semibold text-gray-500 transition-colors hover:text-gray-700 ${
-                                shouldAnimate ? "sidebar-fade-in" : ""
-                            }`}
-                        >
-                            <span>Assistant History</span>
-                            <ChevronDown
-                                className={`h-3.5 w-3.5 transition-transform ${
-                                    historyCollapsed ? "-rotate-90" : ""
-                                }`}
-                            />
-                        </button>
-                        <div
-                            className={`overflow-y-auto flex-1 ${
-                                historyCollapsed ? "hidden" : ""
-                            }`}
-                        >
-                            {!chats ? (
-                                <div className="space-y-1 px-2.5">
-                                    {[40, 60, 50, 70, 45].map((w, i) => (
-                                        <div
-                                            key={i}
-                                            className="h-9 flex items-center px-3 rounded-md"
-                                        >
-                                            <div
-                                                className="h-3 bg-gray-200 rounded animate-pulse"
-                                                style={{ width: `${w}%` }}
-                                            />
-                                        </div>
-                                    ))}
-                                </div>
-                            ) : chats.length === 0 ? (
-                                <div
-                                    className={`text-xs text-gray-500 py-2 px-5 ${
-                                        shouldAnimate ? "sidebar-fade-in-2" : ""
-                                    }`}
-                                >
-                                    No chats yet
-                                </div>
-                            ) : (
-                                <>
-                                    <div
-                                        className={`space-y-1 px-2.5 ${
-                                            shouldAnimate
-                                                ? "sidebar-fade-in-2"
-                                                : ""
-                                        }`}
-                                    >
-                                        {chats.map((chat) => (
-                                            <SidebarChatItem
-                                                key={chat.id}
-                                                chat={chat}
-                                                isActive={
-                                                    routeChatId === chat.id
-                                                }
-                                                projectName={
-                                                    chat.project_id
-                                                        ? projectNames[
-                                                              chat.project_id
-                                                          ]
-                                                        : undefined
-                                                }
-                                                onSelect={() => {
-                                                    setCurrentChatId(chat.id);
-                                                    router.push(
-                                                        chat.project_id
-                                                            ? `/projects/${chat.project_id}/assistant/chat/${chat.id}`
-                                                            : `/assistant/chat/${chat.id}`,
-                                                    );
-                                                }}
-                                            />
-                                        ))}
-                                    </div>
-                                    {hasMoreChats && (
-                                        <div className="px-2.5 pt-1">
-                                            <button
-                                                onClick={loadMoreChats}
-                                                className={cn(
-                                                    "flex h-8 w-full items-center justify-start rounded-md px-3 text-left text-xs font-medium text-gray-500 transition-colors hover:text-gray-700",
-                                                    "hover:bg-gray-100",
-                                                )}
-                                            >
-                                                Load more
-                                            </button>
-                                        </div>
-                                    )}
-                                </>
-                            )}
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )}
+            </div>
 
             {/* User Profile */}
-            <div className="mt-auto p-1">
+            <div className="mt-auto shrink-0 p-1">
                 {user && (
                     // Radix dropdown: portal-mounted and collision-aware, so it
                     // can no longer paint over the Assistant History rows the way
