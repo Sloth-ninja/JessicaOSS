@@ -11,9 +11,10 @@
 
 **Scope:** documentation close-out for the two trains that completed 12–14/08
 — the Practice Management surface (#81–#84) and the 13/08 pilot-feedback wave
-(#85–#86). Docs only: `CLAUDE.md`, `docs/HANDOVER.md`, `docs/DURABLE_LESSONS.md`
-and this file. No code, hook, migration, `.env*`, or `LICENSE` file is touched,
-and nothing here changes product behaviour.
+(#85–#86). Docs — `CLAUDE.md`, `docs/HANDOVER.md`, `docs/DURABLE_LESSONS.md`
+and this file — plus ONE owner-approved hook change: the `stop-check.js`
+flake-tolerance hardening (see Decisions). No code, migration, `.env*`, or
+`LICENSE` file is touched; nothing here changes product behaviour.
 
 **Key changes:**
 
@@ -30,8 +31,8 @@ and nothing here changes product behaviour.
   pilot-feedback wave is recorded with all four items and its 14/08 all-pass
   QA. The open items are now stated explicitly: the unrun Clio live probe with
   its two prerequisites, the deferred post-migration pass, the three open owner
-  decisions, the unsigned-off stop-check hardening, and the Find Case Law
-  computational-analysis licence. Roadmap kept in owner order (voice dictation
+  decisions, and the Find Case Law computational-analysis licence; the
+  stop-check hardening is recorded as applied (owner-approved 14/08). Roadmap kept in owner order (voice dictation
   → hide-AI-working for members → Playbooks → Word add-in). Also: `Updated`
   date, and the backend suite count 757 → 888 tests across 50 files.
 - **`docs/HANDOVER.md` §0** — rewritten as the 14/08 pickup in the section's
@@ -41,8 +42,8 @@ and nothing here changes product behaviour.
   local `USER_API_KEYS_ENCRYPTION_SECRET` with Fly's, and local dev points at
   PRODUCTION Supabase so Clio must never be connected locally as a pilot
   user), the deferred post-migration pass, the three owner decisions, the FCL
-  licence application, and the pending stop-check hardening flagged
-  do-not-self-authorise. The 5 August pickup is demoted to §0a and the 4 August
+  licence application, and the stop-check hardening recorded as done
+  (owner-approved 14/08). The 5 August pickup is demoted to §0a and the 4 August
   one to §0b, following this file's existing habit of keeping historical
   pickups; nothing referenced §0a.
 - **`docs/DURABLE_LESSONS.md`** — two appended lessons plus index entries, in
@@ -91,8 +92,8 @@ primary sources rather than a build. Checks run in this worktree:
   note each time (never silent); any failed test, missing summary, or other error
   still blocks. Verified four ways against the real 13/08 flake capture and
   synthetic failure/other-error/no-signature outputs (all correctly handled).
-  Where HANDOVER §0 and CLAUDE.md still say "awaiting sign-off", this entry and
-  the commit supersede them.
+  Every status mention across CLAUDE.md, HANDOVER §0, the DURABLE_LESSONS
+  addendum, and this entry now agrees: applied, owner-approved 14/08.
 - HANDOVER's older pickups are demoted rather than deleted, matching the §0a/§3a
   precedent; §4's next-actions queue gets a dated superseded note instead of an
   edit, since it is explicitly an owner-set list from 19 July.

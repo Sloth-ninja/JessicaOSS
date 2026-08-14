@@ -634,6 +634,15 @@ reported failure count is zero as a pass, or retry once serially — was
 PROPOSED on 13/08 and **awaits owner sign-off**. Hooks are the owner's to
 change; do not implement this unasked.
 
+**Addendum (14/08/2026):** implemented with explicit owner sign-off (the exact
+patch was presented in-session as a diff with an apply/leave choice; approved
+and committed as `75f465d`). The shipped condition is deliberately NARROWER
+than the paragraph above describes: it tolerates a non-zero exit only when both
+vitest summary lines show pure passes AND the specific
+`Timeout calling "onTaskUpdate"` signature is present, and it logs a one-line
+note on every tolerated run. A zero-failure summary without that signature
+still blocks. The do-not-implement-unasked rule stands for future hook changes.
+
 ### 2026-08-13 (close-out) — A human's uncommitted working-tree edit is invisible to worktrees
 
 **Trigger:** the owner added the `20260807_01_matter_workspace_links.sql`
