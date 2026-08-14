@@ -1,0 +1,15 @@
+// Typecheck-only project for `scripts/` — operator tools that are RUN with tsx
+// and never compiled into `dist/`. The build tsconfig deliberately keeps
+// `rootDir: ./src` + `include: ["src/**/*"]`, so `scripts/` stays out of the
+// shipped output (the same separation `evals/` gets with its own project);
+// this file exists so those scripts are still typechecked:
+//
+//   npx tsc -p tsconfig.scripts.json   (or: npm run typecheck:scripts)
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["src/**/*", "scripts/**/*"]
+}

@@ -4,5 +4,7 @@ dist
 !.env.example
 *.log
 *.raw-llm-stream.json
+# Live-probe output (scripts/clio-live-probes.ts) — machine-readable run record
+clio-probe-results*.json
 logs/
 .DS_Store
