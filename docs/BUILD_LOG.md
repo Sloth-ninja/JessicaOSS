@@ -103,8 +103,9 @@ primary sources rather than a build. Checks run in this worktree:
   interest on 13/08 and the draft is a queued action.
 
 **Deferred:** everything listed as open in CLAUDE.md and HANDOVER §0 — the
-Clio live probe, the post-migration pass, the three owner decisions, the FCL
-licence draft, and the stop-check hardening. No push or PR created by this
+Clio live probe, the post-migration pass, the three owner decisions, and the
+FCL licence draft. (The stop-check hardening is NOT deferred — it shipped in
+this PR with owner approval; see Decisions.) No push or PR created by this
 task; branch `close-out-pm-feedback` is left for review.
 
 ---
