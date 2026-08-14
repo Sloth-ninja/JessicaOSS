@@ -52,8 +52,12 @@ export const MATTERS_PAGE_SIZE = 200;
 /** Time entries on one matter — same single-page discipline. */
 export const ACTIVITIES_PAGE_SIZE = 200;
 
+// The selectors below are exported ONLY so `scripts/clio-live-probes.ts` can
+// probe the exact strings this module sends — a probe run against a copied
+// constant would sign off a selector that had since drifted.
+
 // Core matter selector: every column the Matters list and detail overview need.
-const MATTER_CORE_FIELDS =
+export const MATTER_CORE_FIELDS =
   "id,etag,display_number,description,status,open_date,close_date," +
   "client{id,name},responsible_attorney{id,name},originating_attorney{id,name}," +
   "practice_area{id,name}";
@@ -61,22 +65,22 @@ const MATTER_CORE_FIELDS =
 // Detail adds custom field values (UK legal-aid / KYC fields where the firm has
 // them). This is the one speculative part of the selector set, so the detail
 // call falls back to MATTER_CORE_FIELDS on a 400 (see getMatterDetail).
-const MATTER_DETAIL_FIELDS = `${MATTER_CORE_FIELDS},custom_field_values{id,field_type,value,custom_field{id,name}}`;
+export const MATTER_DETAIL_FIELDS = `${MATTER_CORE_FIELDS},custom_field_values{id,field_type,value,custom_field{id,name}}`;
 
 // Unbilled WIP. Docs-verified 06/08: BillableMatter carries display_number and
 // client DIRECTLY — the shipped `matter{...}` brace was a 400 on every call.
 // Keep in step with the same selector in lib/clio/manageTools.ts.
-const BILLABLE_MATTER_FIELDS =
+export const BILLABLE_MATTER_FIELDS =
   "id,display_number,unbilled_amount,unbilled_hours,amount_in_trust,currency_code,client{id,name}";
 
 // Outstanding balances are aggregated PER CLIENT by Clio — there is no
 // per-matter figure, so the UI labels this as the client-level balance.
-const OUTSTANDING_BALANCE_FIELDS =
+export const OUTSTANDING_BALANCE_FIELDS =
   "id,total_outstanding_balance,contact{id,name}";
 
-const RELATED_CONTACT_FIELDS = "id,name,type,primary_email_address";
+export const RELATED_CONTACT_FIELDS = "id,name,type,primary_email_address";
 
-const ACTIVITY_FIELDS =
+export const ACTIVITY_FIELDS =
   "id,etag,date,quantity,quantity_redacted,note,type,non_billable,billed," +
   "price,total,user{id,name}";
 

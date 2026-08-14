@@ -7,6 +7,118 @@
 
 ---
 
+## 2026-08-14 — Clio live-probe runner, committed this time (branch `clio-probe-script`)
+
+**Scope:** regenerates the Clio live-probe script that answered
+`docs/PRACTICE_MANAGEMENT_SPEC.md`'s "Open questions (probe before build claims
+them)". The original was written to a scratchpad during the PM train and is
+gone; this one lives in the repo. `backend/scripts/clio-live-probes.ts` plus its
+read-only database rail and that rail's tests. No product behaviour changes: the
+only edits to `src/` are visibility (six selector constants exported, one hoisted
+out of a function body) so the probes exercise the SHIPPED strings rather than
+copies that could drift. The script has **not** been run — the two prerequisites
+recorded at close-out (secret alignment; production Supabase awareness) are the
+owner's.
+
+**Key changes:**
+
+- **Ten probes, derived from the spec.** The spec names four open questions and
+  requires "live probes 1–9 (read-only) before build sign-off; write probe 10
+  owner-authorised", but nowhere enumerates 1–9 — neither the spec, the #81
+  entry below, nor the PM plan. Derived as the four headline questions plus
+  every remaining live read the shipped seam depends on, because a run that
+  validated only the four would sign off a build whose other calls had never
+  once been exercised: (1) identity/`who_am_i` vs the stored `clio_user_id` that
+  My matters filters on; (2) the list selector, `open_date(desc)` sort,
+  `meta.records`, plus the `query=` search and `status=` filter #71 rebuilt;
+  (3) **open question 1** — `offset` continuation, two 5-row pages, verdicts
+  separating rejected / ignored / honoured; (4) the responsible ∪ originating
+  filters; (5) matter detail incl. the speculative `custom_field_values` block
+  and whether the shipped core-selector fallback is load-bearing; (6) **open
+  question 2** — the corrected `billable_matters` selector plus a CONTROL
+  re-issuing the disputed `matter{…}` brace, so a 400 there beside a 200 above
+  is conclusive; (7) related contacts; (8) **open question 4** — the corrected
+  contacts selector with the same control treatment; (9) activities, the
+  own/everyone toggle, `billed`/`etag`/`quantity_redacted`; (10) **open question
+  3**, the write probe.
+- **Safety rails, structural rather than promised.** The Supabase handle is a
+  proxy where reading any property other than `from` throws
+  (`backend/scripts/readOnlyDb.ts`), so the shipped client's own self-healing
+  paths — refresh persistence, dead-grant pruning — cannot rewrite or delete a
+  production connection row; they surface as a blocked verdict instead. Probes
+  1–9 can only call a helper whose options type cannot express a method or a
+  body. Probe 10 needs BOTH `--write-probe` and `CLIO_PROBE_TEST_MATTER_ID`,
+  creates one non-billable minute, answers the billed question with a **no-op
+  patch** (note set to the value it already holds), and cleans up in a `finally`
+  with honest reporting of anything left behind. Requests are sequential; two
+  consecutive 429s abort the run; cleanup alone retries once past the window.
+  A decryption failure is diagnosed as the `USER_API_KEYS_ENCRYPTION_SECRET`
+  mismatch it almost always is, rather than surfacing as "not connected".
+  Results record shapes — field presence, counts, statuses — never client data.
+- **Tooling:** `backend/tsconfig.scripts.json` typechecks `scripts/` without
+  letting it into `dist/` (the build tsconfig keeps its `src`-only rootDir, the
+  same separation `evals/` has); `npm run typecheck:scripts` added to the
+  backend CI job; `vitest.config.ts` include extended to `scripts/**/*.test.ts`;
+  probe output git-ignored.
+
+**Verification:** `npx tsc --noEmit` and `npx tsc -p tsconfig.scripts.json
+--noEmit` clean; `prettier --check` clean on every changed file; full backend
+suite **903 passed / 51 files** (888 + the 15 new rail tests); `--dry-run` walks
+all ten probes printing the fully-expanded selector for every call; all four
+refusal paths plus the missing-env path refuse before any network or database
+use; an offline smoke with dummy env proves the real Supabase client still reads
+through the proxy (it reaches the network rather than a blocked-access throw).
+Never run against live Clio.
+
+**Two independent review rounds, both with real findings:**
+
+- **Round 1 — Critical: the write probe escaped its own boundary.** The billed
+  sub-probe took its candidate from probe 9, which runs against an ARBITRARY
+  live matter (the first list row, or `--matter-id`), not the designated test
+  matter — so the "no-op" PATCH would have landed on a real client's invoiced
+  time entry. Worse, a null/withheld note degraded to `""`, so the no-op could
+  have **blanked the note on an invoiced record**. Now the candidate is found by
+  the write probe's own search of the test matter, restricted to the caller's
+  own entries and skipped unless the note is readable; the context field that
+  carried the cross-matter id was deleted outright rather than left unread.
+  Also round 1: inner catches were swallowing the safety rails (probe 3 scored
+  ANY failure as a pass; probes 6/8 absorbed a blocked write into a control
+  result and carried on) — every inner catch now re-raises them first.
+- **Round 2 — the read-only rail was not what it claimed.** It advertised an
+  allow-list while implementing a deny-list of property names, and the reviewer
+  walked past it twice: `db.rest` is a public property holding the
+  PostgrestClient (`db.rest.from(t).update(…)`, `db.rest.rpc(…)`), and
+  `db.schema("public").from(t)` returns a fresh, unwrapped builder. Inverted to
+  a genuine allow-list — reading anything but `from` throws — with symbols and
+  `then` deliberately inert so the handle stays loggable and non-thenable. Both
+  proven bypasses are now committed as regression tests, per the reviewer's
+  point that a manual one-off smoke protects nothing.
+- The header's "never initiates OAuth" claim was also corrected: no
+  authorisation flow ever, but a 401 can still trigger ONE refresh-token
+  exchange inside the shipped client, whose persistence is blocked. Wording
+  only — `lib/clio/client.ts` deliberately untouched.
+
+**Decisions:**
+
+- **Billed DELETE is deliberately never probed.** Deleting a real billed entry
+  is irreversible and financially material. Open question 3 is answered for
+  edits only; the shipped locked UI and server-side 409 stay as the safe default
+  for deletes until someone authorises a disposable billed entry explicitly.
+- **Owner prerequisite for open question 3:** the designated test matter must
+  carry the owner's **own billed time with a readable note**. Without it the
+  probe returns UNANSWERED by design rather than widening to a colleague's
+  entry or to another matter — so prepare the matter first, or expect a shrug.
+- Selector constants are exported for probe use rather than copied; the contacts
+  selector was hoisted out of `findContact` for the same reason. Visibility only.
+
+**Deferred:** running it. Nothing here is verified against live Clio, so the
+response-shape assumptions (`data` / `meta.records` / `meta.paging.next`, the
+activity `etag`) come from the shipped seam, not a live call; the probes report
+`inconclusive` rather than crashing if Clio differs, but the first run should be
+watched.
+
+---
+
 ## 2026-08-14 — Session close-out: Practice Management shipped, pilot-feedback wave QA'd (branch `close-out-pm-feedback`)
 
 **Scope:** documentation close-out for the two trains that completed 12–14/08
