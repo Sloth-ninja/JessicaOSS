@@ -7,6 +7,102 @@
 
 ---
 
+## 2026-08-14 — Session close-out: Practice Management shipped, pilot-feedback wave QA'd (branch `close-out-pm-feedback`)
+
+**Scope:** documentation close-out for the two trains that completed 12–14/08
+— the Practice Management surface (#81–#84) and the 13/08 pilot-feedback wave
+(#85–#86). Docs only: `CLAUDE.md`, `docs/HANDOVER.md`, `docs/DURABLE_LESSONS.md`
+and this file. No code, hook, migration, `.env*`, or `LICENSE` file is touched,
+and nothing here changes product behaviour.
+
+**Key changes:**
+
+- **`CLAUDE.md` `## Current status`** — three targeted edits, no rewrite of
+  unrelated prose. The "Practice Management surface IN BUILD" tail is
+  superseded by SHIPPED + ACTIVE: migration `20260807_01` merged as #84 (12/08,
+  owner-added allowlist entry, cascade FK load-bearing for the WS8 purge,
+  empirically verified on scratch Postgres by the independent review), backend
+  Fly v22 + frontend Worker deployed 13/08 with the Cloudflare purge, the
+  migration run in production Supabase by the owner 13/08 and verified by a
+  separate `information_schema` check (7 columns, exact match; proving select
+  0 rows), owner QA passed 13/08 on the live Matters tab including the first
+  live validation of the #81 `clio_matter_financials` fix. The 13/08
+  pilot-feedback wave is recorded with all four items and its 14/08 all-pass
+  QA. The open items are now stated explicitly: the unrun Clio live probe with
+  its two prerequisites, the deferred post-migration pass, the three open owner
+  decisions, the unsigned-off stop-check hardening, and the Find Case Law
+  computational-analysis licence. Roadmap kept in owner order (voice dictation
+  → hide-AI-working for members → Playbooks → Word add-in). Also: `Updated`
+  date, and the backend suite count 757 → 888 tests across 50 files.
+- **`docs/HANDOVER.md` §0** — rewritten as the 14/08 pickup in the section's
+  existing voice: what is live (both trains, Fly v22 then v23, migration
+  verified), then five ordered next actions — run the Clio live probe (script
+  in sibling branch `clio-probe-script`; prerequisites: the owner aligns the
+  local `USER_API_KEYS_ENCRYPTION_SECRET` with Fly's, and local dev points at
+  PRODUCTION Supabase so Clio must never be connected locally as a pilot
+  user), the deferred post-migration pass, the three owner decisions, the FCL
+  licence application, and the pending stop-check hardening flagged
+  do-not-self-authorise. The 5 August pickup is demoted to §0a and the 4 August
+  one to §0b, following this file's existing habit of keeping historical
+  pickups; nothing referenced §0a.
+- **`docs/DURABLE_LESSONS.md`** — two appended lessons plus index entries, in
+  the established trigger/rule/debugging-signature format: (a) a vitest run
+  reporting all tests passed yet exiting 1, with `Timeout calling
+  "onTaskUpdate"` in Unhandled Errors, is the runner flaking under concurrent
+  agent load — verify with one isolated run, never chase it in product code
+  (the one-level-up sibling of the 2026-08-05 KDF-timeout lesson); (b) a
+  human's uncommitted working-tree edit is invisible to a worktree cut from
+  committed `main` — check the main checkout's `git status` before treating a
+  human-edited gate file as unchanged. No existing entry was altered
+  (append-only).
+
+**Verification:** docs-only, so verification is self-consistency against the
+primary sources rather than a build. Checks run in this worktree:
+
+- Every claim cross-checked against `git log --since=2026-08-11 --date=iso`:
+  #84 merge `d3bf3eb` (12/08 19:42 BST), #85 merge `e07984c` and #86 merge
+  `148af68` (both 13/08). **Correction to the brief this task was given:** #84
+  merged on **12/08**, not 13/08 — the 12/08 date is what git and the #84
+  BUILD_LOG entry both say, and it is what is written everywhere here.
+- The four items of the pilot-feedback wave read back against the 2026-08-13
+  entries below (PR A UI wave, PR B connectors + organisation belt) —
+  including that item 2 is a UI-honesty fix over a server clamp live since WS8
+  PR F, and that the connector-gallery change is silent-drop on PATCH plus
+  stale-id filtering on GET.
+- The deferred post-migration items match the four the 2026-08-08 fix-wave
+  entry names as reviewer-deferred: Workspaces-tab badge, profile connected
+  flag, unlink no-op observability, M6/M14 copy nits.
+- The migration's cascade-FK rationale and the "7 columns" shape match the
+  2026-08-12 entry's column list (`id`, `project_id`, `clio_matter_id`,
+  `clio_display_number`, `organisation_id`, `created_by`, `created_at`).
+- Backend test-file count checked directly: `find backend/src -name '*.test.ts'`
+  = 50 files, consistent with the 888/50 figure recorded.
+- Branch `clio-probe-script` exists but carries no commits ahead of `main` at
+  close-out, so it is described as in flight rather than as merged work.
+
+**Decisions:**
+
+- **The proposed `stop-check.js` hardening is deliberately NOT in this PR.**
+  It is recorded in three places as PROPOSED and awaiting owner sign-off
+  (CLAUDE.md status, HANDOVER §0 action 5, the DURABLE_LESSONS entry) and
+  nowhere as done. Hooks are the owner's to change, and a hook that decides for
+  itself when a red suite is really green is exactly the kind of change that
+  needs a human to say yes.
+- HANDOVER's older pickups are demoted rather than deleted, matching the §0a/§3a
+  precedent; §4's next-actions queue gets a dated superseded note instead of an
+  edit, since it is explicitly an owner-set list from 19 July.
+- The Find Case Law entry states the licence position (free public API,
+  computational use needs the TNA licence, integration stays DEFERRED until
+  granted) without implying any application has been sent — the owner expressed
+  interest on 13/08 and the draft is a queued action.
+
+**Deferred:** everything listed as open in CLAUDE.md and HANDOVER §0 — the
+Clio live probe, the post-migration pass, the three owner decisions, the FCL
+licence draft, and the stop-check hardening. No push or PR created by this
+task; branch `close-out-pm-feedback` is left for review.
+
+---
+
 ## 2026-08-13 — Pilot-feedback UI fix wave (branch `pilot-feedback-ui`)
 
 **Scope:** PR A of the 13/08 pilot-feedback fix train — three frontend-only
