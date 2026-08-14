@@ -23,6 +23,21 @@ process.stdin.on("end", () => {
       execSync(cmd, { cwd, stdio: "pipe", timeout: 280000 });
     } catch (err) {
       const out = [err.stdout, err.stderr].filter(Boolean).map(String).join("\n");
+      // Tolerate the known vitest worker IPC flake: every test passed but the
+      // runner exited non-zero with an unhandled 'Timeout calling "onTaskUpdate"'.
+      // See docs/DURABLE_LESSONS.md 2026-08-13 (owner-approved 14/08/2026).
+      // Real failures still block: both summary lines must show ONLY passes,
+      // and the flake signature must be present. Never silent — logs a note.
+      const summaryLines = out.match(/^\s*(Test Files|Tests)[^\n]*$/gm)?.join("\n") ?? "failed";
+      const flakeOnly =
+        /^\s*Test Files\s+\d+ passed \(\d+\)\s*$/m.test(out) &&
+        /^\s*Tests\s+\d+ passed \(\d+\)\s*$/m.test(out) &&
+        !/failed/.test(summaryLines) &&
+        out.includes('Timeout calling "onTaskUpdate"');
+      if (flakeOnly) {
+        console.log(`stop-check: ${label} — all tests passed; tolerated known vitest worker IPC flake.`);
+        return;
+      }
       failures.push(`--- ${label} failed ---\n${out.slice(0, 6000)}`);
     }
   };

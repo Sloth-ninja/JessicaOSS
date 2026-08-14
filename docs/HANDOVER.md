@@ -27,7 +27,87 @@ Quill/Unity + HMLR integration briefs).
 Deploy gotchas are in DURABLE_LESSONS (OpenNext packager/bun.lock, wrangler
 autoconfig delegation, piped-exit-code trap, Express-async crash class).
 
-## 0. CURRENT PICKUP — 5 August 2026 (read this, then CLAUDE.md Current status)
+## 0. CURRENT PICKUP — 14 August 2026 (read this, then CLAUDE.md Current status)
+
+State: everything through PR #86 is merged, deployed, and QA'd. Two trains
+closed out on 12–14/08:
+
+- **Practice Management surface — SHIPPED and ACTIVE in production.** #81
+  backend (`lib/clio/mattersSurface.ts` + `/clio-matters`), #82 frontend,
+  #83 composed-range fix wave, #84 migration
+  `20260807_01_matter_workspace_links.sql` (merged 12/08; owner added the
+  allowlist entry; the `on delete cascade` on `project_id` is load-bearing
+  for the WS8 retention purge, and the independent review verified the file
+  empirically on scratch Postgres). Backend **Fly v22** + frontend Worker
+  deployed 13/08 with the Cloudflare purge; the owner ran the migration in
+  production Supabase 13/08 and it was verified by a separate
+  `information_schema` check (7 columns, exact match; proving select 0
+  rows). Owner QA PASSED 13/08 on the live Matters tab — My matters, All
+  matters search/filter, matter detail (first live validation of the #81
+  `clio_matter_financials` fix), time entries, workspace linking.
+- **Pilot-feedback wave 13/08 — SHIPPED, owner QA all-pass 14/08.** #85
+  (backend) + #86 (frontend), merged 13/08, backend **Fly v23** + frontend
+  deployed 13/08, purge done. Four owner-reported items: sidebar overlap
+  (two defects — Radix portal menu, and the nav column made a scroll
+  container with the height floor on the History section); the in-chat
+  model picker replaced with a "Provided by {firm}" label under
+  `memberModelPrefs: false`; the Organisation field read-only for firm
+  members (+ a fail-open server-side write belt); Canva and Apollo removed
+  from the connector registry, with `PATCH /admin/connector-gallery` now
+  dropping unknown ids silently and `GET` filtering stale ones.
+
+Backend suite: 888 tests across 50 files.
+
+**Next actions, in order:**
+1. **Run the Clio live probe** (owner-authorised; still NOT run). The script
+   lands via sibling branch `clio-probe-script`. Two prerequisites before it
+   can run at all: (a) the owner aligns the local
+   `USER_API_KEYS_ENCRYPTION_SECRET` with the value in Fly's secrets —
+   otherwise the stored Clio tokens cannot be decrypted locally; (b) be
+   aware that **local dev points at PRODUCTION Supabase**, so *never connect
+   Clio locally as a pilot user* — you would overwrite a real solicitor's
+   connection. Read-only probes plus the self-cleaning write probe on the
+   designated test matter only.
+2. **Deferred post-migration pass** — the four items the PM train review
+   deferred, now unblocked because `matter_workspace_links` exists in
+   production: the Workspaces-tab linked badge, the profile
+   `clio.manage.connected` flag, unlink no-op observability, and the M6/M14
+   copy nits. Small, independent, one PR.
+3. **Chase the three open owner decisions:** adopt a frontend test framework
+   (there is still none — upstream ships none, and the pilot-feedback wave
+   was verified by CSS harness and `next build` alone); reject
+   `type:'tabular'` on legacy `POST/PATCH /workflows` writes (#78 PR body);
+   record-time-via-assistant confirmation.
+4. **Find Case Law licence — draft the application.** Owner interest 13/08.
+   The public API is free, but computational use needs TNA's
+   computational-analysis licence: apply via
+   `caselawlicence@nationalarchives.gov.uk`. Case-law integration stays
+   DEFERRED until it is granted; BAILII remains never.
+5. **Done (owner-approved 14/08):** the Stop hook's `stop-check.js` was
+   hardened after the 13/08 runner-flake episode (see DURABLE_LESSONS
+   2026-08-13, vitest `onTaskUpdate` IPC timeout). It tolerates exactly the
+   all-tests-passed + IPC-flake signature, logging a note each time; real
+   failures still block. Hooks remain the owner's to change — this one
+   carried explicit in-session sign-off.
+
+Then the roadmap resumes in owner order: voice dictation (Azure Speech via a
+backend seam; OS-dictation stopgap note for PILOT.md) → hide-AI-working for
+members → Playbooks → Word add-in. Owner-pending chase items in §5.
+
+**Operating note (owner feedback 05/08, still current):** ALWAYS pass
+explicit model overrides on sub-agent dispatch — Opus for
+builders/independent reviewers, Sonnet for mechanical work; omitting the
+override inherits the top-level model and burns usage (see memory
+`model-split-discipline`).
+
+**Working-tree note (13/08):** if the owner says they edited a gate file
+(e.g. `.claude/hooks/authorized-migrations.json`), check the MAIN checkout's
+working tree — an uncommitted edit there is invisible to any worktree cut
+from committed `main`. See DURABLE_LESSONS 2026-08-13.
+
+---
+
+## 0a. (Historical) pickup — 5 August 2026
 
 State: everything through PR #78 is merged. Two trains completed 04-05/08: the
 pilot-feedback fix train (#70-#73, deployed as Fly v20 by the owner 05/08) and
@@ -76,7 +156,7 @@ model and burns usage (see memory `model-split-discipline`).
 
 ---
 
-## 0a. (Historical) pickup — 4 August 2026
+## 0b. (Historical) pickup — 4 August 2026
 
 State: everything through PR #69 is merged + deployed + live. Clio connector
 v1 shipped (#62–#66) and survived first pilot contact: the 03/08 incident
@@ -202,6 +282,12 @@ flip: a user's own API key ALWAYS beats the server env key, for every provider**
 must be gone; removing a user key falls back to the env default).
 
 ## 4. Next-actions queue (owner-set order, 19 July)
+
+> **Superseded 14/08/2026 for items 1 and 4** — the admin usage dashboard
+> shipped as #39, saved tabular schemas shipped as the Review templates train
+> (#74–#78), and Unity was CANCELLED by the owner on 03/08 in favour of the
+> Clio connector (now the shipped Practice Management surface). The live
+> order is §0; the rest of this list stands.
 
 1. **Admin usage dashboard** (S) — adoption/usage views over existing tables; the
    COO's ROI evidence. Then **saved tabular schemas → Lists** (S–M) — reusable
