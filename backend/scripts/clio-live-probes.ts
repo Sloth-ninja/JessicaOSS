@@ -104,16 +104,17 @@
 // -----------------------------------------------------------------------------
 // Design notes
 // -----------------------------------------------------------------------------
-// * Read-only database. The Supabase client handed to `clioRequest` is wrapped
-//   in a proxy that ALLOWS only `from()` (itself wrapped to refuse
-//   insert/update/upsert/delete) and throws on every other route to the server
-//   — rpc, schema, storage, functions, auth, realtime. An allow-list, because a
-//   deny-list of method names is one refactor away from being stepped around
-//   (`schema("public").from(t).update(...)` returns an unwrapped builder). That
-//   makes the "never modify the stored connection" rail STRUCTURAL rather than a
-//   promise: the client's own self-healing paths (token refresh persistence,
-//   dead-grant pruning) hit the proxy and are surfaced as a clear message
-//   instead of silently rewriting or deleting a production row.
+// * Read-only database (`scripts/readOnlyDb.ts`, unit-tested). The Supabase
+//   client handed to `clioRequest` is wrapped in a proxy where reading ANY
+//   property other than `from` throws — a true allow-list, after a deny-list
+//   version was shown to be walked past twice (`db.schema(…).from(t).update(…)`
+//   and `db.rest.from(t).update(…)`; `rest` is a public property holding the
+//   PostgrestClient). `from(table)` returns a builder whose
+//   insert/update/upsert/delete throw. That makes the "never modify the stored
+//   connection" rail STRUCTURAL rather than a promise: the client's own
+//   self-healing paths (token refresh persistence, dead-grant pruning) hit the
+//   proxy and are surfaced as a clear message instead of silently rewriting or
+//   deleting a production row.
 // * Read-only Clio. Probes 1–9 may only use `probeGet`, which cannot express a
 //   method or a body; `probeWrite` refuses unless the run is in the write phase.
 // * Rails are never swallowed. A blocked write or a rate-limit abort is a
@@ -157,6 +158,7 @@ import {
   RELATED_CONTACT_FIELDS,
 } from "../src/lib/clio/mattersSurface";
 import { createServerSupabase } from "../src/lib/supabase";
+import { ProbeWriteBlockedError, readOnlyDb } from "./readOnlyDb";
 
 type Db = ReturnType<typeof createServerSupabase>;
 
@@ -182,14 +184,6 @@ const PROBE_NOTE_PREFIX = "JessicaOS live probe — safe to delete";
 
 // ── Errors ───────────────────────────────────────────────────────────────────
 
-/** A database write was attempted through the read-only proxy. */
-class ProbeWriteBlockedError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ProbeWriteBlockedError";
-  }
-}
-
 /** Repeated rate limiting — the run stops rather than continue. */
 class ProbeAbortError extends Error {
   constructor(message: string) {
@@ -204,71 +198,6 @@ class ProbeSkipped extends Error {
     super(message);
     this.name = "ProbeSkipped";
   }
-}
-
-// ── Read-only database proxy ─────────────────────────────────────────────────
-
-const BLOCKED_TABLE_METHODS = new Set(["insert", "update", "upsert", "delete"]);
-
-// Client-level entry points that can reach a write WITHOUT going through the
-// wrapped `from()` — `schema("public").from(t).update(...)` is the proof case:
-// the returned builder is a fresh, unwrapped one. The proxy therefore ALLOWS a
-// named set (only `from`, wrapped) and refuses every other route to the server,
-// rather than denying a list of method names that a future refactor could step
-// around.
-const REFUSED_CLIENT_ENTRY_POINTS = new Set([
-  "rpc",
-  "schema",
-  "storage",
-  "functions",
-  "auth",
-  "channel",
-  "realtime",
-  "removeChannel",
-  "removeAllChannels",
-]);
-
-/**
- * Wrap a Supabase client so that only table READS survive.
- *
- * Two layers: the client proxy refuses every entry point that could reach the
- * server other than `from()`, and the table-builder proxy refuses
- * insert/update/upsert/delete (the filter builders returned by `.select()`
- * carry no mutating methods, so they need no wrapping).
- */
-function readOnlyDb(db: Db): Db {
-  const wrapTableBuilder = (builder: object, table: string): object =>
-    new Proxy(builder, {
-      get(target, prop, receiver) {
-        if (typeof prop === "string" && BLOCKED_TABLE_METHODS.has(prop)) {
-          return () => {
-            throw new ProbeWriteBlockedError(
-              `Blocked a ${prop.toUpperCase()} on "${table}" — this script never writes to the database.`,
-            );
-          };
-        }
-        const value = Reflect.get(target, prop, receiver);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    });
-
-  return new Proxy(db as unknown as object, {
-    get(target, prop, receiver) {
-      if (typeof prop === "string" && REFUSED_CLIENT_ENTRY_POINTS.has(prop)) {
-        return () => {
-          throw new ProbeWriteBlockedError(
-            `Blocked \`${prop}(…)\` — this script may only READ tables through from().`,
-          );
-        };
-      }
-      const value = Reflect.get(target, prop, receiver);
-      if (prop === "from" && typeof value === "function") {
-        const from = value.bind(target) as (table: string) => object;
-        return (table: string) => wrapTableBuilder(from(table), table);
-      }
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-  }) as unknown as Db;
 }
 
 // ── Probe framework ──────────────────────────────────────────────────────────
