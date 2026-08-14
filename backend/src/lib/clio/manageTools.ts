@@ -48,6 +48,14 @@ const MATTER_PAGE_SIZE = 100;
 const MATTER_FIELDS = "id,display_number,description,status,client{id,name}";
 const MATTER_STATUSES = new Set(["open", "pending", "closed"]);
 
+// Contact search selector. SELECTOR FIX (docs-verified 06/08 spike; probe
+// validation pending) — `primary_email_address` is a SCALAR on Contact, and the
+// shipped `primary_email_address{address}` brace-on-scalar made Clio reject the
+// whole request. Hoisted out of findContact so `scripts/clio-live-probes.ts` can
+// probe this exact string rather than a copy that could drift.
+export const CONTACT_SEARCH_FIELDS =
+  "id,name,type,primary_email_address,email_addresses{address,primary}";
+
 // Unbilled WIP selector. Docs-verified 06/08 — see the fix note at its use site
 // in matterFinancials, and the same constant in lib/clio/mattersSurface.ts.
 const BILLABLE_MATTER_FIELDS =
@@ -490,15 +498,11 @@ async function findContact(
     "manage",
     "/contacts.json",
     {
-      // SELECTOR FIX (docs-verified 06/08 spike; probe validation pending).
-      // `primary_email_address` is a SCALAR on Contact — the shipped
-      // `primary_email_address{address}` brace-on-scalar made Clio reject the
-      // whole request, so this tool 400'd on every live call. The full
-      // `email_addresses` association carries the same data and more. Contact's
-      // phone shape was NOT re-verified in the spike, so it is dropped here
-      // rather than guessed at (the tool description no longer promises it).
-      fields:
-        "id,name,type,primary_email_address,email_addresses{address,primary}",
+      // SELECTOR FIX (docs-verified 06/08 spike; probe validation pending) —
+      // see CONTACT_SEARCH_FIELDS. Contact's phone shape was NOT re-verified in
+      // the spike, so it is dropped rather than guessed at (the tool description
+      // no longer promises it).
+      fields: CONTACT_SEARCH_FIELDS,
       query: { query, limit: 10 },
     },
   );

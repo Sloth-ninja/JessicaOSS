@@ -7,11 +7,15 @@
 //   * A local backend checkout normally points at the PRODUCTION Supabase.
 //     This script therefore reads a PRODUCTION Clio access token belonging to a
 //     real solicitor and issues real API calls against the firm's live tenant.
-//   * It NEVER initiates OAuth and NEVER writes to the connection row. If the
-//     stored token needs refreshing, the refresh would have to rewrite that row,
-//     so the script REFUSES and tells you instead (see "Read-only database"
-//     below). Never "fix" that by connecting Clio locally as a pilot user —
-//     that would overwrite the production connection with a dev-minted token.
+//   * It never runs an AUTHORISATION flow (no authorize redirect, no code
+//     exchange, no consent) and the stored connection row is NEVER rewritten.
+//     Be precise about what that does not say: a 401 from Clio can still make
+//     the shipped client attempt ONE refresh-token exchange (client.ts:397-406)
+//     before it tries to persist the result — and that persist is blocked here,
+//     so the row is left exactly as it was. Preflight also refuses up front when
+//     the token is expired or near expiry, so the usual run never gets there.
+//     Never "fix" a refusal by connecting Clio locally as a pilot user — that
+//     would overwrite the production connection with a dev-minted token.
 //   * Probes 1–9 are strictly read-only (GET only, enforced structurally).
 //     Probe 10 writes, and only when explicitly enabled — see "Write probe".
 //   * Probe output deliberately records SHAPES, not client data: field presence,
@@ -79,28 +83,42 @@
 //   * The operator's IP is irrelevant (Clio is called server-side, no allowlist),
 //     but the 50 req/min per-user Manage budget is shared with production
 //     traffic — run this when the pilot firm is not mid-session. A full run is
-//     ~15 requests read-only, ~23 with the write probe.
+//     ~17 requests read-only, ~25 with the write probe.
 //
 // Write probe (10) — owner-authorised, self-cleaning:
 //   Runs ONLY when BOTH `--write-probe` is passed AND CLIO_PROBE_TEST_MATTER_ID
 //   names the designated test matter. It creates one non-billable time entry,
 //   exercises the PATCH/If-Match concurrency path, attempts a NO-OP edit of a
 //   billed entry to learn the restriction, and then deletes everything it
-//   created (best-effort, reported honestly even on partial failure). It never
-//   deletes anything it did not create, and never bills, voids or writes to any
-//   record other than its own entry — the 03/08 spike pattern.
+//   created (best-effort, reported honestly even on partial failure).
+//
+//   EVERY write it makes stays on CLIO_PROBE_TEST_MATTER_ID. The billed entry it
+//   patches is found by its OWN search of that matter, restricted to the
+//   caller's own entries — never inherited from the read phase, which runs
+//   against an arbitrary live matter. It skips rather than widens when no such
+//   entry exists, when the caller's Clio user id is unknown, or when the note is
+//   not readable (blanking a note on an invoiced record is exactly the change a
+//   "no-op" must not make). It never deletes anything it did not create, and
+//   never bills or voids anything — the 03/08 spike pattern.
 //
 // -----------------------------------------------------------------------------
 // Design notes
 // -----------------------------------------------------------------------------
 // * Read-only database. The Supabase client handed to `clioRequest` is wrapped
-//   in a proxy that throws on insert/update/upsert/delete/rpc. That makes the
-//   "never modify the stored connection" rail STRUCTURAL rather than a promise:
-//   the client's own self-healing paths (token refresh persistence, dead-grant
-//   pruning) hit the proxy and are surfaced as a clear message instead of
-//   silently rewriting or deleting a production row.
+//   in a proxy that ALLOWS only `from()` (itself wrapped to refuse
+//   insert/update/upsert/delete) and throws on every other route to the server
+//   — rpc, schema, storage, functions, auth, realtime. An allow-list, because a
+//   deny-list of method names is one refactor away from being stepped around
+//   (`schema("public").from(t).update(...)` returns an unwrapped builder). That
+//   makes the "never modify the stored connection" rail STRUCTURAL rather than a
+//   promise: the client's own self-healing paths (token refresh persistence,
+//   dead-grant pruning) hit the proxy and are surfaced as a clear message
+//   instead of silently rewriting or deleting a production row.
 // * Read-only Clio. Probes 1–9 may only use `probeGet`, which cannot express a
 //   method or a body; `probeWrite` refuses unless the run is in the write phase.
+// * Rails are never swallowed. A blocked write or a rate-limit abort is a
+//   verdict about the RUN, so every inner `catch` re-raises it (rethrowRailErrors)
+//   instead of filing it as an observation about the call under test.
 // * Errors. Everything goes through the production client, so Clio's own error
 //   BODY is deliberately not visible (the client redacts it and maps failures
 //   onto fixed messages). That is the point: a probe verdict reflects exactly
@@ -129,6 +147,7 @@ import {
   getClioConnectionSummaries,
   loadClioConnection,
 } from "../src/lib/clio/connections";
+import { CONTACT_SEARCH_FIELDS } from "../src/lib/clio/manageTools";
 import {
   ACTIVITY_FIELDS,
   BILLABLE_MATTER_FIELDS,
@@ -141,16 +160,16 @@ import { createServerSupabase } from "../src/lib/supabase";
 
 type Db = ReturnType<typeof createServerSupabase>;
 
-// The contacts selector is written inline in `manageTools.findContact` (it is
-// not a module constant there), so it is repeated here rather than exported —
-// keep the two in step if either changes.
-const CONTACT_FIELDS =
-  "id,name,type,primary_email_address,email_addresses{address,primary}";
-
 // Pre-fix selectors, re-issued as controls. These are NOT what the code sends
 // any more; they exist to prove the fix addressed the real cause.
 const CONTROL_BILLABLE_MATTER_FIELDS = "id,matter{id,display_number}";
 const CONTROL_CONTACT_FIELDS = "id,name,type,primary_email_address{address}";
+
+// Search term for the `query=` acceptance check. A single common letter is used
+// deliberately: the question is whether Clio ACCEPTS the parameter, and guessing
+// at a real client or matter name would neither generalise nor be appropriate to
+// type into a production tenant.
+const MATTER_SEARCH_PROBE_TERM = "a";
 
 /** Pause between probes — polite pacing inside the 50 req/min Manage budget. */
 const PAUSE_BETWEEN_REQUESTS_MS = 200;
@@ -191,11 +210,31 @@ class ProbeSkipped extends Error {
 
 const BLOCKED_TABLE_METHODS = new Set(["insert", "update", "upsert", "delete"]);
 
+// Client-level entry points that can reach a write WITHOUT going through the
+// wrapped `from()` — `schema("public").from(t).update(...)` is the proof case:
+// the returned builder is a fresh, unwrapped one. The proxy therefore ALLOWS a
+// named set (only `from`, wrapped) and refuses every other route to the server,
+// rather than denying a list of method names that a future refactor could step
+// around.
+const REFUSED_CLIENT_ENTRY_POINTS = new Set([
+  "rpc",
+  "schema",
+  "storage",
+  "functions",
+  "auth",
+  "channel",
+  "realtime",
+  "removeChannel",
+  "removeAllChannels",
+]);
+
 /**
- * Wrap a Supabase client so that every mutating call throws. `from(table)`
- * returns the query builder that owns insert/update/upsert/delete (the filter
- * builders it returns from `.select()` carry no mutating methods), and `rpc`
- * can run arbitrary server-side functions — so those are the two chokepoints.
+ * Wrap a Supabase client so that only table READS survive.
+ *
+ * Two layers: the client proxy refuses every entry point that could reach the
+ * server other than `from()`, and the table-builder proxy refuses
+ * insert/update/upsert/delete (the filter builders returned by `.select()`
+ * carry no mutating methods, so they need no wrapping).
  */
 function readOnlyDb(db: Db): Db {
   const wrapTableBuilder = (builder: object, table: string): object =>
@@ -215,10 +254,10 @@ function readOnlyDb(db: Db): Db {
 
   return new Proxy(db as unknown as object, {
     get(target, prop, receiver) {
-      if (prop === "rpc") {
+      if (typeof prop === "string" && REFUSED_CLIENT_ENTRY_POINTS.has(prop)) {
         return () => {
           throw new ProbeWriteBlockedError(
-            "Blocked an RPC call — this script never writes to the database.",
+            `Blocked \`${prop}(…)\` — this script may only READ tables through from().`,
           );
         };
       }
@@ -266,8 +305,6 @@ interface ProbeCtx {
   matterId: string | null;
   /** Client contact id of that matter, for the outstanding-balance read. */
   clientContactId: string | null;
-  /** A BILLED time entry owned by the caller, if probe 9 found one. */
-  billedOwnActivityId: string | null;
 }
 
 interface Probe {
@@ -445,6 +482,17 @@ function describeError(err: unknown): string {
     return `ClioApiError status=${err.status ?? "unknown"} — ${err.message}`;
   }
   if (err instanceof Error) return `${err.name}: ${err.message}`;
+  // Supabase/PostgREST rejects with a PLAIN OBJECT ({ message, code, details }),
+  // not an Error — the preflight read is exactly that path, so "Unknown error"
+  // would be the operator's whole diagnostic without this branch.
+  const record = asRecord(err);
+  if (record && typeof record.message === "string") {
+    // PostgREST sends an empty-string code for transport failures — an empty
+    // `[]` in the operator's one diagnostic line is noise, not information.
+    const code =
+      typeof record.code === "string" && record.code ? ` [${record.code}]` : "";
+    return `${record.message}${code}`;
+  }
   return "Unknown error";
 }
 
@@ -454,6 +502,32 @@ function statusOf(err: unknown): number | null {
     ? err.status
     : null;
 }
+
+/**
+ * Re-raise the errors a probe's own `catch` must never absorb.
+ *
+ * A blocked database write and a rate-limit abort are verdicts about the RUN,
+ * not observations about the call under test: swallowing one would report a
+ * fired safety rail as an ordinary API result AND let the script carry on
+ * issuing requests afterwards. Every inner catch calls this first.
+ */
+function rethrowRailErrors(err: unknown): void {
+  if (
+    err instanceof ProbeWriteBlockedError ||
+    err instanceof ProbeAbortError ||
+    err instanceof ProbeSkipped
+  ) {
+    throw err;
+  }
+}
+
+/**
+ * Statuses that mean "Clio itself refused this write" — as opposed to a
+ * network blip, a 429, or a 500, none of which say anything about permissions.
+ * 422 is included because Clio reports some rule violations as unprocessable
+ * rather than as a conflict.
+ */
+const REFUSAL_STATUSES = new Set([401, 403, 409, 422]);
 
 // ── Probes 1–9 (read-only) ───────────────────────────────────────────────────
 
@@ -507,9 +581,11 @@ const readProbes: Probe[] = [
     number: 2,
     id: "matters-list",
     question:
-      "Does the Matters list selector return 200 with every requested field, sorted open_date(desc), and does Clio report a total?",
+      "Does the Matters list selector return 200 with every requested field, sorted open_date(desc), with a total — and are the `query=` search and `status=` filter (the #71 surface) accepted?",
     plan: [
       `GET /matters.json?fields=${MATTER_CORE_FIELDS}&order=open_date(desc)&limit=200`,
+      `GET /matters.json?fields=id&order=open_date(desc)&limit=5&query=${MATTER_SEARCH_PROBE_TERM}`,
+      "GET /matters.json?fields=id,status&order=open_date(desc)&limit=5&status=open",
     ],
     async run(ctx) {
       const body = await probeGet(ctx, "/matters.json", {
@@ -526,6 +602,32 @@ const readProbes: Probe[] = [
       if (!ctx.clientContactId) {
         ctx.clientContactId = str(asRecord(rows[0]?.client)?.id);
       }
+
+      // The search box and the status chips are the exact surface #71 rebuilt,
+      // and neither had ever been exercised live. Both are checked for
+      // ACCEPTANCE and, for status, for the filter actually biting — an empty
+      // result is a fact about this firm's data, not a failure, so it is
+      // reported rather than scored.
+      const searched = dataArray(
+        await probeGet(ctx, "/matters.json", {
+          fields: "id",
+          query: {
+            order: "open_date(desc)",
+            limit: 5,
+            query: MATTER_SEARCH_PROBE_TERM,
+          },
+        }),
+      );
+      const filtered = dataArray(
+        await probeGet(ctx, "/matters.json", {
+          fields: "id,status",
+          query: { order: "open_date(desc)", limit: 5, status: "open" },
+        }),
+      );
+      const offStatus = filtered.filter(
+        (row) => (str(row.status) ?? "open").toLowerCase() !== "open",
+      ).length;
+
       return {
         status: rows.length === 0 ? "inconclusive" : "pass",
         observed: [
@@ -534,17 +636,22 @@ const readProbes: Probe[] = [
           `null on the first row: ${presence.null.join(", ") || "none"}`,
           `order=open_date(desc) honoured: ${sorted ? "yes" : "NO"}`,
           `meta.records: ${records ?? "not reported"}; meta.paging.next: ${hasNextPage(body) ? "present" : "absent"}`,
+          `query="${MATTER_SEARCH_PROBE_TERM}" → 200, ${searched.length} row(s) (a match count, not a pass/fail)`,
+          `status=open → 200, ${filtered.length} row(s); rows with another status: ${offStatus}`,
         ],
         meaning:
           rows.length === 0
             ? "This account can see no matters, so the list selector is untested — re-run against an account with matters."
-            : "The shipped list selector, sort and honest-count basis (meta.records) are confirmed live.",
+            : "The shipped list selector, sort, honest-count basis (meta.records) and the search + status filters behind the Matters header are confirmed live.",
         detail: {
           rows: rows.length,
           absentFields: presence.absent,
           sortedByOpenDateDesc: sorted,
           metaRecords: records,
           hasNextPage: hasNextPage(body),
+          searchRows: searched.length,
+          statusFilterRows: filtered.length,
+          statusFilterLeakage: offStatus,
         },
       };
     },
@@ -589,16 +696,20 @@ const readProbes: Probe[] = [
       try {
         second = await page(OFFSET_PROBE_PAGE_SIZE);
       } catch (err) {
+        rethrowRailErrors(err);
         const status = statusOf(err);
         return {
-          status: "pass",
+          // Only an outright 400 ANSWERS the question ("Clio rejects offset").
+          // Any other failure — a 500, a network blip — leaves it open, so it
+          // must not be scored as a pass.
+          status: status === 400 ? "pass" : "inconclusive",
           observed: [
             `offset=${OFFSET_PROBE_PAGE_SIZE} → ${describeError(err)}`,
           ],
           meaning:
             status === 400
               ? "Clio rejects `offset` on this action: deep paging must NOT be built on it. The shipped single-page + honest-count behaviour is correct and stays."
-              : "The offset request failed for a non-400 reason; treat offset as unsupported until a clean run says otherwise.",
+              : "The offset request failed for a reason other than rejection, so open question 1 is still unanswered. Re-run before anyone builds deep paging.",
           detail: { offsetRejectedWithStatus: status },
         };
       }
@@ -715,6 +826,7 @@ const readProbes: Probe[] = [
           },
         };
       } catch (err) {
+        rethrowRailErrors(err);
         if (statusOf(err) !== 400) throw err;
         const body = await probeGet(ctx, `/matters/${matterId}.json`, {
           fields: MATTER_CORE_FIELDS,
@@ -774,6 +886,8 @@ const readProbes: Probe[] = [
         );
         detail.controlRejected = false;
       } catch (err) {
+        // A fired rail is not an observation about this selector.
+        rethrowRailErrors(err);
         observed.push(
           `CONTROL: old \`matter{…}\` brace → ${describeError(err)}`,
         );
@@ -849,18 +963,18 @@ const readProbes: Probe[] = [
     question:
       "SPEC OPEN QUESTION 4 — does the corrected clio_find_contact selector return 200, and did the old brace-on-scalar `primary_email_address{address}` really 400?",
     plan: [
-      `GET /contacts.json?fields=${CONTACT_FIELDS}&limit=5`,
+      `GET /contacts.json?fields=${CONTACT_SEARCH_FIELDS}&limit=5`,
       `CONTROL (expects 400): GET /contacts.json?fields=${CONTROL_CONTACT_FIELDS}&limit=5`,
     ],
     async run(ctx) {
       // No `query=` term: the question is whether the SELECTOR parses, and an
       // unfiltered first page answers that without guessing at a search string.
       const body = await probeGet(ctx, "/contacts.json", {
-        fields: CONTACT_FIELDS,
+        fields: CONTACT_SEARCH_FIELDS,
         query: { limit: 5 },
       });
       const rows = dataArray(body);
-      const presence = fieldPresence(rows[0] ?? null, CONTACT_FIELDS);
+      const presence = fieldPresence(rows[0] ?? null, CONTACT_SEARCH_FIELDS);
       const observed = [
         `corrected selector → 200, ${rows.length} row(s)`,
         `absent fields: ${presence.absent.join(", ") || "none"}`,
@@ -879,6 +993,8 @@ const readProbes: Probe[] = [
         );
         detail.controlRejected = false;
       } catch (err) {
+        // A fired rail is not an observation about this selector.
+        rethrowRailErrors(err);
         observed.push(`CONTROL: brace-on-scalar → ${describeError(err)}`);
         detail.controlRejected = statusOf(err) === 400;
       }
@@ -927,11 +1043,10 @@ const readProbes: Probe[] = [
         own[0] ?? everyone[0] ?? null,
         ACTIVITY_FIELDS,
       );
-      const billedOwn = own.find((row) => row.billed === true) ?? null;
-      // Feeds the write probe's billed-restriction question — an entry that is
-      // both BILLED and the caller's OWN is the only one an edit may be
-      // attempted against.
-      ctx.billedOwnActivityId = str(billedOwn?.id);
+      // Reported as an observation about THIS matter only. It is deliberately
+      // NOT handed to probe 10: that probe finds its own candidate on the
+      // designated test matter, because this matter is an arbitrary live one.
+      const billedOwnCount = own.filter((row) => row.billed === true).length;
       const redacted = everyone.filter(
         (row) => row.quantity_redacted === true,
       ).length;
@@ -942,7 +1057,7 @@ const readProbes: Probe[] = [
           `date(desc) honoured: ${isDescending(everyone, "date") ? "yes" : "NO"}`,
           `absent fields: ${presence.absent.join(", ") || "none"}`,
           `entries flagged quantity_redacted: ${redacted}`,
-          `own BILLED entry available for probe 10: ${ctx.billedOwnActivityId ? "yes" : "no"}`,
+          `billed entries of the caller's own on this matter: ${billedOwnCount} (an observation only — probe 10 searches the test matter itself)`,
         ],
         meaning:
           own.length + everyone.length === 0
@@ -953,7 +1068,7 @@ const readProbes: Probe[] = [
           everyoneRows: everyone.length,
           absentFields: presence.absent,
           redactedRows: redacted,
-          billedOwnEntryFound: !!ctx.billedOwnActivityId,
+          billedOwnRowsOnThisMatter: billedOwnCount,
         },
       };
     },
@@ -988,10 +1103,40 @@ const WRITE_PROBE_PLAN = [
   "GET /activities/<created id>.json  (read back, capture etag)",
   "PATCH /activities/<created id>.json with If-Match <etag>  (edit the note — proves the concurrency path)",
   "PATCH /activities/<created id>.json with the now-STALE etag  (expects 412)",
-  "PATCH /activities/<own BILLED entry>.json setting `note` to its CURRENT value  (a no-op edit: learns the restriction without changing anything)",
+  "GET /activities.json?matter_id=CLIO_PROBE_TEST_MATTER_ID&type=TimeEntry&user_id=<stored clio_user_id>  (find a billed entry OF THE CALLER'S OWN, on the test matter only)",
+  "PATCH /activities/<that billed entry>.json setting `note` to its CURRENT value  (a no-op edit: learns the restriction without changing anything; skipped unless the note is readable)",
   "DELETE /activities/<created id>.json  (cleanup, always attempted)",
   "GET /activities/<created id>.json  (verify the cleanup — expects 404)",
 ];
+
+/** How long to wait for the Manage window to reset before the one cleanup retry. */
+const CLEANUP_RATE_LIMIT_WAIT_MS = 61_000;
+
+/**
+ * Delete a probe-created entry, retrying ONCE past a drained rate-limit window.
+ *
+ * Cleanup is the one place where a 429 is not permission to give up: what is
+ * being deleted is live data the script put on a real matter. The retry is
+ * deliberate and bounded (one sleep, one attempt), and it resets the consecutive
+ * -429 counter so the run-level abort does not fire on the way out.
+ */
+async function deleteWithOneRetry(ctx: ProbeCtx, id: string): Promise<void> {
+  try {
+    await probeWrite(ctx, `/activities/${id}.json`, { method: "DELETE" });
+  } catch (err) {
+    const rateLimited =
+      err instanceof ClioRateLimitError || err instanceof ProbeAbortError;
+    if (!rateLimited) throw err;
+    console.log(
+      `    Cleanup rate-limited — waiting ${Math.round(CLEANUP_RATE_LIMIT_WAIT_MS / 1000)}s for the Clio window to reset, then retrying the delete once.`,
+    );
+    // Only the counter is reset. `ctx.aborted` stays true so the JSON summary
+    // still records that the run hit its rate-limit rail.
+    ctx.consecutiveRateLimits = 0;
+    await sleep(CLEANUP_RATE_LIMIT_WAIT_MS);
+    await probeWrite(ctx, `/activities/${id}.json`, { method: "DELETE" });
+  }
+}
 
 /**
  * Probe 10 — the only writing part of this script.
@@ -1101,15 +1246,42 @@ async function runWriteProbe(
     }
 
     // SPEC OPEN QUESTION 3 — billed-entry restriction, via a no-op edit.
-    if (ctx.billedOwnActivityId) {
-      const billedId = ctx.billedOwnActivityId;
-      const billedRow = dataObject(
-        await probeGet(ctx, `/activities/${billedId}.json`, {
-          fields: ACTIVITY_FIELDS,
-        }),
-      );
-      const currentNote =
-        typeof billedRow?.note === "string" ? billedRow.note : "";
+    //
+    // The candidate is searched for HERE, on the designated test matter, and
+    // never taken from the read phase: probe 9 runs against an arbitrary live
+    // matter (probe 2's first row, or --matter-id), so reusing its find would
+    // have patched a billed entry on a real client's file — outside the
+    // boundary this probe promises to stay inside.
+    //
+    // Without a known Clio user id the search cannot be constrained to the
+    // caller's OWN entries, and patching a colleague's billed time is not this
+    // script's to do — so the sub-probe is skipped rather than widened.
+    const billedCandidates = ctx.clioUserId
+      ? dataArray(
+          await probeGet(ctx, "/activities.json", {
+            fields: ACTIVITY_FIELDS,
+            query: {
+              matter_id: testMatterId,
+              type: "TimeEntry",
+              user_id: ctx.clioUserId,
+              order: "date(desc)",
+              limit: 200,
+            },
+          }),
+        )
+      : [];
+    // A null/withheld note is disqualifying, not something to substitute "" for:
+    // sending "" would BLANK the note on an invoiced record, which is exactly
+    // the change this "no-op" exists to avoid.
+    const billedRow =
+      billedCandidates.find(
+        (row) => row.billed === true && typeof row.note === "string",
+      ) ?? null;
+    const billedId = str(billedRow?.id);
+    const currentNote =
+      typeof billedRow?.note === "string" ? billedRow.note : null;
+
+    if (billedId && currentNote !== null) {
       const billedEtag = str(billedRow?.etag);
       try {
         await probeWrite(ctx, `/activities/${billedId}.json`, {
@@ -1121,19 +1293,25 @@ async function runWriteProbe(
           json: { data: { note: currentNote } },
         });
         observed.push(
-          "no-op PATCH of an own BILLED entry → 200: Clio ALLOWS edits to billed entries",
+          "no-op PATCH of an own BILLED entry on the test matter → 200: Clio ALLOWS edits to billed entries",
         );
         detail.billedEditAllowed = true;
       } catch (err) {
+        rethrowRailErrors(err);
+        const code = statusOf(err);
+        const refused = code !== null && REFUSAL_STATUSES.has(code);
         observed.push(
-          `no-op PATCH of an own BILLED entry → ${describeError(err)}`,
+          `no-op PATCH of an own BILLED entry on the test matter → ${describeError(err)}${refused ? "" : " (not a refusal — the question stays open)"}`,
         );
-        detail.billedEditAllowed = false;
-        detail.billedEditStatus = statusOf(err);
+        // Only a permission-shaped status proves Clio REFUSES; a 500 or a
+        // network failure says nothing about the rule.
+        detail.billedEditAllowed = refused ? false : null;
+        detail.billedEditStatus = code;
+        if (!refused) status = status === "pass" ? "inconclusive" : status;
       }
     } else {
       observed.push(
-        "no BILLED entry of the caller's own was found, so the billed restriction is UNANSWERED",
+        `no billed time entry of the caller's own WITH a readable note exists on test matter ${testMatterId}, so the billed restriction is UNANSWERED`,
       );
       detail.billedEditAllowed = null;
       status = status === "pass" ? "inconclusive" : status;
@@ -1150,16 +1328,24 @@ async function runWriteProbe(
     // then verified, and anything left behind is reported by id.
     for (const id of created) {
       try {
-        await probeWrite(ctx, `/activities/${id}.json`, { method: "DELETE" });
-        let gone = true;
+        await deleteWithOneRetry(ctx, id);
+        let gone = false;
+        let unverified: string | null = null;
         try {
           await probeGet(ctx, `/activities/${id}.json`, { fields: "id" });
           gone = false;
         } catch (err) {
-          gone = statusOf(err) === 404;
+          const code = statusOf(err);
+          if (code === 404) gone = true;
+          else unverified = describeError(err);
         }
         if (gone) {
           cleanedUp.push(id);
+        } else if (unverified) {
+          // Do not claim the entry survived when the CHECK is what failed.
+          cleanupFailures.push(
+            `${id} (delete accepted, but the confirming read failed: ${unverified} — check the matter in Clio)`,
+          );
         } else {
           cleanupFailures.push(
             `${id} (delete returned success but the entry still reads back)`,
@@ -1265,7 +1451,9 @@ async function preflight(db: Db, userId: string): Promise<PreflightResult> {
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const CLIO_ID_RE = /^[0-9]{1,19}$/;
+// Clio record ids are well inside 15 digits; the tighter bound keeps an operator
+// typo from being passed through as a plausible id.
+const CLIO_ID_RE = /^[0-9]{1,15}$/;
 
 const HELP = `
 Clio live probes — answers docs/PRACTICE_MANAGEMENT_SPEC.md's open questions
@@ -1441,7 +1629,6 @@ async function main(): Promise<number> {
     clioUserId: check.clioUserId,
     matterId: pinnedMatter || null,
     clientContactId: null,
-    billedOwnActivityId: null,
   };
 
   const results: ProbeResult[] = [];
