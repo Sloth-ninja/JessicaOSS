@@ -1162,6 +1162,9 @@ async function runWriteProbe(
         detail.staleEtagRejected = false;
         status = "inconclusive";
       } catch (err) {
+        // Inside the WRITE phase: a swallowed rail here would keep the run
+        // issuing writes after a blocked DB access or a rate-limit abort.
+        rethrowRailErrors(err);
         const code = statusOf(err);
         observed.push(`PATCH with a STALE If-Match → ${describeError(err)}`);
         detail.staleEtagRejected = code === 412;
@@ -1202,9 +1205,15 @@ async function runWriteProbe(
     // A null/withheld note is disqualifying, not something to substitute "" for:
     // sending "" would BLANK the note on an invoiced record, which is exactly
     // the change this "no-op" exists to avoid.
+    // Ownership is re-asserted from the ROW rather than trusted to the
+    // `user_id=` filter: if Clio ever ignored or loosened that param, the
+    // candidate would silently become a colleague's billed time.
     const billedRow =
       billedCandidates.find(
-        (row) => row.billed === true && typeof row.note === "string",
+        (row) =>
+          row.billed === true &&
+          typeof row.note === "string" &&
+          str(asRecord(row.user)?.id) === ctx.clioUserId,
       ) ?? null;
     const billedId = str(billedRow?.id);
     const currentNote =
