@@ -83,11 +83,12 @@ Backend suite: 888 tests across 50 files.
    computational-analysis licence: apply via
    `caselawlicence@nationalarchives.gov.uk`. Case-law integration stays
    DEFERRED until it is granted; BAILII remains never.
-5. **Pending, do NOT self-authorise:** a hardening of the Stop hook's
-   `stop-check.js` was proposed after the 13/08 runner-flake episode (see
-   DURABLE_LESSONS 2026-08-13, vitest `onTaskUpdate` IPC timeout) and
-   **awaits owner sign-off**. It is not implemented, and hooks are the
-   owner's to change.
+5. **Done (owner-approved 14/08):** the Stop hook's `stop-check.js` was
+   hardened after the 13/08 runner-flake episode (see DURABLE_LESSONS
+   2026-08-13, vitest `onTaskUpdate` IPC timeout). It tolerates exactly the
+   all-tests-passed + IPC-flake signature, logging a note each time; real
+   failures still block. Hooks remain the owner's to change — this one
+   carried explicit in-session sign-off.
 
 Then the roadmap resumes in owner order: voice dictation (Azure Speech via a
 backend seam; OS-dictation stopgap note for PILOT.md) → hide-AI-working for

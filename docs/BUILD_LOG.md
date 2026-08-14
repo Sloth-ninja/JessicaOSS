@@ -82,12 +82,17 @@ primary sources rather than a build. Checks run in this worktree:
 
 **Decisions:**
 
-- **The proposed `stop-check.js` hardening is deliberately NOT in this PR.**
-  It is recorded in three places as PROPOSED and awaiting owner sign-off
-  (CLAUDE.md status, HANDOVER §0 action 5, the DURABLE_LESSONS entry) and
-  nowhere as done. Hooks are the owner's to change, and a hook that decides for
-  itself when a red suite is really green is exactly the kind of change that
-  needs a human to say yes.
+- **The `stop-check.js` hardening IS in this PR — with explicit owner sign-off.**
+  The docs commits were authored while it was still only PROPOSED; the owner then
+  approved the exact patch (14/08/2026, in-session, presented as a diff with an
+  apply/leave choice) and it was added as this branch's final commit. The hook now
+  tolerates exactly one signature — both vitest summary lines all-passes AND the
+  known `Timeout calling "onTaskUpdate"` worker IPC error — logging a one-line
+  note each time (never silent); any failed test, missing summary, or other error
+  still blocks. Verified four ways against the real 13/08 flake capture and
+  synthetic failure/other-error/no-signature outputs (all correctly handled).
+  Where HANDOVER §0 and CLAUDE.md still say "awaiting sign-off", this entry and
+  the commit supersede them.
 - HANDOVER's older pickups are demoted rather than deleted, matching the §0a/§3a
   precedent; §4's next-actions queue gets a dated superseded note instead of an
   edit, since it is explicitly an owner-set list from 19 July.
