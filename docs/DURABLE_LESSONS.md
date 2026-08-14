@@ -40,6 +40,8 @@
 - 2026-08-05 — "Migration recorded as run" ≠ applied: verify with a pg_proc/columns diagnostic; the SQL editor runs only highlighted text
 - 2026-08-06 — Every page is edge-cached a year with no revalidation: purge the Cloudflare cache after EVERY frontend deploy
 - 2026-08-07 — A MISSING TABLE on modern Supabase is PGRST205, not 42P01: every "42P01-tolerant" degrade needs the PostgREST code too
+- 2026-08-13 — vitest exit 1 with zero failing tests: the `onTaskUpdate` worker IPC timeout is a contention artefact, not a defect
+- 2026-08-13 — A human's uncommitted working-tree edit is invisible to worktrees: check the main checkout's `git status` before believing a gate file is unchanged
 
 ## Lessons
 
@@ -597,3 +599,62 @@ actual exposure, since their tables have all shipped) but would not tolerate a
 genuinely missing table. Worth a sweep before the next feature ships behind an
 unrun migration; flagged to the owner rather than fixed in-train, to keep the
 Practice Management PR's diff honest.
+
+### 2026-08-13 (close-out) — vitest exit 1 with zero failing tests: the worker IPC timeout is a contention artefact
+
+**Trigger:** the Stop hook's full backend suite failed repeatedly during the
+13/08 pilot-feedback wave, while the machine ran several builder and reviewer
+agents at once. Every run printed all tests passed and then exited 1, so the
+hook blocked on a suite that had nothing wrong with it. The failure sat in
+vitest's **Unhandled Errors** section, not in any test: `Timeout calling
+"onTaskUpdate"` — the reporter's RPC back from a worker, timing out because
+the main thread was starved, long after the assertions had already run. Three
+isolated runs (880/880, 886/886, 888/888 as the wave landed) all exited 0.
+
+**Rule:** a run that reports **all N tests passed** yet exits non-zero, with
+`Timeout calling "onTaskUpdate"` (or a sibling worker-RPC timeout) in
+Unhandled Errors, is the RUNNER flaking under load — not the code. Confirm it
+with ONE isolated run (nothing else building or testing on the machine) and
+believe that result. Never chase it in product code, never weaken a test to
+make it go away, and never re-run the full suite five times hoping for a
+different number: the cost of the flake is wall-clock, and the diagnosis takes
+one clean run. This is the same contention family as the 2026-08-05 KDF-timeout
+lesson, one level up: there the worker timed out *inside* a test, here it times
+out *reporting* one.
+
+**Debugging signature:** exit code 1 with `Test Files X passed (X)` and
+`Tests N passed (N)` immediately above it; an `Unhandled Errors` block naming
+`onTaskUpdate`; per-suite timings inflated 5–8× against their solo numbers
+(the 2026-08-08 entry recorded a 901-second "failure" on a test that passes
+standalone in 300ms). If the pass counts are complete and the only red text is
+a worker RPC, stop reading the diff and check what else is running.
+
+**Status:** a hardening of `.claude/hooks/stop-check.js` — treat a run whose
+reported failure count is zero as a pass, or retry once serially — was
+PROPOSED on 13/08 and **awaits owner sign-off**. Hooks are the owner's to
+change; do not implement this unasked.
+
+### 2026-08-13 (close-out) — A human's uncommitted working-tree edit is invisible to worktrees
+
+**Trigger:** the owner added the `20260807_01_matter_workspace_links.sql`
+entry to `.claude/hooks/authorized-migrations.json` in the MAIN checkout and
+said so. A builder agent working in a fresh git worktree — cut from *committed*
+`main` — checked the allowlist four different ways, correctly found no such
+entry, and correctly stopped rather than writing a migration it believed
+unauthorised (hard rule 1). Both parties were right about their own file. The
+edit was simply uncommitted, and a worktree is a checkout of commits, not a
+view onto another checkout's dirty state.
+
+**Rule:** when a human says they changed a file, and you cannot see the change,
+check the MAIN checkout's working tree before concluding the change is absent
+anywhere — `git -C <main-checkout> status` and `git -C <main-checkout> diff --
+<path>`. For human-edited GATE files specifically (migration allowlists, hook
+config, permissions), either do the work where the edit lives, or ask the human
+to commit it first; a gate you cannot see is a gate you must treat as closed,
+so the stop is right and the diagnosis is what has to be fast.
+
+**Debugging signature:** a worktree's file state flatly disagrees with what the
+human just did, and re-reading the file in the worktree keeps confirming the
+agent's view; `git status` in the main checkout shows the file **modified** and
+unstaged. Suspect this immediately whenever the disputed file is one a human
+edits by hand rather than one a PR produces.
